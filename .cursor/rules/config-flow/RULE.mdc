@@ -1,0 +1,64 @@
+---
+applyTo: '**/config_flow.py'
+description: Config flow development standards
+globs: ['**/config_flow.py']
+alwaysApply: false
+---
+
+# Config flow development
+
+## Version control
+
+Always set version numbers on config flows:
+
+```python
+class ConfigFlow(ConfigFlow, domain=DOMAIN):
+    VERSION = 1
+    MINOR_VERSION = 1
+```
+
+## Unique ID management
+
+Prevent duplicate entries using unique IDs or data matching:
+
+```python
+await self.async_set_unique_id(site_id)
+self._abort_if_unique_id_configured()
+
+# Or using data matching
+self._async_abort_entries_match({CONF_API_KEY: user_input[CONF_API_KEY]})
+```
+
+## Data storage
+
+- Connection-critical config → `ConfigEntry.data`
+- User-editable settings → `ConfigEntry.options`
+
+## Validation timing
+
+Validate required fields and schema constraints in the flow.
+API connectivity validation should happen during setup, not configuration.
+Repair issues can be created from the coordinator based on API responses.
+
+## Error handling
+
+Define errors in translation files under `config.error`:
+
+```json
+{
+  "config": {
+    "error": {
+      "cannot_connect": "Failed to connect to Amber API",
+      "invalid_api_key": "Invalid API key"
+    }
+  }
+}
+```
+
+## Step naming
+
+Use standard step names:
+
+- `async_step_user` - User-initiated flow
+- `async_step_reauth` - Re-authentication flow
+- `async_step_reconfigure` - Reconfiguration of existing entry

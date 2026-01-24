@@ -1,0 +1,21 @@
+# Lockfiles
+uv.lock
+package-lock.json
+
+# Build artifacts
+*.egg-info
+build/
+dist/
+
+# Cache directories
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+node_modules/
+
+# Virtual environments
+.venv/
+
+# Coverage
+.coverage
+coverage.xml

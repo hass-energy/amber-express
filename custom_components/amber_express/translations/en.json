@@ -1,0 +1,66 @@
+{
+  "config": {
+    "step": {
+      "site": {
+        "title": "Select Site",
+        "description": "Select the Amber Electric site you want to monitor.",
+        "data": { "site_id": "Site", "site_name": "Site Name (optional)" },
+        "data_description": {
+          "site_id": "The Amber Electric site to monitor",
+          "site_name": "A friendly name for this site (optional)"
+        }
+      },
+      "user": {
+        "title": "Amber Express",
+        "description": "Enter your Amber Electric API token. You can generate one at [Amber Developer Settings]({api_url}).",
+        "data": { "api_token": "API Token" },
+        "data_description": { "api_token": "Your Amber Electric API token" }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API token. Please check your token and try again.",
+      "no_sites": "No sites found for this API token. Please ensure your Amber account is properly configured.",
+      "unknown": "An unexpected error occurred. Please try again."
+    },
+    "abort": { "already_configured": "This site is already configured." }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Amber Express Options",
+        "description": "Configure the integration options.",
+        "data": {
+          "enable_controlled_load": "Enable Controlled Load Channel",
+          "enable_feed_in": "Enable Feed-in Channel",
+          "enable_general": "Enable General Channel",
+          "enable_websocket": "Enable WebSocket (Real-time updates)",
+          "pricing_mode": "Pricing Mode",
+          "wait_for_confirmed": "Wait for confirmed prices"
+        },
+        "data_description": {
+          "enable_controlled_load": "Monitor controlled load (off-peak) prices",
+          "enable_feed_in": "Monitor your solar feed-in prices",
+          "enable_general": "Monitor your general electricity consumption prices",
+          "enable_websocket": "Enable WebSocket for real-time price updates (alpha feature)",
+          "pricing_mode": "AEMO uses per_kwh (includes network tariffs). APP uses Amber's predicted price.",
+          "wait_for_confirmed": "When enabled, sensors only update when a confirmed (non-estimated) price is received. When disabled, sensors update with estimated prices immediately, then again with confirmed prices."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "controlled_load_descriptor": { "name": "Controlled Load Price Descriptor" },
+      "controlled_load_forecast": { "name": "Controlled Load Forecast" },
+      "controlled_load_price": { "name": "Controlled Load Price" },
+      "feed_in_descriptor": { "name": "Feed In Price Descriptor" },
+      "feed_in_forecast": { "name": "Feed In Forecast" },
+      "feed_in_price": { "name": "Feed In Price" },
+      "general_descriptor": { "name": "General Price Descriptor" },
+      "general_forecast": { "name": "General Forecast" },
+      "general_price": { "name": "General Price" },
+      "renewables": { "name": "Renewables" }
+    },
+    "binary_sensor": { "price_spike": { "name": "Price Spike" } }
+  }
+}
