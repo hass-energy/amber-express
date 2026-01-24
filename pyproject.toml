@@ -1,0 +1,130 @@
+[project]
+name = "amber-express"
+version = "0.1.0"
+description = "Home Assistant integration for Amber Electric with smart polling and WebSocket support"
+readme = "README.md"
+requires-python = ">=3.13.2,<3.14"
+
+dependencies = ["homeassistant>=2026.1.1", "amberelectric>=2.0.12"]
+
+[dependency-groups]
+dev = [
+    "freezegun>=1.5.2",
+    "pyright>=1.1.408",
+    "pytest>=9.0.0",
+    "pytest-cov>=7.0.0",
+    "pytest-homeassistant-custom-component>=0.13.300",
+    "ruff>=0.14.0",
+    "syrupy>=5.0.0",
+]
+
+[tool.ruff]
+required-version = ">=0.14.0"
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+# Enable ALL rules and selectively ignore overly strict ones
+select = ["ALL"]
+
+# Ignore overly strict or unwanted rules
+ignore = [
+    'COM812',  # Formatter already deals with trailing commas
+    'D202',    # Blank lines after docstring are fine
+    'D203',    # Don't put a newline between the class and docstring (D211 is used instead)
+    'D213',    # Multiline doc strings have an empty first line (Incompatible with D212)
+    'PLR0913', # Parameter limits are a something for code review not linting
+    'PLR0915', # Too many statements is something for code review not linting
+    'PLR0912', # Too many branches is something for code review not linting
+    'C901',    # Complexity is not a good linting rule, it should be a code review issue
+    'TC001',   # Don't use TYPE_CHECKING blocks
+    'TC002',   # Don't use TYPE_CHECKING blocks
+    'TC003',   # Don't use TYPE_CHECKING blocks
+    'BLE001',  # Do not catch blind exception - integration code needs to handle various exception types gracefully
+    'ANN401',  # Dynamically typed expressions - legitimate use of Any for **kwargs parameters
+    'TRY300',  # Consider moving statement to else block - overly pedantic about code structure
+    'TRY301',  # Abstract raise to inner function - overly pedantic, creates unnecessary indirection
+    'PLR0911', # Too many return statements - something for code review not linting
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["amber_express"]
+force-sort-within-sections = true
+split-on-trailing-comma = false
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    'S101',    # Assert is allowed in tests
+    'B011',    # Assert false is allowed in tests
+    'PT015',   # Assert that always fails is fine in a test
+    'SLF001',  # Accessing private methods is ok in testing
+    'ARG001',  # Unused function argument - test fixtures often provide unused parameters for setup
+    'PLR2004', # Magic value used in comparison - test assertions often use simple numeric values
+    'S110',    # Try-except-pass detected - test exception handling patterns differ from production code
+    'SIM105',  # Use contextlib.suppress instead of try-except-pass - test exception handling patterns differ
+    'BLE001',  # Do not catch blind exception - test code needs to handle various exception types
+    'FBT001',  # Boolean positional argument - common in parametrized tests
+    'FBT003',  # Boolean positional value - test assertions often pass literal booleans
+]
+
+[tool.ruff.lint.pylint]
+max-args = 10
+max-branches = 15
+max-statements = 60
+
+[tool.pyright]
+# Type checking configuration
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+include = ["tests", "custom_components"]
+extraPaths = ["."]
+
+# Disable errors that propagate from third-party incomplete types
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+reportUnknownParameterType = false
+
+# Disable missing stubs warning
+reportMissingTypeStubs = false
+
+# Disable checks that conflict with Home Assistant patterns
+reportIncompatibleVariableOverride = false  # HA uses cached_property pattern
+reportIncompatibleMethodOverride = false    # HA config flow patterns
+reportPrivateImportUsage = false            # amberelectric library exports
+reportMissingTypeArgument = false           # Generic type args in HA patterns
+reportReturnType = false                    # HA config flow return types
+reportAttributeAccessIssue = false          # HA config entry patterns
+reportTypedDictNotRequiredAccess = false    # Standard pytest patterns
+
+# Test-specific overrides - allow patterns common in testing
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = "none"
+
+[tool.pytest.ini_options]
+timeout = 5
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = ["--strict-markers", "--strict-config"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+]
+
+[tool.setuptools]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["custom_components*"]
+
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"

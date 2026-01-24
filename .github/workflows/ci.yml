@@ -1,0 +1,266 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    types: [checks_requested]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  #region Linting and formatting
+  # =============================================================================
+  # Linting and formatting checks
+  # =============================================================================
+
+  ruff-format:
+    name: Ruff format
+    runs-on: ubuntu-latest
+    env:
+      REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install python dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Setup reviewdog
+        if: github.event_name == 'pull_request'
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: v0.20.3
+
+      - name: Ruff format (reviewdog)
+        if: github.event_name == 'pull_request'
+        run: |
+          uv run ruff format --diff \
+            | reviewdog -f=diff -name="ruff format" -reporter=github-pr-review -filter-mode=nofilter -fail-level=any
+
+      - name: Ruff format (check)
+        if: github.event_name != 'pull_request'
+        run: uv run ruff format --check
+
+  ruff-lint:
+    name: Ruff lint
+    runs-on: ubuntu-latest
+    env:
+      REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install python dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Setup reviewdog
+        if: github.event_name == 'pull_request'
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: v0.20.3
+
+      - name: Ruff lint (reviewdog)
+        if: github.event_name == 'pull_request'
+        run: |
+          uv run ruff check --output-format rdjson \
+            | reviewdog -f=rdjson -name="ruff lint" -reporter=github-pr-review -filter-mode=nofilter -fail-level=any
+
+      - name: Ruff lint (check)
+        if: github.event_name != 'pull_request'
+        run: uv run ruff check
+
+  pyright:
+    name: Pyright
+    runs-on: ubuntu-latest
+    env:
+      REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install python dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Setup reviewdog
+        if: github.event_name == 'pull_request'
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: v0.20.3
+
+      - name: Pyright (reviewdog)
+        if: github.event_name == 'pull_request'
+        run: |
+          uv run pyright --outputjson > pyright_output.json || true
+          jq '{
+            source: {name: "pyright", url: "https://github.com/Microsoft/pyright"},
+            severity: "ERROR",
+            diagnostics: [.generalDiagnostics[]? | {
+              message: (if .rule then "\(.message) (\(.rule))" else .message end),
+              severity: (.severity | ascii_upcase),
+              location: {
+                path: .file,
+                range: {
+                  start: {line: (.range.start.line + 1), column: (.range.start.character + 1)},
+                  end: {line: (.range.end.line + 1), column: (.range.end.character + 1)}
+                }
+              }
+            }]
+          }' pyright_output.json \
+            | reviewdog -f=rdjson -name="pyright" -reporter=github-pr-review -filter-mode=nofilter -fail-level=any
+
+      - name: Pyright (check)
+        if: github.event_name != 'pull_request'
+        run: uv run pyright
+
+  prettier:
+    name: Prettier
+    runs-on: ubuntu-latest
+    env:
+      REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+
+      - name: Setup reviewdog
+        if: github.event_name == 'pull_request'
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: v0.20.3
+
+      - name: Prettier (reviewdog)
+        if: github.event_name == 'pull_request'
+        run: |
+          npm ci
+          npx --yes prettier@3 --write .
+          git diff \
+            | reviewdog -f=diff -name="prettier" -reporter=github-pr-review -filter-mode=nofilter -fail-level=any
+
+      - name: Prettier (check)
+        if: github.event_name != 'pull_request'
+        run: |
+          npm ci
+          npx --yes prettier@3 --check .
+  #endregion
+  #region Tests
+  # =============================================================================
+  # Tests
+  # =============================================================================
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run Tests
+        run: uv run pytest --cov=custom_components/amber_express --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
+
+      - name: Upload coverage to Codecov
+        if: ${{ github.event_name != 'release' && !cancelled() }}
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+  #endregion
+
+  #region Validation
+  # =============================================================================
+  # Validation checks
+  # =============================================================================
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Run hassfest validation
+        uses: home-assistant/actions/hassfest@master
+
+  version-check:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Check version consistency
+        run: |
+          PYPROJECT=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          MANIFEST=$(jq -r '.version' custom_components/amber_express/manifest.json)
+          echo "pyproject.toml=$PYPROJECT manifest.json=$MANIFEST"
+          [[ "$PYPROJECT" == "$MANIFEST" ]]
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
+  #endregion
+
+  #region CI passed
+  # =============================================================================
+  # CI passed (single required check)
+  # =============================================================================
+
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs:
+      - ruff-format
+      - ruff-lint
+      - pyright
+      - prettier
+      - test
+      - hassfest
+      - version-check
+      - hacs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "::error::One or more required jobs failed"
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "::error::One or more required jobs were cancelled"
+            exit 1
+          fi
+          echo "All required jobs passed!"
+  #endregion

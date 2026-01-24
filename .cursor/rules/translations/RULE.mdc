@@ -1,0 +1,108 @@
+---
+applyTo: '**/translations/**'
+description: Translation and user-facing text standards
+globs: ['**/translations/**']
+alwaysApply: false
+---
+
+# Translation and user-facing text
+
+Custom integrations use `translations/en.json` (not `strings.json` like core integrations).
+
+## Writing style
+
+- **Tone**: Friendly and informative
+- **Perspective**: Second person ("you" and "your")
+- **Clarity**: Write for non-native English speakers
+- **Case**: Sentence case for all titles and messages
+- **Abbreviations**: Avoid when possible
+
+## Formatting in messages
+
+- Use backticks for: file paths, filenames, variable names, field entries
+- Example: "Check the `config.json` file"
+
+## strings.json structure
+
+```json
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Amber Express",
+        "description": "Enter your Amber Electric API key",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Amber API",
+      "invalid_api_key": "Invalid API key"
+    },
+    "abort": {
+      "already_configured": "This site is already configured"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "general_price": {
+        "name": "General price"
+      },
+      "feed_in_price": {
+        "name": "Feed-in price"
+      }
+    }
+  },
+  "exceptions": {
+    "api_error": {
+      "message": "Failed to communicate with Amber API: {reason}"
+    }
+  }
+}
+```
+
+## Entity translations
+
+Use translation keys for entity names:
+
+```python
+class MySensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_translation_key = "general_price"
+```
+
+## Exception translations
+
+Use translation keys for user-facing exceptions:
+
+```python
+raise ServiceValidationError(
+    translation_domain=DOMAIN,
+    translation_key="api_error",
+    translation_placeholders={"reason": "timeout"},
+)
+```
+
+## Sensor naming conventions
+
+### Capitalization
+
+Entity names should start with a capital letter, rest lowercase (unless proper noun or abbreviation):
+
+- ✓ Correct: "General price", "Feed-in price", "Renewables percentage"
+- ✗ Incorrect: "General Price", "FEED-IN PRICE"
+
+### Home Assistant entity naming requirements
+
+- `has_entity_name = True` - Required for all new integrations
+- `translation_key` - Used to look up translated entity names
+- `translation_placeholders` - Optional dict for parameterized translations
+
+### Entity name composition
+
+Home Assistant generates `friendly_name` by combining device and entity names:
+
+- Entity not in device: `friendly_name = entity.name`
+- Entity in device with name: `friendly_name = f"{device.name} {entity.name}"`
+- Entity in device with `name=None`: `friendly_name = device.name`

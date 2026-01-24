@@ -1,0 +1,292 @@
+"""Tests for the smart polling manager."""
+
+from datetime import UTC, datetime
+from unittest.mock import patch
+
+from custom_components.amber_express.smart_polling import PollingState, SmartPollingManager
+
+
+class TestSmartPollingManagerInit:
+    """Tests for SmartPollingManager initialization."""
+
+    def test_initial_state(self) -> None:
+        """Test initial state after construction."""
+        manager = SmartPollingManager()
+        state = manager.get_state()
+
+        assert state.current_interval_start is None
+        assert state.has_confirmed_price is False
+        assert state.forecasts_pending is False
+        assert state.poll_count_this_interval == 0
+        assert state.first_interval_after_startup is True
+        assert state.last_estimate_elapsed is None
+
+    def test_initial_properties(self) -> None:
+        """Test initial property values."""
+        manager = SmartPollingManager()
+
+        assert manager.has_confirmed_price is False
+        assert manager.forecasts_pending is False
+        assert manager.poll_count_this_interval == 0
+        assert manager.first_interval_after_startup is True
+
+
+class TestShouldPoll:
+    """Tests for should_poll method."""
+
+    def test_first_run_always_polls(self) -> None:
+        """Test that first run (no data) always polls."""
+        manager = SmartPollingManager()
+
+        result = manager.should_poll(has_data=False)
+
+        assert result is True
+
+    def test_new_interval_always_polls(self) -> None:
+        """Test that new interval always triggers polling."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # First poll at 10:00
+            result1 = manager.should_poll(has_data=True)
+            assert result1 is True
+
+            # Same interval, confirmed price
+            manager.on_confirmed_received()
+
+            # Move to next interval at 10:05
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+            result2 = manager.should_poll(has_data=True)
+            assert result2 is True
+
+    def test_confirmed_price_stops_polling(self) -> None:
+        """Test that confirmed price stops polling."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # Start interval
+            manager.should_poll(has_data=True)
+
+            # Receive confirmed price
+            manager.on_confirmed_received()
+
+            # Check if should poll - should be False
+            result = manager.should_poll(has_data=True)
+            assert result is False
+
+    def test_forecasts_pending_allows_retry(self) -> None:
+        """Test that forecasts pending allows retry polling."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # Start interval
+            manager.should_poll(has_data=True)
+
+            # Receive confirmed price but forecasts failed
+            manager.on_confirmed_received()
+            manager.set_forecasts_pending()
+
+            # Should poll to retry forecasts
+            result = manager.should_poll(has_data=True)
+            assert result is True
+
+    def test_forecasts_pending_respects_rate_limit(self) -> None:
+        """Test that forecasts pending respects rate limit."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # Start interval
+            manager.should_poll(has_data=True)
+
+            # Receive confirmed price but forecasts failed
+            manager.on_confirmed_received()
+            manager.set_forecasts_pending()
+
+            # Set rate limit until 10:01
+            rate_limit_until = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
+
+            # Still at 10:00 - should not poll
+            result = manager.should_poll(has_data=True, rate_limit_until=rate_limit_until)
+            assert result is False
+
+    def test_offset_based_polling_after_first_poll(self) -> None:
+        """Test that polling uses offset tracker after first poll."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # First poll starts the interval
+            result1 = manager.should_poll(has_data=True)
+            assert result1 is True
+
+            # 5 seconds later - before default 15s offset
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
+            result2 = manager.should_poll(has_data=True)
+            assert result2 is False  # Not yet time
+
+            # 20 seconds later - after default 15s offset, on 5s boundary
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 20, tzinfo=UTC)
+            result3 = manager.should_poll(has_data=True)
+            assert result3 is True  # Time to poll
+
+
+class TestPollLifecycle:
+    """Tests for poll lifecycle methods."""
+
+    def test_on_poll_started_increments_count(self) -> None:
+        """Test that on_poll_started increments poll count."""
+        manager = SmartPollingManager()
+
+        assert manager.poll_count_this_interval == 0
+
+        manager.on_poll_started()
+        assert manager.poll_count_this_interval == 1
+
+        manager.on_poll_started()
+        assert manager.poll_count_this_interval == 2
+
+    def test_on_estimate_received_records_elapsed(self) -> None:
+        """Test that on_estimate_received records elapsed time."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # Start interval
+            manager.should_poll(has_data=True)
+
+            # 10 seconds later, receive estimate
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 10, tzinfo=UTC)
+            manager.on_estimate_received()
+
+            state = manager.get_state()
+            assert state.last_estimate_elapsed == 10.0
+
+    def test_on_confirmed_received_sets_flag(self) -> None:
+        """Test that on_confirmed_received sets has_confirmed_price."""
+        manager = SmartPollingManager()
+
+        assert manager.has_confirmed_price is False
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+
+            manager.on_confirmed_received()
+
+        assert manager.has_confirmed_price is True
+
+
+class TestForecastsPending:
+    """Tests for forecasts pending state."""
+
+    def test_set_forecasts_pending(self) -> None:
+        """Test setting forecasts pending."""
+        manager = SmartPollingManager()
+
+        assert manager.forecasts_pending is False
+
+        manager.set_forecasts_pending()
+        assert manager.forecasts_pending is True
+
+    def test_clear_forecasts_pending(self) -> None:
+        """Test clearing forecasts pending."""
+        manager = SmartPollingManager()
+
+        manager.set_forecasts_pending()
+        assert manager.forecasts_pending is True
+
+        manager.clear_forecasts_pending()
+        assert manager.forecasts_pending is False
+
+
+class TestIntervalReset:
+    """Tests for interval reset behavior."""
+
+    def test_new_interval_resets_state(self) -> None:
+        """Test that moving to a new interval resets all state."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            # Start first interval
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+            manager.on_poll_started()
+            manager.on_poll_started()
+            manager.on_confirmed_received()
+            manager.set_forecasts_pending()
+
+            # Verify state is set
+            assert manager.has_confirmed_price is True
+            assert manager.forecasts_pending is True
+            assert manager.poll_count_this_interval == 2
+
+            # Move to next interval
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+
+            # Verify state is reset
+            assert manager.has_confirmed_price is False
+            assert manager.forecasts_pending is False
+            assert manager.poll_count_this_interval == 0
+
+    def test_first_interval_flag_clears_on_second_interval(self) -> None:
+        """Test that first_interval_after_startup clears on second interval."""
+        manager = SmartPollingManager()
+
+        assert manager.first_interval_after_startup is True
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            # First interval with has_data=False (first run)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=False)  # First run
+            # Note: first_interval_after_startup remains True until SECOND interval
+
+            # Second interval with has_data=True (not first run)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)  # Now has data
+            assert manager.first_interval_after_startup is False
+
+
+class TestGetOffsetStats:
+    """Tests for get_offset_stats method."""
+
+    def test_returns_offset_tracker_stats(self) -> None:
+        """Test that get_offset_stats returns stats from offset tracker."""
+        manager = SmartPollingManager()
+
+        stats = manager.get_offset_stats()
+
+        assert stats.offset == 15  # Default offset
+        assert stats.confirmatory_poll_count == 0
+
+
+class TestPollingState:
+    """Tests for PollingState dataclass."""
+
+    def test_polling_state_fields(self) -> None:
+        """Test PollingState dataclass fields."""
+        state = PollingState(
+            current_interval_start=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
+            has_confirmed_price=True,
+            forecasts_pending=False,
+            poll_count_this_interval=3,
+            first_interval_after_startup=False,
+            last_estimate_elapsed=10.5,
+        )
+
+        assert state.current_interval_start == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        assert state.has_confirmed_price is True
+        assert state.forecasts_pending is False
+        assert state.poll_count_this_interval == 3
+        assert state.first_interval_after_startup is False
+        assert state.last_estimate_elapsed == 10.5
