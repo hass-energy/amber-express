@@ -30,7 +30,7 @@ jobs:
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v4
 
@@ -60,7 +60,7 @@ jobs:
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v4
 
@@ -90,7 +90,7 @@ jobs:
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v4
 
@@ -135,7 +135,7 @@ jobs:
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
 
@@ -169,7 +169,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -200,7 +200,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run hassfest validation
         uses: home-assistant/actions/hassfest@master
@@ -210,7 +210,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
