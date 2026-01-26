@@ -29,6 +29,15 @@
       },
       "renewables": {
         "default": "mdi:solar-power"
+      },
+      "site": {
+        "default": "mdi:information-outline"
+      },
+      "confirmation_delay": {
+        "default": "mdi:timer-outline"
+      },
+      "api_error": {
+        "default": "mdi:cloud-alert-outline"
       }
     }
   }
