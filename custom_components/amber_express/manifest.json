@@ -1,11 +1,11 @@
 {
   "domain": "amber_express",
   "name": "Amber Express",
-  "codeowners": [],
+  "codeowners": ["@BrendanAnnable"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/hass-energy/amber-express",
-  "iot_class": "cloud_push",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/hass-energy/amber-express/issues",
   "requirements": ["amberelectric>=2.0.12"],
   "version": "0.1.1"
