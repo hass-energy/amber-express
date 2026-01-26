@@ -158,7 +158,7 @@ def _add_site_sensors(
 
         # API error sensor
         entities.append(
-            AmberApiErrorSensor(
+            AmberApiStatusSensor(
                 coordinator=coordinator,
                 entry=entry,
                 subentry=subentry,
@@ -505,7 +505,7 @@ class AmberPollingStatsSensor(AmberBaseSensor):
         return attrs
 
 
-class AmberApiErrorSensor(AmberBaseSensor):
+class AmberApiStatusSensor(AmberBaseSensor):
     """Sensor for API error status."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -518,8 +518,8 @@ class AmberApiErrorSensor(AmberBaseSensor):
     ) -> None:
         """Initialize the API error sensor."""
         super().__init__(coordinator, entry, subentry, None)
-        self._attr_unique_id = f"{self._site_id}_api_error"
-        self._attr_translation_key = "api_error"
+        self._attr_unique_id = f"{self._site_id}_api_status"
+        self._attr_translation_key = "api_status"
 
     @staticmethod
     def _get_http_status_label(status_code: int) -> str:

@@ -36,7 +36,7 @@
       "confirmation_delay": {
         "default": "mdi:timer-outline"
       },
-      "api_error": {
+      "api_status": {
         "default": "mdi:cloud-alert-outline"
       }
     }

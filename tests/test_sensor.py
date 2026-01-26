@@ -27,7 +27,7 @@ from custom_components.amber_express.const import (
 from custom_components.amber_express.sensor import (
     CHANNEL_PRICE_DETAILED_TRANSLATION_KEY,
     CHANNEL_PRICE_TRANSLATION_KEY,
-    AmberApiErrorSensor,
+    AmberApiStatusSensor,
     AmberDetailedPriceSensor,
     AmberPriceSensor,
     AmberRenewablesSensor,
@@ -688,7 +688,7 @@ class TestAsyncSetupEntry:
 
         # With general and feed_in enabled, we should have:
         # 2 channels x 2 sensors (price, detailed price) = 4
-        # + renewables + site + polling_stats + api_error = 8
+        # + renewables + site + polling_stats + api_status = 8
         assert len(added_entities) == 8
 
     async def test_setup_entry_uses_site_channels(
@@ -725,7 +725,7 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only general channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_error = 6
+        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status = 6
         assert len(added_entities) == 6
 
     async def test_setup_entry_controlled_load_channel(
@@ -762,7 +762,7 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only controlled load channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_error = 6
+        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status = 6
         assert len(added_entities) == 6
 
 
@@ -782,26 +782,26 @@ class TestChannelTranslationKeys:
         assert CHANNEL_PRICE_DETAILED_TRANSLATION_KEY[CHANNEL_CONTROLLED_LOAD] == "controlled_load_price_detailed"
 
 
-class TestAmberApiErrorSensor:
-    """Tests for AmberApiErrorSensor."""
+class TestAmberApiStatusSensor:
+    """Tests for AmberApiStatusSensor."""
 
-    def test_api_error_sensor_init(
+    def test_api_status_sensor_init(
         self,
         mock_coordinator_with_data: MagicMock,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
         """Test API error sensor initialization."""
-        sensor = AmberApiErrorSensor(
+        sensor = AmberApiStatusSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
         )
 
-        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_api_error"
-        assert sensor._attr_translation_key == "api_error"
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_api_status"
+        assert sensor._attr_translation_key == "api_status"
 
-    def test_api_error_sensor_is_diagnostic(
+    def test_api_status_sensor_is_diagnostic(
         self,
         mock_coordinator_with_data: MagicMock,
         mock_config_entry: MockConfigEntry,
@@ -810,7 +810,7 @@ class TestAmberApiErrorSensor:
         """Test API error sensor is a diagnostic entity."""
         from homeassistant.const import EntityCategory  # noqa: PLC0415
 
-        sensor = AmberApiErrorSensor(
+        sensor = AmberApiStatusSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
@@ -818,7 +818,7 @@ class TestAmberApiErrorSensor:
 
         assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
 
-    def test_api_error_sensor_status_200(
+    def test_api_status_sensor_status_200(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
@@ -827,7 +827,7 @@ class TestAmberApiErrorSensor:
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=200)
 
-        sensor = AmberApiErrorSensor(
+        sensor = AmberApiStatusSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
@@ -836,7 +836,7 @@ class TestAmberApiErrorSensor:
         assert sensor.native_value == "OK"
         assert sensor.extra_state_attributes == {"status_code": 200}
 
-    def test_api_error_sensor_429_error(
+    def test_api_status_sensor_429_error(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
@@ -845,7 +845,7 @@ class TestAmberApiErrorSensor:
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=429)
 
-        sensor = AmberApiErrorSensor(
+        sensor = AmberApiStatusSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
@@ -854,7 +854,7 @@ class TestAmberApiErrorSensor:
         assert sensor.native_value == "Too Many Requests"
         assert sensor.extra_state_attributes == {"status_code": 429}
 
-    def test_api_error_sensor_500_error(
+    def test_api_status_sensor_500_error(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
@@ -863,7 +863,7 @@ class TestAmberApiErrorSensor:
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=500)
 
-        sensor = AmberApiErrorSensor(
+        sensor = AmberApiStatusSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
@@ -872,7 +872,7 @@ class TestAmberApiErrorSensor:
         assert sensor.native_value == "Internal Server Error"
         assert sensor.extra_state_attributes == {"status_code": 500}
 
-    def test_api_error_sensor_unknown_status_code(
+    def test_api_status_sensor_unknown_status_code(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
@@ -881,7 +881,7 @@ class TestAmberApiErrorSensor:
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=999)
 
-        sensor = AmberApiErrorSensor(
+        sensor = AmberApiStatusSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
@@ -892,11 +892,11 @@ class TestAmberApiErrorSensor:
 
     def test_get_http_status_label_common_codes(self) -> None:
         """Test _get_http_status_label for common HTTP status codes."""
-        assert AmberApiErrorSensor._get_http_status_label(400) == "Bad Request"
-        assert AmberApiErrorSensor._get_http_status_label(401) == "Unauthorized"
-        assert AmberApiErrorSensor._get_http_status_label(403) == "Forbidden"
-        assert AmberApiErrorSensor._get_http_status_label(404) == "Not Found"
-        assert AmberApiErrorSensor._get_http_status_label(429) == "Too Many Requests"
-        assert AmberApiErrorSensor._get_http_status_label(500) == "Internal Server Error"
-        assert AmberApiErrorSensor._get_http_status_label(502) == "Bad Gateway"
-        assert AmberApiErrorSensor._get_http_status_label(503) == "Service Unavailable"
+        assert AmberApiStatusSensor._get_http_status_label(400) == "Bad Request"
+        assert AmberApiStatusSensor._get_http_status_label(401) == "Unauthorized"
+        assert AmberApiStatusSensor._get_http_status_label(403) == "Forbidden"
+        assert AmberApiStatusSensor._get_http_status_label(404) == "Not Found"
+        assert AmberApiStatusSensor._get_http_status_label(429) == "Too Many Requests"
+        assert AmberApiStatusSensor._get_http_status_label(500) == "Internal Server Error"
+        assert AmberApiStatusSensor._get_http_status_label(502) == "Bad Gateway"
+        assert AmberApiStatusSensor._get_http_status_label(503) == "Service Unavailable"
