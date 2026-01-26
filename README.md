@@ -63,16 +63,6 @@ Import Price: sensor.amber_express_general_forecast
 Export Price: sensor.amber_express_feed_in_forecast
 ```
 
-The `forecasts` attribute contains data in the format HAEO expects:
-
-```yaml
-forecasts:
-  - time: "2025-01-24T14:00:00+10:00"
-    value: 0.28
-  - time: "2025-01-24T14:30:00+10:00"
-    value: 0.32
-```
-
 ## Smart Polling
 
 Amber Express uses adaptive polling to minimize API calls while ensuring timely price updates:
