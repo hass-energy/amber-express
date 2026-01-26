@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -149,6 +150,15 @@ def _add_site_sensors(
         # Polling stats sensor
         entities.append(
             AmberPollingStatsSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
+        # API error sensor
+        entities.append(
+            AmberApiErrorSensor(
                 coordinator=coordinator,
                 entry=entry,
                 subentry=subentry,
@@ -499,5 +509,51 @@ class AmberPollingStatsSensor(AmberBaseSensor):
             attrs["last_estimate_elapsed"] = round(offset_stats.last_estimate_elapsed, 1)
         if offset_stats.last_confirmed_elapsed is not None:
             attrs["last_confirmed_elapsed"] = round(offset_stats.last_confirmed_elapsed, 1)
+
+        return attrs
+
+
+class AmberApiErrorSensor(AmberBaseSensor):
+    """Sensor for API error status."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the API error sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_api_error"
+        self._attr_translation_key = "api_error"
+
+    @staticmethod
+    def _get_http_status_label(status_code: int) -> str:
+        """Get human-readable label for HTTP status code."""
+        try:
+            return HTTPStatus(status_code).phrase
+        except ValueError:
+            return "Unknown Error"
+
+    @property
+    def native_value(self) -> str:
+        """Return the API status as human-readable label."""
+        return self._get_http_status_label(self.coordinator.get_api_status())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return API status details as attributes."""
+        status_code = self.coordinator.get_api_status()
+        attrs: dict[str, Any] = {"status_code": status_code}
+
+        # Include rate limit info if there's an error (not OK)
+        if status_code != HTTPStatus.OK:
+            rate_limit_info = self.coordinator.get_rate_limit_info()
+            if rate_limit_info.get("rate_limit_until"):
+                attrs["rate_limit_until"] = rate_limit_info["rate_limit_until"]
+            if rate_limit_info.get("backoff_seconds"):
+                attrs["backoff_seconds"] = rate_limit_info["backoff_seconds"]
 
         return attrs

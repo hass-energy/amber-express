@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
 import logging
 from typing import Any
 
@@ -107,6 +108,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Merged data (exposed via data_sources)
         self.current_data: CoordinatorData = {}
         self.data_source: str = DATA_SOURCE_POLLING
+
+        # API status tracking (OK = 200, error codes otherwise)
+        self._last_api_status: int = HTTPStatus.OK
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
@@ -248,13 +252,18 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     resolution=resolution,
                 )
             )
-            # Reset backoff on success
+            # Reset backoff and record success
             self._rate_limiter.record_success()
+            self._set_api_status(HTTPStatus.OK)
         except ApiException as err:
-            if err.status == HTTP_TOO_MANY_REQUESTS:
-                self._rate_limiter.record_rate_limit()
+            if err.status is not None:
+                self._set_api_status(err.status)
+                if err.status == HTTP_TOO_MANY_REQUESTS:
+                    self._rate_limiter.record_rate_limit()
+                else:
+                    _LOGGER.warning("Amber API error (%d): %s", err.status, err.reason)
             else:
-                _LOGGER.warning("Amber API error (%d): %s", err.status, err.reason)
+                _LOGGER.warning("Amber API error: %s", err.reason)
             return
         except Exception as err:
             _LOGGER.warning("Failed to fetch Amber data: %s", err)
@@ -315,13 +324,19 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 )
             )
             data = self._interval_processor.process_intervals(intervals_with_forecasts)
+            self._set_api_status(HTTPStatus.OK)
             _LOGGER.debug("Fetched %d forecast intervals", FORECAST_INTERVALS)
             return data
         except ApiException as err:
-            if err.status == HTTP_TOO_MANY_REQUESTS:
-                _LOGGER.warning("Rate limited fetching forecasts (429). Will retry next cycle.")
+            if err.status is not None:
+                self._set_api_status(err.status)
+                if err.status == HTTP_TOO_MANY_REQUESTS:
+                    self._rate_limiter.record_rate_limit()
+                    _LOGGER.warning("Rate limited fetching forecasts (429). Will retry next cycle.")
+                else:
+                    _LOGGER.warning("Failed to fetch forecasts: API error %d", err.status)
             else:
-                _LOGGER.warning("Failed to fetch forecasts: API error %d", err.status)
+                _LOGGER.warning("Failed to fetch forecasts: %s", err.reason)
             return None
         except Exception as err:
             _LOGGER.warning("Failed to fetch forecasts: %s", err)
@@ -442,3 +457,18 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def get_polling_offset_stats(self) -> PollingOffsetStats:
         """Get polling offset statistics for diagnostics."""
         return self._polling_manager.get_offset_stats()
+
+    def _set_api_status(self, status: int) -> None:
+        """Set the last API status code."""
+        self._last_api_status = status
+
+    def get_api_status(self) -> int:
+        """Get last API status code (200 = OK)."""
+        return self._last_api_status
+
+    def get_rate_limit_info(self) -> dict[str, Any]:
+        """Get rate limit details for diagnostics."""
+        return {
+            "rate_limit_until": self._rate_limiter.rate_limit_until,
+            "backoff_seconds": self._rate_limiter.current_backoff,
+        }
