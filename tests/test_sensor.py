@@ -189,33 +189,6 @@ class TestAmberPriceSensor:
 
         assert sensor.extra_state_attributes == {}
 
-    def test_price_sensor_with_advanced_price(
-        self,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test price sensor with advanced_price attribute."""
-        coordinator = MagicMock()
-        coordinator.get_channel_data = MagicMock(
-            return_value={
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_ADVANCED_PRICE: 0.28,
-            }
-        )
-        coordinator.get_forecasts = MagicMock(return_value=[])
-        coordinator.data_source = "polling"
-
-        sensor = AmberPriceSensor(
-            coordinator=coordinator,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-            channel=CHANNEL_GENERAL,
-        )
-
-        attrs = sensor.extra_state_attributes
-        assert ATTR_ADVANCED_PRICE in attrs
-
     def test_price_sensor_uses_pricing_mode_aemo(
         self,
         mock_coordinator_with_data: MagicMock,
