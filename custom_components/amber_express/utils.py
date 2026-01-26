@@ -1,0 +1,22 @@
+"""Utility functions for Amber Express."""
+
+from homeassistant.util import dt as dt_util
+
+PRICE_DECIMAL_PLACES = 2
+
+
+def cents_to_dollars(cents: float | None) -> float | None:
+    """Convert cents to dollars, rounded to avoid floating point artifacts."""
+    if cents is None:
+        return None
+    return round(cents / 100, PRICE_DECIMAL_PLACES)
+
+
+def to_local_iso(iso_string: str | None) -> str | None:
+    """Convert an ISO timestamp string to local timezone."""
+    if iso_string is None:
+        return None
+    dt = dt_util.parse_datetime(iso_string)
+    if dt is None:
+        return iso_string
+    return dt_util.as_local(dt).isoformat()
