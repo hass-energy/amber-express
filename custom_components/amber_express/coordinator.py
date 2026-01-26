@@ -381,6 +381,15 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Update data from websocket."""
         self._log_price_data(data, "WebSocket")
 
+        for channel_id, new_channel_data in data.items():
+            if not new_channel_data.get(ATTR_FORECASTS):
+                # Try to find existing forecasts in the current data
+                current_channel_data = self.current_data.get(channel_id)
+                if current_channel_data:
+                    existing_forecasts = current_channel_data.get(ATTR_FORECASTS)
+                    if existing_forecasts:
+                        new_channel_data[ATTR_FORECASTS] = existing_forecasts
+
         self._data_sources.update_websocket(data)
 
         # Merge and notify listeners
