@@ -733,19 +733,6 @@ class TestAmberDataCoordinator:
             # API status should be 200
             assert coordinator.get_api_status() == 200
 
-    def test_get_rate_limit_info(self, coordinator: AmberDataCoordinator) -> None:
-        """Test get_rate_limit_info returns rate limit details."""
-        # Initially no rate limit
-        info = coordinator.get_rate_limit_info()
-        assert info["rate_limit_until"] is None
-        assert info["backoff_seconds"] == 0
-
-        # Record rate limit
-        coordinator._rate_limiter.record_rate_limit()
-        info = coordinator.get_rate_limit_info()
-        assert info["rate_limit_until"] is not None
-        assert info["backoff_seconds"] == 10
-
     def test_api_status_tracking(self, coordinator: AmberDataCoordinator) -> None:
         """Test API status tracking."""
         # Initially 200 (OK)

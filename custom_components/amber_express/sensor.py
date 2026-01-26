@@ -545,15 +545,4 @@ class AmberApiErrorSensor(AmberBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return API status details as attributes."""
-        status_code = self.coordinator.get_api_status()
-        attrs: dict[str, Any] = {"status_code": status_code}
-
-        # Include rate limit info if there's an error (not OK)
-        if status_code != HTTPStatus.OK:
-            rate_limit_info = self.coordinator.get_rate_limit_info()
-            if rate_limit_info.get("rate_limit_until"):
-                attrs["rate_limit_until"] = rate_limit_info["rate_limit_until"]
-            if rate_limit_info.get("backoff_seconds"):
-                attrs["backoff_seconds"] = rate_limit_info["backoff_seconds"]
-
-        return attrs
+        return {"status_code": self.coordinator.get_api_status()}

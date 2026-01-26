@@ -465,10 +465,3 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def get_api_status(self) -> int:
         """Get last API status code (200 = OK)."""
         return self._last_api_status
-
-    def get_rate_limit_info(self) -> dict[str, Any]:
-        """Get rate limit details for diagnostics."""
-        return {
-            "rate_limit_until": self._rate_limiter.rate_limit_until,
-            "backoff_seconds": self._rate_limiter.current_backoff,
-        }

@@ -842,14 +842,8 @@ class TestAmberApiErrorSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test API error sensor with 429 error."""
-        from datetime import UTC, datetime  # noqa: PLC0415
-
-        rate_limit_until = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=429)
-        coordinator.get_rate_limit_info = MagicMock(
-            return_value={"rate_limit_until": rate_limit_until, "backoff_seconds": 10}
-        )
 
         sensor = AmberApiErrorSensor(
             coordinator=coordinator,
@@ -858,10 +852,7 @@ class TestAmberApiErrorSensor:
         )
 
         assert sensor.native_value == "Too Many Requests"
-        attrs = sensor.extra_state_attributes
-        assert attrs["status_code"] == 429
-        assert attrs["rate_limit_until"] == rate_limit_until
-        assert attrs["backoff_seconds"] == 10
+        assert sensor.extra_state_attributes == {"status_code": 429}
 
     def test_api_error_sensor_500_error(
         self,
@@ -871,7 +862,6 @@ class TestAmberApiErrorSensor:
         """Test API error sensor with 500 error."""
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=500)
-        coordinator.get_rate_limit_info = MagicMock(return_value={"rate_limit_until": None, "backoff_seconds": 0})
 
         sensor = AmberApiErrorSensor(
             coordinator=coordinator,
@@ -880,11 +870,7 @@ class TestAmberApiErrorSensor:
         )
 
         assert sensor.native_value == "Internal Server Error"
-        attrs = sensor.extra_state_attributes
-        assert attrs["status_code"] == 500
-        # No rate limit info for non-429 errors
-        assert "rate_limit_until" not in attrs
-        assert "backoff_seconds" not in attrs
+        assert sensor.extra_state_attributes == {"status_code": 500}
 
     def test_api_error_sensor_unknown_status_code(
         self,
@@ -894,7 +880,6 @@ class TestAmberApiErrorSensor:
         """Test API error sensor with unknown status code."""
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=999)
-        coordinator.get_rate_limit_info = MagicMock(return_value={"rate_limit_until": None, "backoff_seconds": 0})
 
         sensor = AmberApiErrorSensor(
             coordinator=coordinator,
@@ -903,6 +888,7 @@ class TestAmberApiErrorSensor:
         )
 
         assert sensor.native_value == "Unknown Error"
+        assert sensor.extra_state_attributes == {"status_code": 999}
 
     def test_get_http_status_label_common_codes(self) -> None:
         """Test _get_http_status_label for common HTTP status codes."""
