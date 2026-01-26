@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -25,6 +25,12 @@ from .interval_processor import CHANNEL_TYPE_MAP
 
 if TYPE_CHECKING:
     from . import AmberConfigEntry
+
+PRICE_SPIKE_ICONS = {
+    "none": "mdi:power-plug",
+    "potential": "mdi:power-plug-outline",
+    "spike": "mdi:power-plug-off",
+}
 
 
 async def async_setup_entry(
@@ -89,7 +95,6 @@ def _add_site_binary_sensors(
 class AmberPriceSpikeSensor(CoordinatorEntity[AmberDataCoordinator], BinarySensorEntity):
     """Binary sensor for price spike detection."""
 
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_has_entity_name = True
     _attr_translation_key = "price_spike"
 
@@ -116,6 +121,15 @@ class AmberPriceSpikeSensor(CoordinatorEntity[AmberDataCoordinator], BinarySenso
             manufacturer="Amber Electric",
             configuration_url="https://app.amber.com.au",
         )
+
+    @property
+    def icon(self) -> str:
+        """Return the sensor icon based on spike status."""
+        channel_data = self.coordinator.get_channel_data(CHANNEL_GENERAL)
+        if channel_data:
+            status = channel_data.get(ATTR_SPIKE_STATUS) or "none"
+            return PRICE_SPIKE_ICONS.get(status, PRICE_SPIKE_ICONS["none"])
+        return PRICE_SPIKE_ICONS["none"]
 
     @property
     def is_on(self) -> bool | None:

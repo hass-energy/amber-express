@@ -64,7 +64,7 @@
   },
   "entity": {
     "sensor": {
-      "api_error": { "name": "API Error" },
+      "api_status": { "name": "API Status" },
       "confirmation_delay": { "name": "Confirmation Delay" },
       "controlled_load_price": { "name": "Controlled Load Price" },
       "controlled_load_price_detailed": { "name": "Controlled Load Price Detailed" },

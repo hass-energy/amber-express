@@ -20,9 +20,7 @@ from .const import (
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
-    ATTR_NEM_TIME,
     ATTR_PER_KWH,
-    ATTR_SPIKE_STATUS,
     ATTR_SPOT_PER_KWH,
     ATTR_START_TIME,
     CHANNEL_CONTROLLED_LOAD,
@@ -158,7 +156,7 @@ def _add_site_sensors(
 
         # API error sensor
         entities.append(
-            AmberApiErrorSensor(
+            AmberApiStatusSensor(
                 coordinator=coordinator,
                 entry=entry,
                 subentry=subentry,
@@ -278,18 +276,10 @@ class AmberPriceSensor(AmberBaseSensor):
         attrs: dict[str, Any] = {
             ATTR_START_TIME: channel_data.get(ATTR_START_TIME),
             ATTR_END_TIME: channel_data.get(ATTR_END_TIME),
-            ATTR_NEM_TIME: channel_data.get(ATTR_NEM_TIME),
-            ATTR_SPOT_PER_KWH: channel_data.get(ATTR_SPOT_PER_KWH),
-            ATTR_PER_KWH: channel_data.get(ATTR_PER_KWH),
             ATTR_ESTIMATE: channel_data.get(ATTR_ESTIMATE),
             ATTR_DESCRIPTOR: channel_data.get(ATTR_DESCRIPTOR),
-            ATTR_SPIKE_STATUS: channel_data.get(ATTR_SPIKE_STATUS),
             "data_source": self.coordinator.data_source,
         }
-
-        # Include advanced price if available
-        if ATTR_ADVANCED_PRICE in channel_data:
-            attrs[ATTR_ADVANCED_PRICE] = channel_data[ATTR_ADVANCED_PRICE]
 
         # Build simple forecast list for energy optimization tools
         price_key = self._get_price_key()
@@ -513,7 +503,7 @@ class AmberPollingStatsSensor(AmberBaseSensor):
         return attrs
 
 
-class AmberApiErrorSensor(AmberBaseSensor):
+class AmberApiStatusSensor(AmberBaseSensor):
     """Sensor for API error status."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -526,8 +516,8 @@ class AmberApiErrorSensor(AmberBaseSensor):
     ) -> None:
         """Initialize the API error sensor."""
         super().__init__(coordinator, entry, subentry, None)
-        self._attr_unique_id = f"{self._site_id}_api_error"
-        self._attr_translation_key = "api_error"
+        self._attr_unique_id = f"{self._site_id}_api_status"
+        self._attr_translation_key = "api_status"
 
     @staticmethod
     def _get_http_status_label(status_code: int) -> str:
