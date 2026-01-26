@@ -37,6 +37,7 @@ from .const import (
     WS_STALE_TIMEOUT,
 )
 from .types import AdvancedPriceData, ChannelData, WSPriceInterval, is_ws_price_update
+from .utils import cents_to_dollars
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -276,13 +277,8 @@ class AmberWebSocketClient:
 
     def _extract_channel_data(self, interval: WSPriceInterval) -> ChannelData | None:
         """Extract data from a price interval in the WebSocket message."""
-        # Get price data (API returns cents, convert to dollars)
-        per_kwh_cents = interval.get("perKwh")
-        spot_per_kwh_cents = interval.get("spotPerKwh")
-
-        # Convert cents to dollars
-        per_kwh = per_kwh_cents / 100 if per_kwh_cents is not None else None
-        spot_per_kwh = spot_per_kwh_cents / 100 if spot_per_kwh_cents is not None else None
+        per_kwh = cents_to_dollars(interval.get("perKwh"))
+        spot_per_kwh = cents_to_dollars(interval.get("spotPerKwh"))
 
         result: ChannelData = {
             ATTR_PER_KWH: per_kwh,
@@ -296,16 +292,13 @@ class AmberWebSocketClient:
             ATTR_ESTIMATE: interval.get("estimate"),
         }
 
-        # Get advanced price if available (convert cents to dollars)
+        # Get advanced price if available
         advanced_price = interval.get("advancedPrice")
         if advanced_price:
-            low_cents = advanced_price.get("low")
-            predicted_cents = advanced_price.get("predicted")
-            high_cents = advanced_price.get("high")
             advanced_price_data: AdvancedPriceData = {
-                "low": low_cents / 100 if low_cents is not None else None,
-                "predicted": predicted_cents / 100 if predicted_cents is not None else None,
-                "high": high_cents / 100 if high_cents is not None else None,
+                "low": cents_to_dollars(advanced_price.get("low")),
+                "predicted": cents_to_dollars(advanced_price.get("predicted")),
+                "high": cents_to_dollars(advanced_price.get("high")),
             }
             result[ATTR_ADVANCED_PRICE] = advanced_price_data
 

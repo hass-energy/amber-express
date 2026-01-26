@@ -30,6 +30,7 @@ from .const import (
     PRICING_MODE_APP,
 )
 from .types import AdvancedPriceData, ChannelData
+from .utils import cents_to_dollars
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -128,10 +129,8 @@ class IntervalProcessor:
             # Use per_kwh (AEMO-based)
             price_cents = interval.per_kwh
 
-        # Convert cents to dollars
-        price = price_cents / 100 if price_cents is not None else None
-        spot_per_kwh_cents = getattr(interval, "spot_per_kwh", None)
-        spot_per_kwh = spot_per_kwh_cents / 100 if spot_per_kwh_cents is not None else None
+        price = cents_to_dollars(price_cents)
+        spot_per_kwh = cents_to_dollars(getattr(interval, "spot_per_kwh", None))
 
         # Extract descriptor
         descriptor = None
@@ -163,15 +162,12 @@ class IntervalProcessor:
             ATTR_ESTIMATE: is_estimate,
         }
 
-        # Add advanced price data if available (convert cents to dollars)
+        # Add advanced price data if available
         if hasattr(interval, "advanced_price") and interval.advanced_price:
-            low_cents = getattr(interval.advanced_price, "low", None)
-            predicted_cents = getattr(interval.advanced_price, "predicted", None)
-            high_cents = getattr(interval.advanced_price, "high", None)
             advanced_price_data: AdvancedPriceData = {
-                "low": low_cents / 100 if low_cents is not None else None,
-                "predicted": predicted_cents / 100 if predicted_cents is not None else None,
-                "high": high_cents / 100 if high_cents is not None else None,
+                "low": cents_to_dollars(getattr(interval.advanced_price, "low", None)),
+                "predicted": cents_to_dollars(getattr(interval.advanced_price, "predicted", None)),
+                "high": cents_to_dollars(getattr(interval.advanced_price, "high", None)),
             }
             data[ATTR_ADVANCED_PRICE] = advanced_price_data
 
