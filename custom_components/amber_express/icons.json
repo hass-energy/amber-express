@@ -9,6 +9,12 @@
       }
     },
     "sensor": {
+      "api_status": {
+        "default": "mdi:cloud-alert-outline"
+      },
+      "confirmation_delay": {
+        "default": "mdi:timer-outline"
+      },
       "controlled_load_price": {
         "default": "mdi:clock-outline"
       },
@@ -32,12 +38,6 @@
       },
       "site": {
         "default": "mdi:information-outline"
-      },
-      "confirmation_delay": {
-        "default": "mdi:timer-outline"
-      },
-      "api_status": {
-        "default": "mdi:cloud-alert-outline"
       }
     }
   }
