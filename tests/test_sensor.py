@@ -5,6 +5,7 @@
 from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData
@@ -279,10 +280,12 @@ class TestAmberPriceSensor:
         assert len(attrs["forecast"]) == 2
 
         # Check time/value format (default is APP mode, uses advanced_price_predicted)
+        # Times are converted to local timezone
         first_forecast = attrs["forecast"][0]
         assert "time" in first_forecast
         assert "value" in first_forecast
-        assert first_forecast["time"] == "2024-01-01T10:05:00+00:00"
+        expected_time = dt_util.as_local(dt_util.parse_datetime("2024-01-01T10:05:00+00:00")).isoformat()
+        assert first_forecast["time"] == expected_time
         assert first_forecast["value"] == 0.28
 
     def test_price_sensor_forecast_uses_pricing_mode(

@@ -39,6 +39,7 @@ from .const import (
 from .coordinator import AmberDataCoordinator
 from .interval_processor import CHANNEL_TYPE_MAP
 from .types import ChannelData
+from .utils import to_local_iso
 
 if TYPE_CHECKING:
     from . import AmberConfigEntry
@@ -291,7 +292,7 @@ class AmberPriceSensor(AmberBaseSensor):
             # Apply demand window price for general channel
             if value is not None and self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
                 value += demand_window_price
-            forecast_list.append({"time": f.get(ATTR_START_TIME), "value": value})
+            forecast_list.append({"time": to_local_iso(f.get(ATTR_START_TIME)), "value": value})
         attrs["forecast"] = forecast_list
 
         return {k: v for k, v in attrs.items() if v is not None}
@@ -491,8 +492,8 @@ class AmberPollingStatsSensor(AmberBaseSensor):
         """Return polling statistics as attributes."""
         offset_stats = self.coordinator.get_polling_offset_stats()
         attrs: dict[str, Any] = {
-            "polling_offset": offset_stats.offset,
-            "confirmatory_poll_count": offset_stats.confirmatory_poll_count,
+            "polling_delay": offset_stats.offset,
+            "poll_count": offset_stats.confirmatory_poll_count + 1,
         }
 
         if offset_stats.last_estimate_elapsed is not None:
