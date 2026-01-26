@@ -616,11 +616,11 @@ class TestAmberDataCoordinator:
             assert coordinator._rate_limiter.current_backoff == 0
             assert coordinator._rate_limiter.is_limited() is False
 
-    async def test_fetch_amber_data_confirmed_price_forecasts_fail(
+    async def test_fetch_amber_data_confirmed_price_forecasts_fail_subsequent_poll(
         self,
         hass: HomeAssistant,
     ) -> None:
-        """Test _fetch_amber_data with confirmed price but forecasts fail."""
+        """Test _fetch_amber_data with confirmed price on subsequent poll but forecasts fail."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="Test",
@@ -630,6 +630,11 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+
+        # Simulate that first poll already happened (estimate received)
+        # This makes the next poll a "subsequent" poll that would need separate forecast fetch
+        coordinator._polling_manager._poll_count_this_interval = 1
+        coordinator._polling_manager._current_interval_start = datetime.now(UTC)
 
         # Create a confirmed interval (estimate=False)
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -745,3 +750,138 @@ class TestAmberDataCoordinator:
         # Set back to 200
         coordinator._set_api_status(200)
         assert coordinator.get_api_status() == 200
+
+    async def test_fetch_amber_data_first_poll_fetches_with_forecasts(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test first poll of interval fetches with forecasts and updates data."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Test",
+            data={CONF_API_TOKEN: "test"},
+            options={},
+        )
+        entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
+        coordinator = AmberDataCoordinator(hass, entry, subentry)
+
+        mock_interval = MagicMock(spec=CurrentInterval)
+        mock_interval.per_kwh = 25.0
+        mock_interval.spot_per_kwh = 20.0
+        mock_interval.start_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.end_time = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+        mock_interval.estimate = True
+        mock_interval.descriptor = MagicMock(value="neutral")
+        mock_interval.spike_status = MagicMock(value="none")
+        mock_interval.channel_type = MagicMock(value="general")
+        mock_interval.advanced_price = None
+        mock_interval.tariff_information = None
+        mock_interval.nem_time = None
+        mock_interval.renewables = None
+
+        wrapped = wrap_interval(mock_interval)
+        with patch.object(
+            coordinator.hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=[wrapped]),
+        ):
+            await coordinator._fetch_amber_data()
+
+            # Verify first poll updated data
+            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
+
+    async def test_fetch_amber_data_subsequent_estimate_ignored(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test subsequent estimate polls are ignored (don't update data)."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Test",
+            data={CONF_API_TOKEN: "test"},
+            options={},
+        )
+        entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
+        coordinator = AmberDataCoordinator(hass, entry, subentry)
+
+        # Simulate first poll already happened with data
+        coordinator._polling_manager._poll_count_this_interval = 1
+        coordinator._polling_manager._current_interval_start = datetime.now(UTC)
+        initial_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.20, ATTR_FORECASTS: [{"time": "test"}]}}
+        coordinator._data_sources.update_polling(initial_data)
+
+        # Create an estimate interval for second poll
+        mock_interval = MagicMock(spec=CurrentInterval)
+        mock_interval.per_kwh = 30.0  # Different price
+        mock_interval.spot_per_kwh = 25.0
+        mock_interval.start_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.end_time = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+        mock_interval.estimate = True  # Still estimate
+        mock_interval.descriptor = MagicMock(value="neutral")
+        mock_interval.spike_status = MagicMock(value="none")
+        mock_interval.channel_type = MagicMock(value="general")
+        mock_interval.advanced_price = None
+        mock_interval.tariff_information = None
+        mock_interval.nem_time = None
+        mock_interval.renewables = None
+
+        wrapped = wrap_interval(mock_interval)
+        with patch.object(
+            coordinator.hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=[wrapped]),
+        ):
+            await coordinator._fetch_amber_data()
+
+            # Data should NOT be updated - still has original price and forecasts
+            assert coordinator._data_sources.polling_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.20
+            assert coordinator._data_sources.polling_data[CHANNEL_GENERAL][ATTR_FORECASTS] == [{"time": "test"}]
+
+    async def test_fetch_amber_data_first_poll_confirmed_no_separate_forecast_fetch(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test first poll with confirmed price doesn't need separate forecast fetch."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Test",
+            data={CONF_API_TOKEN: "test"},
+            options={},
+        )
+        entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
+        coordinator = AmberDataCoordinator(hass, entry, subentry)
+
+        # Create a confirmed interval
+        mock_interval = MagicMock(spec=CurrentInterval)
+        mock_interval.per_kwh = 25.0
+        mock_interval.spot_per_kwh = 20.0
+        mock_interval.start_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.end_time = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+        mock_interval.estimate = False  # Confirmed!
+        mock_interval.descriptor = MagicMock(value="neutral")
+        mock_interval.spike_status = MagicMock(value="none")
+        mock_interval.channel_type = MagicMock(value="general")
+        mock_interval.advanced_price = None
+        mock_interval.tariff_information = None
+        mock_interval.nem_time = None
+        mock_interval.renewables = None
+
+        wrapped = wrap_interval(mock_interval)
+        with (
+            patch.object(
+                coordinator.hass,
+                "async_add_executor_job",
+                new=AsyncMock(return_value=[wrapped]),
+            ),
+            patch.object(coordinator, "_fetch_forecasts", new=AsyncMock()) as mock_fetch_forecasts,
+        ):
+            await coordinator._fetch_amber_data()
+
+            # _fetch_forecasts should NOT be called on first poll (already has forecasts)
+            mock_fetch_forecasts.assert_not_called()
+            assert coordinator._polling_manager.has_confirmed_price is True
+            # Should NOT have forecasts_pending since first poll already fetched them
+            assert coordinator._polling_manager.forecasts_pending is False

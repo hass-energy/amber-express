@@ -236,18 +236,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Record poll started
         self._polling_manager.on_poll_started()
+        is_first_poll = self._polling_manager.poll_count_this_interval == 1
 
         _LOGGER.debug(
             "Polling Amber API (poll #%d for this interval)",
             self._polling_manager.poll_count_this_interval,
         )
 
+        # First poll of interval: fetch with forecasts to ensure we have them immediately
+        # Subsequent polls: fetch without forecasts (just checking for confirmed)
+        next_intervals = FORECAST_INTERVALS if is_first_poll else 0
+
         try:
-            # First fetch current price only (no forecasts) to check if confirmed
             intervals = await self.hass.async_add_executor_job(
                 lambda: self._api.get_current_prices(
                     self.site_id,
-                    next=0,
+                    next=next_intervals,
                     previous=0,
                     resolution=resolution,
                 )
@@ -286,31 +290,35 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         is_estimate = general_data.get(ATTR_ESTIMATE, True)
         wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
 
-        # Confirmed price: fetch full forecasts and update
+        # Confirmed price: update and stop polling
         if is_estimate is False:
             # Record confirmed price for offset tracking
             self._polling_manager.on_confirmed_received()
 
-            # Try to fetch forecasts
-            forecasts_fetched = await self._fetch_forecasts(resolution)
-            if not forecasts_fetched:
-                self._polling_manager.set_forecasts_pending()
-            else:
-                self._polling_manager.clear_forecasts_pending()
-                data = forecasts_fetched
+            # If not first poll, we need to fetch forecasts separately
+            if not is_first_poll:
+                forecasts_fetched = await self._fetch_forecasts(resolution)
+                if not forecasts_fetched:
+                    self._polling_manager.set_forecasts_pending()
+                else:
+                    self._polling_manager.clear_forecasts_pending()
+                    data = forecasts_fetched
 
             self._data_sources.update_polling(data)
             _LOGGER.info("Confirmed price received, stopping polling for this interval")
-        # Estimated price: track time and update if needed
+        # Estimated price: only update on first poll (which has forecasts)
         else:
             # Track when we got this estimate for offset calculation
             self._polling_manager.on_estimate_received()
 
-            if not wait_for_confirmed:
+            # Only update on first poll - subsequent estimates are ignored to preserve forecasts
+            if is_first_poll and not wait_for_confirmed:
                 self._data_sources.update_polling(data)
-                _LOGGER.debug("Estimated price received, updating sensors")
+                _LOGGER.debug("First poll estimate received with forecasts, updating sensors")
+            elif is_first_poll:
+                _LOGGER.debug("First poll estimate received, waiting for confirmed")
             else:
-                _LOGGER.debug("Estimated price received, waiting for confirmed")
+                _LOGGER.debug("Subsequent estimate received, ignoring (waiting for confirmed)")
 
     async def _fetch_forecasts(self, resolution: int) -> dict[str, ChannelData] | None:
         """Fetch forecasts. Returns data with forecasts or None on failure."""
