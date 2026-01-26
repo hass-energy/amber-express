@@ -278,18 +278,10 @@ class AmberPriceSensor(AmberBaseSensor):
         attrs: dict[str, Any] = {
             ATTR_START_TIME: channel_data.get(ATTR_START_TIME),
             ATTR_END_TIME: channel_data.get(ATTR_END_TIME),
-            ATTR_NEM_TIME: channel_data.get(ATTR_NEM_TIME),
-            ATTR_SPOT_PER_KWH: channel_data.get(ATTR_SPOT_PER_KWH),
-            ATTR_PER_KWH: channel_data.get(ATTR_PER_KWH),
             ATTR_ESTIMATE: channel_data.get(ATTR_ESTIMATE),
             ATTR_DESCRIPTOR: channel_data.get(ATTR_DESCRIPTOR),
-            ATTR_SPIKE_STATUS: channel_data.get(ATTR_SPIKE_STATUS),
             "data_source": self.coordinator.data_source,
         }
-
-        # Include advanced price if available
-        if ATTR_ADVANCED_PRICE in channel_data:
-            attrs[ATTR_ADVANCED_PRICE] = channel_data[ATTR_ADVANCED_PRICE]
 
         # Build simple forecast list for energy optimization tools
         price_key = self._get_price_key()
