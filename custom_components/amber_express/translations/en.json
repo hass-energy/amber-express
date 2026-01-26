@@ -4,62 +4,38 @@
       "name_sites": {
         "title": "Name Your Site",
         "description": "**Site ID:** {site_id}  \n**NMI:** {nmi}  \n**Network:** {network}  \n**Interval:** {interval}  \n**Active from:** {active_from}",
-        "data": {
-          "site_name": "Site Name"
-        },
-        "data_description": {
-          "site_name": "A friendly name for this site"
-        }
+        "data": { "site_name": "Site Name" },
+        "data_description": { "site_name": "A friendly name for this site" }
       },
       "reconfigure": {
         "title": "Update API Token",
         "description": "Enter a new API token or leave empty to keep the current one. You can generate a token at [Amber Developer Settings]({api_url}).",
-        "data": {
-          "api_token": "New API Token"
-        },
-        "data_description": {
-          "api_token": "Leave empty to keep the current token"
-        }
+        "data": { "api_token": "New API Token" },
+        "data_description": { "api_token": "Leave empty to keep the current token" }
       },
       "reconfigure_name_sites": {
         "title": "Name New Site",
         "description": "**Site ID:** {site_id}  \n**NMI:** {nmi}  \n**Network:** {network}  \n**Interval:** {interval}  \n**Active from:** {active_from}",
-        "data": {
-          "site_name": "Site Name"
-        },
-        "data_description": {
-          "site_name": "A friendly name for this site"
-        }
+        "data": { "site_name": "Site Name" },
+        "data_description": { "site_name": "A friendly name for this site" }
       },
       "reconfigure_sites": {
         "title": "Select Sites",
         "description": "Select the sites you want to monitor. Deselecting a site will remove it from the integration.",
-        "data": {
-          "selected_sites": "Sites"
-        },
-        "data_description": {
-          "selected_sites": "The Amber Electric sites to monitor"
-        }
+        "data": { "selected_sites": "Sites" },
+        "data_description": { "selected_sites": "The Amber Electric sites to monitor" }
       },
       "select_sites": {
         "title": "Select Sites",
         "description": "Multiple sites were found. Select the sites you want to configure.",
-        "data": {
-          "selected_sites": "Sites"
-        },
-        "data_description": {
-          "selected_sites": "The Amber Electric sites to monitor"
-        }
+        "data": { "selected_sites": "Sites" },
+        "data_description": { "selected_sites": "The Amber Electric sites to monitor" }
       },
       "user": {
         "title": "Amber Express",
         "description": "Enter your Amber Electric API token. You can generate one at [Amber Developer Settings]({api_url}).",
-        "data": {
-          "api_token": "API Token"
-        },
-        "data_description": {
-          "api_token": "Your Amber Electric API token"
-        }
+        "data": { "api_token": "API Token" },
+        "data_description": { "api_token": "Your Amber Electric API token" }
       }
     },
     "error": {
@@ -81,56 +57,25 @@
       "init": {
         "title": "Amber Express Options",
         "description": "Rename this integration hub. Site-specific options (pricing mode, WebSocket, etc.) are configured per site subentry.",
-        "data": {
-          "title": "Hub Name"
-        },
-        "data_description": {
-          "title": "The display name for this integration"
-        }
+        "data": { "title": "Hub Name" },
+        "data_description": { "title": "The display name for this integration" }
       }
     }
   },
   "entity": {
     "sensor": {
-      "api_error": {
-        "name": "API Error"
-      },
-      "confirmation_delay": {
-        "name": "Confirmation Delay"
-      },
-      "controlled_load_price": {
-        "name": "Controlled Load Price"
-      },
-      "controlled_load_price_detailed": {
-        "name": "Controlled Load Price Detailed"
-      },
-      "feed_in_price": {
-        "name": "Feed In Price"
-      },
-      "feed_in_price_detailed": {
-        "name": "Feed In Price Detailed"
-      },
-      "general_price": {
-        "name": "General Price"
-      },
-      "general_price_detailed": {
-        "name": "General Price Detailed"
-      },
-      "renewables": {
-        "name": "Renewables"
-      },
-      "site": {
-        "name": "Site"
-      }
+      "api_error": { "name": "API Error" },
+      "confirmation_delay": { "name": "Confirmation Delay" },
+      "controlled_load_price": { "name": "Controlled Load Price" },
+      "controlled_load_price_detailed": { "name": "Controlled Load Price Detailed" },
+      "feed_in_price": { "name": "Feed In Price" },
+      "feed_in_price_detailed": { "name": "Feed In Price Detailed" },
+      "general_price": { "name": "General Price" },
+      "general_price_detailed": { "name": "General Price Detailed" },
+      "renewables": { "name": "Renewables" },
+      "site": { "name": "Site" }
     },
-    "binary_sensor": {
-      "demand_window": {
-        "name": "Demand Window"
-      },
-      "price_spike": {
-        "name": "Price Spike"
-      }
-    }
+    "binary_sensor": { "demand_window": { "name": "Demand Window" }, "price_spike": { "name": "Price Spike" } }
   },
   "config_subentries": {
     "site": {
@@ -157,10 +102,7 @@
         "user": {
           "title": "Add Site",
           "description": "Select a site to add and give it a name.",
-          "data": {
-            "site_id": "Site",
-            "site_name": "Site Name"
-          },
+          "data": { "site_id": "Site", "site_name": "Site Name" },
           "data_description": {
             "site_id": "The Amber Electric site to add",
             "site_name": "A friendly name for this site"
@@ -176,10 +118,7 @@
         "use_reconfigure": "To add or remove sites, use the Reconfigure option on the main Amber Electric entry."
       },
       "entry_type": "Site",
-      "initiate_flow": {
-        "reconfigure": "Site",
-        "user": "Site"
-      }
+      "initiate_flow": { "reconfigure": "Site", "user": "Site" }
     }
   }
 }
