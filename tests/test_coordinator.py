@@ -317,6 +317,18 @@ class TestAmberDataCoordinator:
             # Site info should be unchanged from subentry data
             assert coordinator._site_info == initial_site_info
 
+    async def test_fetch_site_info_429_records_rate_limit(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _fetch_site_info handles 429 and records rate limit."""
+        # Create a mock ApiException with headers
+        err = ApiException(status=429)
+        err.headers = {"ratelimit-reset": "120"}
+
+        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
+            await coordinator._fetch_site_info()
+            # Should have recorded rate limit with reset from headers
+            assert coordinator._rate_limiter.is_limited() is True
+            assert coordinator._rate_limiter.current_backoff == 122  # 120 + 2 buffer
+
     async def test_fetch_amber_data_rate_limit_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data respects rate limit backoff."""
         coordinator._rate_limiter.record_rate_limit()  # Sets rate limit

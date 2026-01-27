@@ -182,6 +182,13 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         try:
             sites = await self.hass.async_add_executor_job(self._api.get_sites)
+        except ApiException as err:
+            if err.status == HTTP_TOO_MANY_REQUESTS:
+                reset_seconds = self._get_reset_from_error(err)
+                self._rate_limiter.record_rate_limit(reset_seconds)
+            else:
+                _LOGGER.warning("Failed to fetch sites: %s", err)
+            return
         except Exception as err:
             _LOGGER.warning("Failed to fetch sites: %s", err)
             return
@@ -278,7 +285,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             if err.status is not None:
                 self._set_api_status(err.status)
                 if err.status == HTTP_TOO_MANY_REQUESTS:
-                    self._rate_limiter.record_rate_limit()
+                    # Parse reset_seconds from error response headers
+                    reset_seconds = self._get_reset_from_error(err)
+                    self._rate_limiter.record_rate_limit(reset_seconds)
                 else:
                     _LOGGER.warning("Amber API error (%d): %s", err.status, err.reason)
             else:
@@ -360,8 +369,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             if err.status is not None:
                 self._set_api_status(err.status)
                 if err.status == HTTP_TOO_MANY_REQUESTS:
-                    self._rate_limiter.record_rate_limit()
-                    _LOGGER.warning("Rate limited fetching forecasts (429). Will retry next cycle.")
+                    reset_seconds = self._get_reset_from_error(err)
+                    self._rate_limiter.record_rate_limit(reset_seconds)
                 else:
                     _LOGGER.warning("Failed to fetch forecasts: API error %d", err.status)
             else:
@@ -549,3 +558,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def get_rate_limit_info(self) -> RateLimitInfo:
         """Get rate limit information from last API response."""
         return self._rate_limit_info
+
+    def _get_reset_from_error(self, err: ApiException) -> int | None:
+        """Extract reset_seconds from ApiException headers."""
+        headers = getattr(err, "headers", None)
+        if not headers:
+            return None
+
+        # Headers from ApiException are a list of tuples or dict
+        if isinstance(headers, dict):
+            reset_str = headers.get("ratelimit-reset") or headers.get("Ratelimit-Reset")
+        else:
+            # List of tuples
+            headers_dict = {k.lower(): v for k, v in headers}
+            reset_str = headers_dict.get("ratelimit-reset")
+
+        if reset_str:
+            with contextlib.suppress(ValueError):
+                return int(reset_str)
+        return None
