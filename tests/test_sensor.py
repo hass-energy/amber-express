@@ -787,7 +787,7 @@ class TestAmberConfirmationLagSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test confirmation lag sensor with no observation returns None."""
-        # Default mock has last_observation=None
+        # Default mock has last_estimate_elapsed=None
         sensor = AmberConfirmationLagSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
@@ -802,17 +802,15 @@ class TestAmberConfirmationLagSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test confirmation lag sensor calculates gap from observation."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+        from custom_components.amber_express.polling_offset import PollingOffsetStats  # noqa: PLC0415
 
         coordinator = MagicMock()
-        coordinator.get_cdf_polling_stats = MagicMock(
-            return_value=CDFPollingStats(
-                observation_count=100,
-                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
-                next_poll_index=0,
-                confirmatory_poll_count=0,
-                polls_per_interval=4,
-                last_observation={"start": 15.0, "end": 27.5},
+        coordinator.get_polling_offset_stats = MagicMock(
+            return_value=PollingOffsetStats(
+                offset=15,
+                last_estimate_elapsed=15.0,
+                last_confirmed_elapsed=27.5,
+                confirmatory_poll_count=2,
             )
         )
 
@@ -822,7 +820,7 @@ class TestAmberConfirmationLagSensor:
             subentry=mock_subentry,
         )
 
-        # Lag is end - start = 27.5 - 15.0 = 12.5
+        # Lag is confirmed - estimate = 27.5 - 15.0 = 12.5
         assert sensor.native_value == 12.5
 
 
