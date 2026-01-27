@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_change
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_time_change
 
 from .cdf_storage import CDFObservationStore
 from .const import (
@@ -30,9 +31,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# Polling seconds - check every second to support 2-second confirmatory polling
-# The coordinator's should_poll() decides when to actually make API calls
-POLL_SECONDS = list(range(0, 60, 1))
+# Interval detection - check every second to detect 5-minute interval boundaries
+# Sub-second poll timing is handled by async_call_later chains
+INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 
@@ -44,6 +45,7 @@ class SiteRuntimeData:
     coordinator: AmberDataCoordinator
     websocket_client: AmberWebSocketClient | None = None
     unsub_time_change: Callable[[], None] | None = None
+    cancel_next_poll: Callable[[], None] | None = None
 
 
 @dataclass(slots=True)
@@ -118,29 +120,89 @@ async def _setup_site(
             on_message=coordinator.update_from_websocket,
         )
 
-    # Set up clock-aligned polling for this coordinator
-    async def _clock_aligned_poll(_now: object) -> None:
-        """Poll at clock-aligned times with smart offset logic."""
-        if not coordinator.should_poll():
-            return
-        await coordinator.async_refresh()
-
-    unsub_time_change = async_track_time_change(
-        hass,
-        _clock_aligned_poll,
-        second=POLL_SECONDS,
-    )
-
-    # Store site runtime data
+    # Store site runtime data (before setting up polling so callbacks can access it)
     site_data = SiteRuntimeData(
         coordinator=coordinator,
         websocket_client=websocket_client,
-        unsub_time_change=unsub_time_change,
     )
     runtime_data.sites[subentry_id] = site_data
 
+    def _cancel_pending_poll() -> None:
+        """Cancel any pending scheduled poll."""
+        if site_data.cancel_next_poll:
+            site_data.cancel_next_poll()
+            site_data.cancel_next_poll = None
+
+    async def _do_scheduled_poll() -> None:
+        """Execute the scheduled poll."""
+        _LOGGER.debug("Sub-second scheduled poll firing")
+        site_data.cancel_next_poll = None
+
+        # Double-check we still need to poll
+        if coordinator.has_confirmed_price:
+            _LOGGER.debug("Skipping scheduled poll: already have confirmed price")
+            return
+
+        await coordinator.async_refresh()
+
+        # Schedule the next poll if we still don't have confirmed price
+        _schedule_next_poll()
+
+    @callback
+    def _on_scheduled_poll(_now: datetime) -> None:
+        """Handle the async_call_later callback by creating a task."""
+        hass.async_create_task(_do_scheduled_poll())
+
+    def _schedule_next_poll() -> None:
+        """Schedule the next poll using sub-second precision."""
+        _cancel_pending_poll()
+
+        # Don't schedule if we have confirmed price
+        if coordinator.has_confirmed_price:
+            _LOGGER.debug("Not scheduling poll: already have confirmed price")
+            return
+
+        delay = coordinator.get_next_poll_delay()
+        if delay is None:
+            _LOGGER.debug("Not scheduling poll: no delay returned (no more polls)")
+            return
+
+        _LOGGER.debug("Scheduling next poll in %.2fs", delay)
+
+        # Schedule the next poll with sub-second precision
+        site_data.cancel_next_poll = async_call_later(
+            hass,
+            delay,
+            _on_scheduled_poll,
+        )
+
+    async def _check_interval(_now: object) -> None:
+        """Check for new interval and start sub-second polling chain."""
+        # Check if this is a new interval
+        if not coordinator.check_new_interval():
+            return
+
+        # New interval - cancel any pending poll from previous interval
+        _cancel_pending_poll()
+
+        # New interval - do immediate first poll
+        await coordinator.async_refresh()
+
+        # Start the sub-second polling chain for confirmatory polls
+        _schedule_next_poll()
+
+    unsub_time_change = async_track_time_change(
+        hass,
+        _check_interval,
+        second=INTERVAL_CHECK_SECONDS,
+    )
+    site_data.unsub_time_change = unsub_time_change
+
     # Initial fetch
     await coordinator.async_config_entry_first_refresh()
+
+    # Start sub-second polling chain if we don't have confirmed price yet
+    _schedule_next_poll()
 
     # Start WebSocket client if enabled
     if websocket_client:
@@ -154,6 +216,10 @@ async def _teardown_site(
     site_data: SiteRuntimeData,
 ) -> None:
     """Tear down a single site."""
+    # Cancel any pending scheduled poll
+    if site_data.cancel_next_poll:
+        site_data.cancel_next_poll()
+
     # Unsubscribe from time change listener
     if site_data.unsub_time_change:
         site_data.unsub_time_change()

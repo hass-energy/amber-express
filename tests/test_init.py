@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.amber_express import POLL_SECONDS, async_setup_entry, async_unload_entry, async_update_listener
+from custom_components.amber_express import (
+    INTERVAL_CHECK_SECONDS,
+    async_setup_entry,
+    async_unload_entry,
+    async_update_listener,
+)
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
@@ -91,11 +96,14 @@ class TestAsyncSetupEntry:
             patch("custom_components.amber_express.AmberDataCoordinator") as mock_coordinator_class,
             patch("custom_components.amber_express.AmberWebSocketClient") as mock_ws_class,
             patch("custom_components.amber_express.async_track_time_change") as mock_track_time,
+            patch("custom_components.amber_express.async_call_later") as mock_call_later,
             patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()) as mock_forward,
         ):
             mock_coordinator = AsyncMock()
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
-            mock_coordinator.should_poll = MagicMock(return_value=True)
+            mock_coordinator.check_new_interval = MagicMock(return_value=True)
+            mock_coordinator.has_confirmed_price = False
+            mock_coordinator.get_next_poll_delay = MagicMock(return_value=None)
             mock_coordinator.async_refresh = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()
             mock_coordinator_class.return_value = mock_coordinator
@@ -106,6 +114,7 @@ class TestAsyncSetupEntry:
 
             mock_unsub = MagicMock()
             mock_track_time.return_value = mock_unsub
+            mock_call_later.return_value = MagicMock()
 
             result = await async_setup_entry(hass, entry)
 
@@ -130,14 +139,18 @@ class TestAsyncSetupEntry:
             patch("custom_components.amber_express.AmberDataCoordinator") as mock_coordinator_class,
             patch("custom_components.amber_express.AmberWebSocketClient") as mock_ws_class,
             patch("custom_components.amber_express.async_track_time_change") as mock_track_time,
+            patch("custom_components.amber_express.async_call_later") as mock_call_later,
             patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
         ):
             mock_coordinator = AsyncMock()
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+            mock_coordinator.has_confirmed_price = False
+            mock_coordinator.get_next_poll_delay = MagicMock(return_value=None)
             mock_coordinator_class.return_value = mock_coordinator
 
             mock_unsub = MagicMock()
             mock_track_time.return_value = mock_unsub
+            mock_call_later.return_value = MagicMock()
 
             result = await async_setup_entry(hass, entry)
 
@@ -145,11 +158,11 @@ class TestAsyncSetupEntry:
             assert entry.runtime_data.sites["test_subentry_id"].websocket_client is None
             mock_ws_class.assert_not_called()
 
-    async def test_setup_entry_clock_aligned_poll(
+    async def test_setup_entry_interval_check(
         self,
         hass: HomeAssistant,
     ) -> None:
-        """Test clock-aligned polling is set up correctly."""
+        """Test interval check polling is set up correctly with sub-second scheduling."""
         entry = create_mock_entry_with_subentry(hass)
 
         captured_callback: Any = None
@@ -168,11 +181,14 @@ class TestAsyncSetupEntry:
                 "custom_components.amber_express.async_track_time_change",
                 side_effect=capture_track_time,
             ),
+            patch("custom_components.amber_express.async_call_later") as mock_call_later,
             patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
         ):
             mock_coordinator = AsyncMock()
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
-            mock_coordinator.should_poll = MagicMock(return_value=True)
+            mock_coordinator.check_new_interval = MagicMock(return_value=True)
+            mock_coordinator.has_confirmed_price = False
+            mock_coordinator.get_next_poll_delay = MagicMock(return_value=5.5)
             mock_coordinator.async_refresh = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()
             mock_coordinator_class.return_value = mock_coordinator
@@ -181,20 +197,30 @@ class TestAsyncSetupEntry:
             mock_ws.start = AsyncMock()
             mock_ws_class.return_value = mock_ws
 
+            mock_cancel = MagicMock()
+            mock_call_later.return_value = mock_cancel
+
             await async_setup_entry(hass, entry)
 
-            assert captured_seconds == POLL_SECONDS
+            # Check interval detection seconds
+            assert captured_seconds == INTERVAL_CHECK_SECONDS
             assert captured_callback is not None
 
-            # Test the callback - should_poll returns True
+            # Test the callback - check_new_interval returns True (new interval)
+            mock_coordinator.async_refresh.reset_mock()
+            mock_call_later.reset_mock()
             await captured_callback(None)
-            mock_coordinator.async_refresh.assert_called_once()
 
-    async def test_setup_entry_poll_skipped_when_not_needed(
+            # Should poll immediately for new interval
+            mock_coordinator.async_refresh.assert_called_once()
+            # Should schedule next poll with sub-second delay
+            mock_call_later.assert_called()
+
+    async def test_setup_entry_poll_skipped_when_not_new_interval(
         self,
         hass: HomeAssistant,
     ) -> None:
-        """Test polling is skipped when should_poll returns False."""
+        """Test polling is skipped when check_new_interval returns False."""
         entry = create_mock_entry_with_subentry(hass)
 
         captured_callback: Any = None
@@ -211,11 +237,14 @@ class TestAsyncSetupEntry:
                 "custom_components.amber_express.async_track_time_change",
                 side_effect=capture_track_time,
             ),
+            patch("custom_components.amber_express.async_call_later") as mock_call_later,
             patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
         ):
             mock_coordinator = AsyncMock()
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
-            mock_coordinator.should_poll = MagicMock(return_value=False)
+            mock_coordinator.check_new_interval = MagicMock(return_value=False)
+            mock_coordinator.has_confirmed_price = False
+            mock_coordinator.get_next_poll_delay = MagicMock(return_value=None)
             mock_coordinator.async_refresh = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()
             mock_coordinator_class.return_value = mock_coordinator
@@ -224,9 +253,11 @@ class TestAsyncSetupEntry:
             mock_ws.start = AsyncMock()
             mock_ws_class.return_value = mock_ws
 
+            mock_call_later.return_value = MagicMock()
+
             await async_setup_entry(hass, entry)
 
-            # Test the callback - should_poll returns False, so refresh not called
+            # Test the callback - check_new_interval returns False, so refresh not called
             mock_coordinator.async_refresh.reset_mock()
             await captured_callback(None)
             mock_coordinator.async_refresh.assert_not_called()
@@ -357,11 +388,11 @@ class TestAsyncUpdateListener:
             mock_reload.assert_called_once_with(entry.entry_id)
 
 
-class TestPollSeconds:
-    """Tests for POLL_SECONDS constant."""
+class TestIntervalCheckSeconds:
+    """Tests for INTERVAL_CHECK_SECONDS constant."""
 
-    def test_poll_seconds_contains_expected_values(self) -> None:
-        """Test POLL_SECONDS contains expected values."""
-        assert 0 in POLL_SECONDS
-        assert 5 in POLL_SECONDS
-        assert all(0 <= s < 60 for s in POLL_SECONDS)
+    def test_interval_check_seconds_contains_expected_values(self) -> None:
+        """Test INTERVAL_CHECK_SECONDS contains expected values for detecting intervals."""
+        assert 0 in INTERVAL_CHECK_SECONDS
+        assert 5 in INTERVAL_CHECK_SECONDS
+        assert all(0 <= s < 60 for s in INTERVAL_CHECK_SECONDS)

@@ -131,6 +131,28 @@ class CDFPollingStrategy:
         next_poll_time = self._scheduled_polls[self._next_poll_index]
         return elapsed_seconds >= next_poll_time
 
+    def get_next_poll_delay(self, elapsed_seconds: float) -> float | None:
+        """Get the delay in seconds until the next scheduled poll.
+
+        Args:
+            elapsed_seconds: Seconds since the interval started
+
+        Returns:
+            Seconds until next poll, or None if no more polls scheduled
+
+        """
+        if self._next_poll_index >= len(self._scheduled_polls):
+            return None
+
+        next_poll_time = self._scheduled_polls[self._next_poll_index]
+        delay = next_poll_time - elapsed_seconds
+
+        # If delay is negative or very small, next poll is now
+        if delay <= 0:
+            return 0.0
+
+        return delay
+
     def increment_confirmatory_poll(self) -> None:
         """Track that we made a confirmatory poll attempt."""
         self._confirmatory_poll_count += 1

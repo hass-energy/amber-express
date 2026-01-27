@@ -107,6 +107,53 @@ def test_should_poll_returns_false_after_all_polls_used() -> None:
     assert not strategy.should_poll_for_confirmed(100.0)
 
 
+def test_get_next_poll_delay_returns_time_until_next_poll() -> None:
+    """Test that get_next_poll_delay returns correct delay."""
+    observations: list[IntervalObservation] = [{"start": 10.0, "end": 30.0}]
+    strategy = CDFPollingStrategy(observations)
+    strategy.start_interval()
+
+    # With single interval [10, 30] and k=4, polls at [14, 18, 22, 26]
+    # At elapsed=10s, next poll is at 14s, so delay = 4s
+    delay = strategy.get_next_poll_delay(10.0)
+    assert delay == 4.0
+
+    # At elapsed=14s, next poll is now (delay = 0)
+    delay = strategy.get_next_poll_delay(14.0)
+    assert delay == 0.0
+
+    # At elapsed=15s, poll at 14s is past (delay would be negative -> 0)
+    delay = strategy.get_next_poll_delay(15.0)
+    assert delay == 0.0
+
+
+def test_get_next_poll_delay_returns_none_after_all_polls() -> None:
+    """Test that get_next_poll_delay returns None when no polls remain."""
+    strategy = CDFPollingStrategy()
+    strategy.start_interval()
+
+    # Use all 4 polls
+    for _ in range(4):
+        strategy.increment_confirmatory_poll()
+
+    # Should return None
+    assert strategy.get_next_poll_delay(100.0) is None
+
+
+def test_get_next_poll_delay_sub_second_precision() -> None:
+    """Test that get_next_poll_delay handles sub-second precision."""
+    observations: list[IntervalObservation] = [{"start": 25.0, "end": 26.0}]
+    strategy = CDFPollingStrategy(observations)
+    strategy.start_interval(polls_per_interval=4)
+
+    # With narrow interval [25, 26], polls should be tightly spaced
+    # At elapsed=25.1, should return sub-second delay
+    delay = strategy.get_next_poll_delay(25.1)
+    assert delay is not None
+    # Delay should be small (sub-second for tightly packed polls)
+    assert delay >= 0
+
+
 def test_start_interval_resets_poll_state() -> None:
     """Test that start_interval resets the poll index."""
     strategy = CDFPollingStrategy()

@@ -70,6 +70,57 @@ class SmartPollingManager:
             return None
         return remaining
 
+    def check_new_interval(
+        self,
+        *,
+        has_data: bool,
+        rate_limit_info: RateLimitInfo | None = None,
+    ) -> bool:
+        """Check if we've entered a new interval and reset state if so.
+
+        Args:
+            has_data: Whether we have any existing data (for first-run detection)
+            rate_limit_info: Current rate limit quota info (for calculating k)
+
+        Returns:
+            True if this is a new interval (should poll immediately), False otherwise
+
+        """
+        current_interval = self._get_current_5min_interval()
+
+        # Not a new interval
+        if self._current_interval_start == current_interval:
+            return False
+
+        # New interval - reset state
+        is_first_run = not has_data
+        self._current_interval_start = current_interval
+        self._has_confirmed_price = False
+        self._forecasts_pending = False
+        self._poll_count_this_interval = 0
+        self._last_estimate_elapsed = None
+
+        # Calculate optimal k from rate limit info
+        polls_per_interval = None
+        if rate_limit_info:
+            polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
+
+        self._cdf_strategy.start_interval(polls_per_interval)
+
+        if is_first_run:
+            _LOGGER.debug("First poll - fetching initial data")
+        else:
+            # Clear the first-interval flag now that we're in a real new interval
+            self._first_interval_after_startup = False
+            _LOGGER.debug(
+                "New 5-minute interval started: %s (k=%d, scheduled polls: %s)",
+                current_interval,
+                len(self._cdf_strategy.scheduled_polls),
+                [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
+            )
+
+        return True
+
     def should_poll(
         self,
         *,
@@ -88,37 +139,11 @@ class SmartPollingManager:
             True if we should poll now, False otherwise
 
         """
-        current_interval = self._get_current_5min_interval()
-        now = datetime.now(UTC)
-
-        # Reset state if we've moved to a new interval (or first run)
-        if self._current_interval_start != current_interval:
-            is_first_run = not has_data
-            self._current_interval_start = current_interval
-            self._has_confirmed_price = False
-            self._forecasts_pending = False
-            self._poll_count_this_interval = 0
-            self._last_estimate_elapsed = None
-
-            # Calculate optimal k from rate limit info
-            polls_per_interval = None
-            if rate_limit_info:
-                polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
-
-            self._cdf_strategy.start_interval(polls_per_interval)
-
-            if is_first_run:
-                _LOGGER.debug("First poll - fetching initial data")
-            else:
-                # Clear the first-interval flag now that we're in a real new interval
-                self._first_interval_after_startup = False
-                _LOGGER.debug(
-                    "New 5-minute interval started: %s (k=%d, scheduled polls: %s)",
-                    current_interval,
-                    len(self._cdf_strategy.scheduled_polls),
-                    [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
-                )
+        # Check for new interval first
+        if self.check_new_interval(has_data=has_data, rate_limit_info=rate_limit_info):
             return True  # Always poll at start of new interval for estimate
+
+        now = datetime.now(UTC)
 
         # Don't poll if we already have confirmed price (unless forecasts pending)
         if self._has_confirmed_price and not self._forecasts_pending:
@@ -138,6 +163,24 @@ class SmartPollingManager:
             return True
         elapsed = (now - self._current_interval_start).total_seconds()
         return self._cdf_strategy.should_poll_for_confirmed(elapsed)
+
+    def get_next_poll_delay(self) -> float | None:
+        """Get the delay in seconds until the next scheduled poll.
+
+        Returns:
+            Seconds until next poll, or None if no more polls scheduled
+            or we already have confirmed price.
+
+        """
+        if self._has_confirmed_price and not self._forecasts_pending:
+            return None
+
+        if self._current_interval_start is None:
+            return None
+
+        now = datetime.now(UTC)
+        elapsed = (now - self._current_interval_start).total_seconds()
+        return self._cdf_strategy.get_next_poll_delay(elapsed)
 
     def on_poll_started(self) -> None:
         """Record that a poll has started."""

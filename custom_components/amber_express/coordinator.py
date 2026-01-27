@@ -161,6 +161,32 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             rate_limit_info=self._rate_limit_info,
         )
 
+    def check_new_interval(self) -> bool:
+        """Check if we've entered a new interval (for sub-second polling).
+
+        Returns:
+            True if this is a new interval (should poll immediately).
+
+        """
+        return self._polling_manager.check_new_interval(
+            has_data=bool(self.current_data),
+            rate_limit_info=self._rate_limit_info,
+        )
+
+    def get_next_poll_delay(self) -> float | None:
+        """Get the delay in seconds until the next scheduled poll.
+
+        Returns:
+            Seconds until next poll, or None if no more polls scheduled.
+
+        """
+        return self._polling_manager.get_next_poll_delay()
+
+    @property
+    def has_confirmed_price(self) -> bool:
+        """Check if we have a confirmed price for this interval."""
+        return self._polling_manager.has_confirmed_price
+
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from Amber API using smart polling."""
         # Fetch site info on first run (for tariff codes etc.)
