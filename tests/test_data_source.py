@@ -434,3 +434,83 @@ class TestForecastPreservation:
         # Should have new price but preserve existing forecasts
         assert result.data["general"]["price"] == 0.27
         assert result.data["general"]["forecasts"] == forecasts
+
+    def test_forecasts_only_creates_channel_entry(self) -> None:
+        """Test that forecasts without current data still creates channel entry."""
+        merger = DataSourceMerger()
+        forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
+
+        # Polling with only forecasts, no current interval fields
+        merger.update_polling({"general": {"forecasts": forecasts}})
+
+        result = merger.get_merged_data()
+
+        assert "general" in result.data
+        assert result.data["general"]["forecasts"] == forecasts
+
+    def test_websocket_first_then_polling_forecasts(self) -> None:
+        """Test WebSocket price arrives first, then polling brings forecasts."""
+        merger = DataSourceMerger()
+        forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
+
+        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+            # WebSocket arrives first with current price
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            merger.update_websocket({"general": {"price": 0.30}})
+
+            # Polling arrives later with price + forecasts
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
+            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
+
+        result = merger.get_merged_data()
+
+        # Polling is fresher, should use polling price and forecasts
+        assert result.source == DATA_SOURCE_POLLING
+        assert result.data["general"]["price"] == 0.25
+        assert result.data["general"]["forecasts"] == forecasts
+
+    def test_polling_price_websocket_price_polling_forecasts(self) -> None:
+        """Test API price, WebSocket price, then API with forecasts."""
+        merger = DataSourceMerger()
+        forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
+
+        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+            # Initial polling with price only (no forecasts yet)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            merger.update_polling({"general": {"price": 0.25}})
+
+            # WebSocket update with fresher price
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
+            merger.update_websocket({"general": {"price": 0.30}})
+
+            # Later polling brings forecasts (but older price)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
+            merger.update_polling({"general": {"price": 0.27, "forecasts": forecasts}})
+
+        result = merger.get_merged_data()
+
+        # Latest polling is fresher than websocket
+        assert result.source == DATA_SOURCE_POLLING
+        assert result.data["general"]["price"] == 0.27
+        assert result.data["general"]["forecasts"] == forecasts
+
+    def test_websocket_fresher_than_polling_with_forecasts(self) -> None:
+        """Test WebSocket price is used when fresher, but polling forecasts preserved."""
+        merger = DataSourceMerger()
+        forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
+
+        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+            # Polling with price + forecasts
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
+
+            # WebSocket with fresher price (no forecasts)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
+            merger.update_websocket({"general": {"price": 0.30}})
+
+        result = merger.get_merged_data()
+
+        # WebSocket is fresher for current price, but forecasts from polling
+        assert result.source == DATA_SOURCE_WEBSOCKET
+        assert result.data["general"]["price"] == 0.30
+        assert result.data["general"]["forecasts"] == forecasts
