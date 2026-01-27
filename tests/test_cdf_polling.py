@@ -266,3 +266,74 @@ def test_start_interval_none_preserves_previous() -> None:
     # Start new interval with None - should keep 2
     strategy.start_interval(polls_per_interval=None)
     assert len(strategy.scheduled_polls) == 2
+
+
+def test_update_budget_recomputes_schedule() -> None:
+    """Test that update_budget recomputes the schedule mid-interval."""
+    strategy = CDFPollingStrategy()
+
+    # Start with default 4 polls
+    assert len(strategy.scheduled_polls) == 4
+
+    # Update budget to 2 polls at 10 seconds elapsed
+    strategy.update_budget(polls_per_interval=2, elapsed_seconds=10.0)
+
+    # Should now have 2 scheduled polls
+    assert len(strategy.scheduled_polls) == 2
+
+
+def test_update_budget_uses_conditional_cdf() -> None:
+    """Test that update_budget recomputes schedule using conditional P(T | T > elapsed).
+
+    When we update at time t, we know the event hasn't occurred yet, so we sample
+    from the remaining probability mass. All new polls should be after elapsed time.
+    """
+    strategy = CDFPollingStrategy()
+
+    # Cold start schedule: [21, 27, 33, 39] (evenly spaced in [15, 45])
+    strategy.start_interval(polls_per_interval=4)
+    assert strategy.scheduled_polls == [21.0, 27.0, 33.0, 39.0]
+
+    # Update at 25 seconds - now we condition on T > 25
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=25.0)
+
+    # All polls should be > 25s (conditional sampling)
+    assert all(t > 25.0 for t in strategy.scheduled_polls)
+    # Poll index starts at 0 since all polls are in the future
+    assert strategy._next_poll_index == 0
+    # First poll should be shortly after 25s
+    assert strategy.should_poll_for_confirmed(25.0) is False
+    assert strategy.should_poll_for_confirmed(strategy.scheduled_polls[0]) is True
+
+
+def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
+    """Test that conditional sampling concentrates polls in remaining probability mass."""
+    strategy = CDFPollingStrategy()
+    strategy.start_interval(polls_per_interval=4)
+
+    # Original schedule spans [21, 39] within [15, 45] interval
+    original = strategy.scheduled_polls.copy()
+    assert original == [21.0, 27.0, 33.0, 39.0]
+
+    # Update at 30 seconds - half the probability mass is now gone
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=30.0)
+
+    # New schedule should be compressed into [30, 45]
+    # All 4 polls should be evenly distributed in the remaining mass
+    new_schedule = strategy.scheduled_polls
+    assert len(new_schedule) == 4
+    assert all(30.0 < t <= 45.0 for t in new_schedule)
+
+
+def test_update_budget_all_mass_in_past() -> None:
+    """Test update_budget when all probability mass is before elapsed time."""
+    strategy = CDFPollingStrategy()
+    strategy.start_interval(polls_per_interval=4)
+
+    # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0)
+
+    # No remaining mass to sample from - schedule should be empty
+    assert strategy.scheduled_polls == []
+    assert strategy.should_poll_for_confirmed(50.0) is False
+    assert strategy.should_poll_for_confirmed(100.0) is False

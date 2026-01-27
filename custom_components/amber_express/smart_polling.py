@@ -189,6 +189,36 @@ class SmartPollingManager:
         """Clear forecasts pending flag."""
         self._forecasts_pending = False
 
+    def update_budget(self, rate_limit_info: RateLimitInfo) -> None:
+        """Update the poll budget based on new rate limit info.
+
+        Called after each API response to dynamically adjust the schedule
+        based on the current remaining quota.
+
+        Args:
+            rate_limit_info: Current rate limit information from API
+
+        """
+        if self._current_interval_start is None:
+            return
+
+        polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
+        if polls_per_interval is None:
+            return
+
+        now = datetime.now(UTC)
+        elapsed = (now - self._current_interval_start).total_seconds()
+
+        old_schedule = self._cdf_strategy.scheduled_polls.copy()
+        self._cdf_strategy.update_budget(polls_per_interval, elapsed)
+
+        if self._cdf_strategy.scheduled_polls != old_schedule:
+            _LOGGER.debug(
+                "Budget updated: k=%d, schedule: %s",
+                polls_per_interval,
+                [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
+            )
+
     @property
     def has_confirmed_price(self) -> bool:
         """Return whether we have a confirmed price for this interval."""

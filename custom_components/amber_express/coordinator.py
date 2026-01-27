@@ -572,6 +572,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "policy": policy,
         }
 
+        # Dynamically update poll budget based on new remaining quota
+        self._polling_manager.update_budget(self._rate_limit_info)
+
     def get_rate_limit_info(self) -> RateLimitInfo:
         """Get rate limit information from last API response."""
         return self._rate_limit_info

@@ -332,3 +332,21 @@ class TestRateLimitBasedPolling:
             # Should have scheduled 45 polls (k = remaining)
             stats = manager.get_cdf_stats()
             assert len(stats.scheduled_polls) == 45
+
+    def test_update_budget_dynamically_adjusts_schedule(self) -> None:
+        """Test that update_budget dynamically adjusts the schedule mid-interval."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # Start interval with 45 remaining
+            manager.should_poll(has_data=True, rate_limit_info={"remaining": 45})
+            assert len(manager.get_cdf_stats().scheduled_polls) == 45
+
+            # Time passes, budget shrinks to 10
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
+            manager.update_budget({"remaining": 10})
+
+            # Schedule should now have 10 polls
+            assert len(manager.get_cdf_stats().scheduled_polls) == 10

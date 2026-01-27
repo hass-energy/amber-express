@@ -76,6 +76,22 @@ class CDFPollingStrategy:
             # Recompute schedule with new k
             self._compute_poll_schedule()
 
+    def update_budget(self, polls_per_interval: int, elapsed_seconds: float) -> None:
+        """Update the poll budget mid-interval based on new rate limit info.
+
+        Recomputes the schedule using conditional probability - since we know
+        the event hasn't occurred by elapsed_seconds, we sample from P(T | T > t).
+
+        Args:
+            polls_per_interval: New number of confirmatory polls (from remaining quota)
+            elapsed_seconds: Current elapsed time in the interval
+
+        """
+        self._polls_per_interval = max(self.MIN_POLLS_PER_INTERVAL, polls_per_interval)
+        self._compute_poll_schedule(condition_on_elapsed=elapsed_seconds)
+        # All scheduled polls are in the future, start from index 0
+        self._next_poll_index = 0
+
     def record_observation(self, start: float, end: float) -> None:
         """Record a new interval observation and update the CDF.
 
@@ -148,8 +164,14 @@ class CDFPollingStrategy:
             last_observation=self._observations[-1] if self._observations else None,
         )
 
-    def _compute_poll_schedule(self) -> None:
-        """Compute optimal poll times using inverse CDF sampling."""
+    def _compute_poll_schedule(self, condition_on_elapsed: float | None = None) -> None:
+        """Compute optimal poll times using inverse CDF sampling.
+
+        Args:
+            condition_on_elapsed: If provided, compute conditional schedule given
+                that the event hasn't occurred by this time. Uses P(T | T > t).
+
+        """
         if not self._observations:
             self._scheduled_polls = []
             return
@@ -163,7 +185,26 @@ class CDFPollingStrategy:
 
         # Compute poll times via inverse CDF
         k = self._polls_per_interval
-        target_probabilities = [j / (k + 1) for j in range(1, k + 1)]
+
+        if condition_on_elapsed is not None and condition_on_elapsed > 0:
+            # Conditional sampling: we know T > elapsed, so sample from P(T | T > t)
+            # F_conditional(x) = (F(x) - F(t)) / (1 - F(t))
+            # To sample, we need F^-1(F(t) + p * (1 - F(t)))
+            f_elapsed = self._cdf_at(condition_on_elapsed, cdf_points)
+
+            if f_elapsed >= 1.0:
+                # All probability mass is before elapsed - shouldn't happen
+                self._scheduled_polls = []
+                return
+
+            # Map uniform [0,1] targets to conditional targets
+            remaining_mass = 1.0 - f_elapsed
+            target_probabilities = [
+                f_elapsed + (j / (k + 1)) * remaining_mass for j in range(1, k + 1)
+            ]
+        else:
+            # Unconditional sampling
+            target_probabilities = [j / (k + 1) for j in range(1, k + 1)]
 
         self._scheduled_polls = [
             self._inverse_cdf(p, cdf_points) for p in target_probabilities
@@ -220,6 +261,41 @@ class CDFPollingStrategy:
             cdf_points = [(t, p / cumulative) for t, p in cdf_points]
 
         return cdf_points
+
+    def _cdf_at(self, t: float, cdf_points: list[tuple[float, float]]) -> float:
+        """Compute CDF value F(t) at a given time via linear interpolation.
+
+        Args:
+            t: Time to evaluate CDF at
+            cdf_points: List of (time, cumulative_probability) points
+
+        Returns:
+            F(t) - the cumulative probability at time t
+
+        """
+        if not cdf_points:
+            return 0.0
+
+        # Before first point
+        if t <= cdf_points[0][0]:
+            return cdf_points[0][1]
+
+        # After last point
+        if t >= cdf_points[-1][0]:
+            return cdf_points[-1][1]
+
+        # Find segment containing t and interpolate
+        for i in range(len(cdf_points) - 1):
+            t0, p0 = cdf_points[i]
+            t1, p1 = cdf_points[i + 1]
+
+            if t0 <= t <= t1:
+                if t1 == t0:
+                    return p0
+                fraction = (t - t0) / (t1 - t0)
+                return p0 + fraction * (p1 - p0)
+
+        return cdf_points[-1][1]
 
     def _inverse_cdf(
         self, target_p: float, cdf_points: list[tuple[float, float]]
