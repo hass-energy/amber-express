@@ -286,7 +286,11 @@ class TestAmberDataCoordinator:
         mock_channel.tariff = "EA116"
         mock_site.channels = [mock_channel]
 
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=[mock_site])):
+        with patch.object(
+            coordinator.hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=wrap_api_response([mock_site])),
+        ):
             await coordinator._fetch_site_info()
 
             assert coordinator._site_info["id"] == coordinator.site_id
@@ -302,7 +306,11 @@ class TestAmberDataCoordinator:
         # Save initial site info from subentry
         initial_site_info = coordinator._site_info.copy()
 
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=[mock_site])):
+        with patch.object(
+            coordinator.hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=wrap_api_response([mock_site])),
+        ):
             await coordinator._fetch_site_info()
             # Site info should be unchanged from subentry data
             assert coordinator._site_info == initial_site_info

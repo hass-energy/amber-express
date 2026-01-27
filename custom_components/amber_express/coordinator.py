@@ -181,7 +181,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         _LOGGER.debug("Fetching site info for site %s", self.site_id)
 
         try:
-            sites = await self.hass.async_add_executor_job(self._api.get_sites)
+            response = await self.hass.async_add_executor_job(self._api.get_sites_with_http_info)
+            # Parse rate limit headers from successful response
+            self._parse_rate_limit_headers(response.headers)
+            sites = response.data if response.data else []
         except ApiException as err:
             if err.status == HTTP_TOO_MANY_REQUESTS:
                 reset_seconds = self._get_reset_from_error(err)
