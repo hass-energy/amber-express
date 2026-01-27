@@ -333,7 +333,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             elif is_first_poll:
                 _LOGGER.debug("First poll estimate received, waiting for confirmed")
             else:
-                _LOGGER.debug("Subsequent estimate received, ignoring (waiting for confirmed)")
+                _LOGGER.debug("Subsequent estimate ignored (preserving forecasts, polling for confirmed)")
 
     async def _fetch_forecasts(self, resolution: int) -> dict[str, ChannelData] | None:
         """Fetch forecasts. Returns data with forecasts or None on failure."""
