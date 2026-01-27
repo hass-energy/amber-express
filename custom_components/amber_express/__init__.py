@@ -11,7 +11,16 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
-from .const import CONF_API_TOKEN, CONF_ENABLE_WEBSOCKET, CONF_SITE_ID, DEFAULT_ENABLE_WEBSOCKET, SUBENTRY_TYPE_SITE
+from .const import (
+    CONF_API_TOKEN,
+    CONF_ENABLE_WEBSOCKET,
+    CONF_PRICING_MODE,
+    CONF_SITE_ID,
+    DEFAULT_ENABLE_WEBSOCKET,
+    PRICING_MODE_AEMO,
+    PRICING_MODE_APP,
+    SUBENTRY_TYPE_SITE,
+)
 from .coordinator import AmberDataCoordinator
 from .websocket import AmberWebSocketClient
 
@@ -24,7 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 # The coordinator's should_poll() decides when to actually make API calls
 POLL_SECONDS = list(range(0, 60, 1))
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 
 
 @dataclass(slots=True)
@@ -50,6 +59,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> boo
     """Set up Amber Express from a config entry."""
     runtime_data = AmberRuntimeData()
     entry.runtime_data = runtime_data
+
+    # Migrate legacy pricing mode values
+    legacy_pricing_modes = {"aemo": PRICING_MODE_AEMO, "app": PRICING_MODE_APP}
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_SITE:
+            continue
+        current_mode = subentry.data.get(CONF_PRICING_MODE)
+        if current_mode in legacy_pricing_modes:
+            updated_data = dict(subentry.data)
+            updated_data[CONF_PRICING_MODE] = legacy_pricing_modes[current_mode]
+            hass.config_entries.async_update_subentry(entry, subentry, data=updated_data)
 
     # Set up each site subentry
     for subentry in entry.subentries.values():

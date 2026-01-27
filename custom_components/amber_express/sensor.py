@@ -186,8 +186,11 @@ class AmberBaseSensor(CoordinatorEntity[AmberDataCoordinator], SensorEntity):
         self._site_name = subentry.data.get(CONF_SITE_NAME, subentry.title)
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
-        """Get an option from subentry data."""
-        return self._subentry.data.get(key, default)
+        """Get an option from subentry data (reads fresh from config entry)."""
+        subentry = self._entry.subentries.get(self._subentry.subentry_id)
+        if subentry is None:
+            return default
+        return subentry.data.get(key, default)
 
     @property
     def device_info(self) -> DeviceInfo:
