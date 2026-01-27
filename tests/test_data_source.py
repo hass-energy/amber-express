@@ -347,17 +347,21 @@ class TestForecastPreservation:
         with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
             # Polling with forecasts for multiple channels
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({
-                "general": {"price": 0.25, "forecasts": general_forecasts},
-                "feed_in": {"price": 0.10, "forecasts": feed_in_forecasts},
-            })
+            merger.update_polling(
+                {
+                    "general": {"price": 0.25, "forecasts": general_forecasts},
+                    "feed_in": {"price": 0.10, "forecasts": feed_in_forecasts},
+                }
+            )
 
             # Websocket update (no forecasts)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({
-                "general": {"price": 0.30},
-                "feed_in": {"price": 0.12},
-            })
+            merger.update_websocket(
+                {
+                    "general": {"price": 0.30},
+                    "feed_in": {"price": 0.12},
+                }
+            )
 
         result = merger.get_merged_data()
 

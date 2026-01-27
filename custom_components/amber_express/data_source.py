@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from .const import ATTR_FORECASTS, DATA_SOURCE_POLLING, DATA_SOURCE_WEBSOCKET
 from .types import ChannelData
@@ -63,9 +63,7 @@ class DataSourceMerger:
                 self._forecasts_timestamp = now
 
             # Store current interval without forecasts
-            current_only: ChannelData = {
-                k: v for k, v in channel_data.items() if k != ATTR_FORECASTS
-            }
+            current_only = cast("ChannelData", {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS})
             self._polling_current[channel] = current_only
 
     def update_websocket(self, data: dict[str, ChannelData]) -> None:
@@ -143,7 +141,7 @@ class DataSourceMerger:
         """Get the current polling data (with forecasts reattached for compatibility)."""
         result: dict[str, ChannelData] = {}
         for channel, data in self._polling_current.items():
-            result[channel] = dict(data)
+            result[channel] = cast("ChannelData", dict(data))
             if channel in self._forecasts:
                 result[channel][ATTR_FORECASTS] = self._forecasts[channel]
         return result
