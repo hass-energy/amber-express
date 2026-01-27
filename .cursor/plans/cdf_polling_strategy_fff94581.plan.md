@@ -4,19 +4,19 @@ overview: Replace the heuristic `PollingOffsetTracker` with a statistically-opti
 todos:
   - id: cdf-core
     content: Create `cdf_polling.py` with CDFPollingStrategy class and CDF computation logic
-    status: pending
+    status: completed
   - id: cdf-storage
     content: Create `cdf_storage.py` with CDFObservationStore for Home Assistant persistence
-    status: pending
+    status: completed
   - id: integrate
     content: Update `smart_polling.py` and `__init__.py` to use new strategy
-    status: pending
+    status: completed
   - id: cleanup
     content: Delete `polling_offset.py` and update any remaining references
-    status: pending
+    status: completed
   - id: tests
     content: Add unit and integration tests for CDF polling strategy
-    status: pending
+    status: completed
 isProject: false
 ---
 

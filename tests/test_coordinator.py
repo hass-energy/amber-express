@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.amber_express.cdf_storage import CDFObservationStore
 from custom_components.amber_express.const import (
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
@@ -34,6 +35,14 @@ from custom_components.amber_express.const import (
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
 from tests.conftest import wrap_api_response, wrap_interval
+
+
+def create_mock_cdf_store() -> MagicMock:
+    """Create a mock CDFObservationStore for testing."""
+    store = MagicMock(spec=CDFObservationStore)
+    store.async_load = AsyncMock(return_value=None)
+    store.async_save = AsyncMock()
+    return store
 
 
 def create_mock_subentry_for_coordinator(
@@ -67,7 +76,10 @@ class TestAmberDataCoordinator:
     ) -> AmberDataCoordinator:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
-        return AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        return AmberDataCoordinator(
+            hass, mock_config_entry, mock_subentry, cdf_store=mock_cdf_store
+        )
 
     def test_coordinator_init(self, coordinator: AmberDataCoordinator) -> None:
         """Test coordinator initialization."""
@@ -505,7 +517,10 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store
+        )
 
         # Create a confirmed interval (estimate=False)
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -552,7 +567,10 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store
+        )
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -654,7 +672,10 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store
+        )
 
         # Simulate that first poll already happened (estimate received)
         # This makes the next poll a "subsequent" poll that would need separate forecast fetch
@@ -792,7 +813,10 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store
+        )
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -833,7 +857,10 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store
+        )
 
         # Simulate first poll already happened with data
         coordinator._polling_manager._poll_count_this_interval = 1
@@ -882,7 +909,10 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store
+        )
 
         # Create a confirmed interval
         mock_interval = MagicMock(spec=CurrentInterval)

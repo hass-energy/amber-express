@@ -16,6 +16,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import http_sf
 
+from .cdf_polling import CDFPollingStats, IntervalObservation
+from .cdf_storage import CDFObservationStore
 from .const import (
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
@@ -41,7 +43,6 @@ from .const import (
 )
 from .data_source import DataSourceMerger
 from .interval_processor import IntervalProcessor
-from .polling_offset import PollingOffsetStats
 from .rate_limiter import ExponentialBackoffRateLimiter
 from .smart_polling import SmartPollingManager
 from .types import ChannelData, ChannelInfo, CoordinatorData, RateLimitInfo, SiteInfoData, TariffInfoData
@@ -63,6 +64,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         hass: HomeAssistant,
         entry: ConfigEntry,
         subentry: ConfigSubentry,
+        *,
+        cdf_store: CDFObservationStore,
+        observations: list[IntervalObservation] | None = None,
     ) -> None:
         """Initialize the coordinator.
 
@@ -70,6 +74,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             hass: Home Assistant instance.
             entry: Main config entry (contains API token).
             subentry: Site subentry (contains site-specific config).
+            cdf_store: Store for persisting CDF observations.
+            observations: Optional pre-loaded observations from storage.
 
         """
         super().__init__(
@@ -94,8 +100,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         pricing_mode = self._get_subentry_option(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
         self._interval_processor = IntervalProcessor(pricing_mode)
 
-        # Smart polling manager
-        self._polling_manager = SmartPollingManager()
+        # Smart polling manager with CDF strategy
+        self._polling_manager = SmartPollingManager(observations)
+        self._cdf_store = cdf_store
 
         # Exponential backoff for 429 errors
         self._rate_limiter = ExponentialBackoffRateLimiter()
@@ -151,6 +158,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return self._polling_manager.should_poll(
             has_data=bool(self.current_data),
             rate_limit_until=self._rate_limiter.rate_limit_until,
+            rate_limit_info=self._rate_limit_info,
         )
 
     async def _async_update_data(self) -> CoordinatorData:
@@ -320,8 +328,11 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Confirmed price: update and stop polling
         if is_estimate is False:
-            # Record confirmed price for offset tracking
+            # Record observation for CDF strategy
             self._polling_manager.on_confirmed_received()
+
+            # Persist updated observations
+            await self._cdf_store.async_save(self._polling_manager.observations)
 
             # If not first poll, we need to fetch forecasts separately
             if not is_first_poll:
@@ -496,9 +507,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get site information including channels and tariff codes."""
         return self._site_info
 
-    def get_polling_offset_stats(self) -> PollingOffsetStats:
-        """Get polling offset statistics for diagnostics."""
-        return self._polling_manager.get_offset_stats()
+    def get_cdf_polling_stats(self) -> CDFPollingStats:
+        """Get CDF polling statistics for diagnostics."""
+        return self._polling_manager.get_cdf_stats()
 
     def _set_api_status(self, status: int) -> None:
         """Set the last API status code."""

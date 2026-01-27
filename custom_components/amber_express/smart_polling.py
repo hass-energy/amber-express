@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 
-from .polling_offset import PollingOffsetStats, PollingOffsetTracker
+from .cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
+from .types import RateLimitInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,15 +31,22 @@ class SmartPollingManager:
     optimizing for minimal API calls while ensuring timely price updates.
     """
 
-    def __init__(self) -> None:
-        """Initialize the polling manager."""
+    def __init__(
+        self, observations: list[IntervalObservation] | None = None
+    ) -> None:
+        """Initialize the polling manager.
+
+        Args:
+            observations: Optional pre-loaded observations from storage
+
+        """
         self._current_interval_start: datetime | None = None
         self._has_confirmed_price = False
         self._poll_count_this_interval = 0
         self._first_interval_after_startup = True
         self._last_estimate_elapsed: float | None = None
         self._forecasts_pending = False
-        self._offset_tracker = PollingOffsetTracker()
+        self._cdf_strategy = CDFPollingStrategy(observations)
 
     def _get_current_5min_interval(self) -> datetime:
         """Get the start of the current 5-minute interval."""
@@ -47,17 +55,34 @@ class SmartPollingManager:
         minutes = (now.minute // 5) * 5
         return now.replace(minute=minutes, second=0, microsecond=0)
 
+    def _calculate_polls_per_interval(self, rate_limit_info: RateLimitInfo) -> int | None:
+        """Calculate polls per interval based on rate limit quota.
+
+        Args:
+            rate_limit_info: Current rate limit information from API
+
+        Returns:
+            Number of confirmatory polls (equals remaining quota), or None if unavailable
+
+        """
+        remaining = rate_limit_info.get("remaining")
+        if remaining is None:
+            return None
+        return remaining
+
     def should_poll(
         self,
         *,
         has_data: bool,
         rate_limit_until: datetime | None = None,
+        rate_limit_info: RateLimitInfo | None = None,
     ) -> bool:
-        """Determine if we should poll using smart offset-based polling.
+        """Determine if we should poll using smart CDF-based polling.
 
         Args:
             has_data: Whether we have any existing data (for first-run detection)
             rate_limit_until: When rate limit expires (None if not limited)
+            rate_limit_info: Current rate limit quota info (for calculating k)
 
         Returns:
             True if we should poll now, False otherwise
@@ -74,7 +99,13 @@ class SmartPollingManager:
             self._forecasts_pending = False
             self._poll_count_this_interval = 0
             self._last_estimate_elapsed = None
-            self._offset_tracker.start_interval()
+
+            # Calculate optimal k from rate limit info
+            polls_per_interval = None
+            if rate_limit_info:
+                polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
+
+            self._cdf_strategy.start_interval(polls_per_interval)
 
             if is_first_run:
                 _LOGGER.debug("First poll - fetching initial data")
@@ -82,9 +113,10 @@ class SmartPollingManager:
                 # Clear the first-interval flag now that we're in a real new interval
                 self._first_interval_after_startup = False
                 _LOGGER.debug(
-                    "New 5-minute interval started: %s (offset=%.1fs)",
+                    "New 5-minute interval started: %s (k=%d, scheduled polls: %s)",
                     current_interval,
-                    self._offset_tracker.offset,
+                    len(self._cdf_strategy.scheduled_polls),
+                    [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
                 )
             return True  # Always poll at start of new interval for estimate
 
@@ -100,12 +132,12 @@ class SmartPollingManager:
         if self._forecasts_pending:
             return True
 
-        # Use offset tracker for confirmatory polling
+        # Use CDF strategy for confirmatory polling
         if self._current_interval_start is None:
             # Should never happen - _current_interval_start is set when interval changes
             return True
         elapsed = (now - self._current_interval_start).total_seconds()
-        return self._offset_tracker.should_poll_for_confirmed(elapsed)
+        return self._cdf_strategy.should_poll_for_confirmed(elapsed)
 
     def on_poll_started(self) -> None:
         """Record that a poll has started."""
@@ -113,7 +145,7 @@ class SmartPollingManager:
 
         # Track confirmatory polls (polls after the first estimate poll)
         if self._poll_count_this_interval > 1:
-            self._offset_tracker.increment_confirmatory_poll()
+            self._cdf_strategy.increment_confirmatory_poll()
 
     def on_estimate_received(self) -> None:
         """Record that an estimated price was received."""
@@ -122,25 +154,32 @@ class SmartPollingManager:
             self._last_estimate_elapsed = (now - self._current_interval_start).total_seconds()
 
     def on_confirmed_received(self) -> None:
-        """Record that a confirmed price was received and adjust offset."""
+        """Record that a confirmed price was received and record observation."""
         self._has_confirmed_price = True
 
-        # Record for offset tracking (skip first interval after startup if no estimate seen)
+        # Record observation (skip first interval after startup if no estimate seen)
         if self._current_interval_start is not None and not self._first_interval_after_startup:
             now = datetime.now(UTC)
             confirmed_elapsed = (now - self._current_interval_start).total_seconds()
-            self._offset_tracker.record_confirmed(
-                last_estimate_elapsed=self._last_estimate_elapsed,
-                confirmed_elapsed=confirmed_elapsed,
-            )
-            _LOGGER.debug(
-                "Confirmed at %.1fs (last estimate at %s), new offset: %ds",
-                confirmed_elapsed,
-                f"{self._last_estimate_elapsed:.1f}s" if self._last_estimate_elapsed else "N/A",
-                self._offset_tracker.offset,
-            )
+
+            if self._last_estimate_elapsed is not None:
+                self._cdf_strategy.record_observation(
+                    start=self._last_estimate_elapsed,
+                    end=confirmed_elapsed,
+                )
+                _LOGGER.debug(
+                    "Recorded observation [%.1fs, %.1fs], next polls: %s",
+                    self._last_estimate_elapsed,
+                    confirmed_elapsed,
+                    [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
+                )
+            else:
+                _LOGGER.debug(
+                    "Confirmed at %.1fs but no estimate seen, skipping observation",
+                    confirmed_elapsed,
+                )
         elif self._first_interval_after_startup:
-            _LOGGER.debug("Skipping offset adjustment on first interval after startup")
+            _LOGGER.debug("Skipping observation on first interval after startup")
 
     def set_forecasts_pending(self) -> None:
         """Mark forecasts as pending retry."""
@@ -170,9 +209,14 @@ class SmartPollingManager:
         """Return whether this is the first interval after startup."""
         return self._first_interval_after_startup
 
-    def get_offset_stats(self) -> PollingOffsetStats:
-        """Get polling offset statistics for diagnostics."""
-        return self._offset_tracker.get_stats()
+    def get_cdf_stats(self) -> CDFPollingStats:
+        """Get CDF polling statistics for diagnostics."""
+        return self._cdf_strategy.get_stats()
+
+    @property
+    def observations(self) -> list[IntervalObservation]:
+        """Get current observations for persistence."""
+        return self._cdf_strategy.observations
 
     def get_state(self) -> PollingState:
         """Get current polling state for testing/debugging."""

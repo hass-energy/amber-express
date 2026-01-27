@@ -117,8 +117,8 @@ class TestShouldPoll:
             result = manager.should_poll(has_data=True, rate_limit_until=rate_limit_until)
             assert result is False
 
-    def test_offset_based_polling_after_first_poll(self) -> None:
-        """Test that polling uses offset tracker after first poll."""
+    def test_cdf_scheduled_polling_after_first_poll(self) -> None:
+        """Test that polling uses CDF scheduled times after first poll."""
         manager = SmartPollingManager()
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
@@ -128,13 +128,13 @@ class TestShouldPoll:
             result1 = manager.should_poll(has_data=True)
             assert result1 is True
 
-            # 5 seconds later - before default 15s offset
+            # 5 seconds later - before first scheduled poll at 21s
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
             result2 = manager.should_poll(has_data=True)
             assert result2 is False  # Not yet time
 
-            # 20 seconds later - after default 15s offset, on 5s boundary
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 20, tzinfo=UTC)
+            # 21 seconds - first scheduled poll (cold start: 21, 27, 33, 39)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 21, tzinfo=UTC)
             result3 = manager.should_poll(has_data=True)
             assert result3 is True  # Time to poll
 
@@ -257,17 +257,18 @@ class TestIntervalReset:
             assert manager.first_interval_after_startup is False
 
 
-class TestGetOffsetStats:
-    """Tests for get_offset_stats method."""
+class TestGetCDFStats:
+    """Tests for get_cdf_stats method."""
 
-    def test_returns_offset_tracker_stats(self) -> None:
-        """Test that get_offset_stats returns stats from offset tracker."""
+    def test_returns_cdf_strategy_stats(self) -> None:
+        """Test that get_cdf_stats returns stats from CDF strategy."""
         manager = SmartPollingManager()
 
-        stats = manager.get_offset_stats()
+        stats = manager.get_cdf_stats()
 
-        assert stats.offset == 15  # Default offset
+        assert stats.observation_count == 100  # Cold start synthetic observations
         assert stats.confirmatory_poll_count == 0
+        assert stats.scheduled_polls == [21.0, 27.0, 33.0, 39.0]
 
 
 class TestPollingState:
@@ -290,3 +291,44 @@ class TestPollingState:
         assert state.poll_count_this_interval == 3
         assert state.first_interval_after_startup is False
         assert state.last_estimate_elapsed == 10.5
+
+
+class TestRateLimitBasedPolling:
+    """Tests for rate limit based k calculation."""
+
+    def test_calculate_polls_equals_remaining(self) -> None:
+        """Test k equals remaining from rate limit info."""
+        manager = SmartPollingManager()
+
+        result = manager._calculate_polls_per_interval({"remaining": 45})
+        assert result == 45
+
+        result = manager._calculate_polls_per_interval({"remaining": 5})
+        assert result == 5
+
+        result = manager._calculate_polls_per_interval({"remaining": 1})
+        assert result == 1
+
+    def test_calculate_polls_missing_remaining_returns_none(self) -> None:
+        """Test that missing remaining returns None."""
+        manager = SmartPollingManager()
+
+        assert manager._calculate_polls_per_interval({}) is None
+
+    def test_should_poll_uses_rate_limit_info(self) -> None:
+        """Test that should_poll uses rate limit info for k calculation."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            # First poll with 45 remaining
+            result = manager.should_poll(
+                has_data=True,
+                rate_limit_info={"remaining": 45},
+            )
+            assert result is True
+
+            # Should have scheduled 45 polls (k = remaining)
+            stats = manager.get_cdf_stats()
+            assert len(stats.scheduled_polls) == 45

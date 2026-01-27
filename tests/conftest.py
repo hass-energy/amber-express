@@ -9,6 +9,7 @@ from amberelectric.models import CurrentInterval, ForecastInterval, Interval
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.amber_express.cdf_polling import CDFPollingStats
 from custom_components.amber_express.const import (
     ATTR_DESCRIPTOR,
     ATTR_END_TIME,
@@ -35,7 +36,6 @@ from custom_components.amber_express.const import (
     DOMAIN,
     SUBENTRY_TYPE_SITE,
 )
-from custom_components.amber_express.polling_offset import PollingOffsetStats
 
 # Enable loading of the custom component
 pytest_plugins = "pytest_homeassistant_custom_component"
@@ -300,12 +300,14 @@ def mock_coordinator_with_data(
             "interval_length": 30,
         }
 
-    def get_polling_offset_stats() -> PollingOffsetStats:
-        return PollingOffsetStats(
-            offset=15,
-            last_estimate_elapsed=None,
-            last_confirmed_elapsed=None,
+    def get_cdf_polling_stats() -> CDFPollingStats:
+        return CDFPollingStats(
+            observation_count=100,
+            scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+            next_poll_index=0,
             confirmatory_poll_count=0,
+            polls_per_interval=4,
+            last_observation=None,
         )
 
     def get_api_status() -> int:
@@ -328,7 +330,7 @@ def mock_coordinator_with_data(
     coordinator.get_tariff_info = MagicMock(side_effect=get_tariff_info)
     coordinator.get_active_channels = MagicMock(side_effect=get_active_channels)
     coordinator.get_site_info = MagicMock(side_effect=get_site_info)
-    coordinator.get_polling_offset_stats = MagicMock(side_effect=get_polling_offset_stats)
+    coordinator.get_cdf_polling_stats = MagicMock(side_effect=get_cdf_polling_stats)
     coordinator.get_api_status = MagicMock(side_effect=get_api_status)
     coordinator.get_rate_limit_info = MagicMock(side_effect=get_rate_limit_info)
 

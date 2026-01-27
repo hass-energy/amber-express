@@ -507,22 +507,24 @@ class AmberPollingStatsSensor(AmberBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return the last time-to-confirmed value in seconds."""
-        offset_stats = self.coordinator.get_polling_offset_stats()
-        return offset_stats.last_confirmed_elapsed
+        stats = self.coordinator.get_cdf_polling_stats()
+        if stats.last_observation is not None:
+            return stats.last_observation["end"]
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return polling statistics as attributes."""
-        offset_stats = self.coordinator.get_polling_offset_stats()
+        stats = self.coordinator.get_cdf_polling_stats()
         attrs: dict[str, Any] = {
-            "polling_delay": offset_stats.offset,
-            "poll_count": offset_stats.confirmatory_poll_count + 1,
+            "scheduled_polls": [round(t, 1) for t in stats.scheduled_polls],
+            "poll_count": stats.confirmatory_poll_count + 1,
+            "observation_count": stats.observation_count,
         }
 
-        if offset_stats.last_estimate_elapsed is not None:
-            attrs["last_estimate_elapsed"] = round(offset_stats.last_estimate_elapsed, 1)
-        if offset_stats.last_confirmed_elapsed is not None:
-            attrs["last_confirmed_elapsed"] = round(offset_stats.last_confirmed_elapsed, 1)
+        if stats.last_observation is not None:
+            attrs["last_estimate_elapsed"] = round(stats.last_observation["start"], 1)
+            attrs["last_confirmed_elapsed"] = round(stats.last_observation["end"], 1)
 
         return attrs
 
