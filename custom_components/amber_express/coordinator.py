@@ -567,15 +567,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     def _get_reset_from_error(self, err: ApiException) -> int | None:
         """Extract reset_seconds from ApiException headers."""
-        headers = getattr(err, "headers", None)
-        if not headers:
+        if not err.headers:
             return None
-
-        # HTTPHeaderDict and dict-like objects have .get()
-        reset_str = None
-        if hasattr(headers, "get"):
-            reset_str = headers.get("ratelimit-reset") or headers.get("RateLimit-Reset")
-
+        reset_str = err.headers.get("ratelimit-reset")
         if reset_str:
             with contextlib.suppress(ValueError):
                 return int(reset_str)
