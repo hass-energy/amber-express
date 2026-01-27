@@ -116,6 +116,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get an option from subentry data."""
         return self.subentry.data.get(key, default)
 
+    def update_pricing_mode(self, new_mode: str) -> None:
+        """Update the pricing mode and recreate the interval processor."""
+        self._interval_processor = IntervalProcessor(new_mode)
+
     def _build_site_info_from_subentry(self) -> SiteInfoData:
         """Build initial site info from subentry data."""
         data = self.subentry.data

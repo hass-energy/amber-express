@@ -75,7 +75,13 @@
       "renewables": { "name": "Renewables" },
       "site": { "name": "Site" }
     },
-    "binary_sensor": { "demand_window": { "name": "Demand Window" }, "price_spike": { "name": "Price Spike" } }
+    "binary_sensor": { "demand_window": { "name": "Demand Window" }, "price_spike": { "name": "Price Spike" } },
+    "select": {
+      "pricing_mode": {
+        "name": "Pricing Mode",
+        "state": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
+      }
+    }
   },
   "config_subentries": {
     "site": {
@@ -114,6 +120,7 @@
         "no_sites": "No sites found.",
         "no_sites_available": "No additional sites are available to add.",
         "rate_limited": "Rate limited by Amber API. Please try again later.",
+        "reconfigure_successful": "Site configuration updated successfully.",
         "unknown": "An unexpected error occurred.",
         "use_reconfigure": "To add or remove sites, use the Reconfigure option on the main Amber Electric entry."
       },
