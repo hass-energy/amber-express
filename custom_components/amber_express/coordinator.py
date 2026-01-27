@@ -14,6 +14,7 @@ from amberelectric.rest import ApiException
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+import http_sf
 
 from .const import (
     ATTR_DEMAND_WINDOW,
@@ -517,21 +518,23 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         headers_lower = {k.lower(): v for k, v in headers.items()}
 
-        # Parse ratelimit-policy (e.g., "50;w=300")
+        # Parse ratelimit-policy using RFC 8941 structured fields (e.g., "50;w=300")
         policy = headers_lower.get("ratelimit-policy")
         limit: int | None = None
         window: int | None = None
 
         if policy:
-            # Parse "50;w=300" format
-            parts = policy.split(";")
-            if parts:
-                with contextlib.suppress(ValueError):
-                    limit = int(parts[0].strip())
-                for part in parts[1:]:
-                    if part.strip().startswith("w="):
-                        with contextlib.suppress(ValueError):
-                            window = int(part.strip()[2:])
+            try:
+                result = http_sf.parse(policy.encode(), tltype="item")
+                if isinstance(result, tuple) and len(result) == 2:  # noqa: PLR2004
+                    value, params = result
+                    if isinstance(value, int):
+                        limit = value
+                    w = params.get("w")
+                    if isinstance(w, int):
+                        window = w
+            except http_sf.StructuredFieldError:
+                _LOGGER.debug("Failed to parse RateLimit-Policy header: %s", policy)
 
         # Parse individual headers
         remaining: int | None = None
