@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
@@ -57,7 +57,7 @@ class PricingModeSelect(SelectEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "pricing_mode"
-    _attr_options = [PRICING_MODE_APP, PRICING_MODE_AEMO]
+    _attr_options: ClassVar[list[str]] = [PRICING_MODE_APP, PRICING_MODE_AEMO]
 
     def __init__(
         self,
