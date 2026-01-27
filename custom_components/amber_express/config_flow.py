@@ -41,6 +41,7 @@ from .const import (
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
     PRICING_MODE_AEMO,
+    PRICING_MODE_ALL,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
@@ -635,11 +636,16 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                     vol.Required(
                         CONF_PRICING_MODE,
                         default=current_data.get(CONF_PRICING_MODE, DEFAULT_PRICING_MODE),
-                    ): vol.In(
-                        {
-                            PRICING_MODE_APP: "Advanced Price Predicted (Amber's prediction)",
-                            PRICING_MODE_AEMO: "AEMO (including tariffs)",
-                        }
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": PRICING_MODE_APP, "label": "advanced_price_predicted"},
+                                {"value": PRICING_MODE_AEMO, "label": "per_kwh"},
+                                {"value": PRICING_MODE_ALL, "label": "all"},
+                            ],
+                            translation_key="pricing_mode",
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
                     ),
                     vol.Required(
                         CONF_ENABLE_WEBSOCKET,

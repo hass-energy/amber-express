@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_DEMAND_WINDOW_PRICE,
     DEFAULT_PRICING_MODE,
     DOMAIN,
+    PRICING_MODE_ALL,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
@@ -286,16 +287,35 @@ class AmberPriceSensor(AmberBaseSensor):
         }
 
         # Build simple forecast list for energy optimization tools
-        price_key = self._get_price_key()
+        pricing_mode = self._get_subentry_option(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
         forecasts = self.coordinator.get_forecasts(self._channel)
         forecast_list: list[dict[str, Any]] = []
         demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
         for f in forecasts:
-            value = self._get_price(f, price_key)
-            # Apply demand window price for general channel
-            if value is not None and self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
-                value += demand_window_price
-            forecast_list.append({"time": to_local_iso(f.get(ATTR_START_TIME)), "value": value})
+            time_value = to_local_iso(f.get(ATTR_START_TIME))
+            if pricing_mode == PRICING_MODE_ALL:
+                # Include all price types
+                per_kwh = self._get_price(f, ATTR_PER_KWH)
+                advanced = self._get_price(f, ATTR_ADVANCED_PRICE)
+                # Apply demand window price for general channel
+                if self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
+                    if per_kwh is not None:
+                        per_kwh += demand_window_price
+                    if advanced is not None:
+                        advanced += demand_window_price
+                forecast_list.append(
+                    {
+                        "time": time_value,
+                        ATTR_PER_KWH: per_kwh,
+                        ATTR_ADVANCED_PRICE: advanced,
+                    }
+                )
+            else:
+                # Single price value based on mode
+                value = self._get_price(f, self._get_price_key())
+                if value is not None and self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
+                    value += demand_window_price
+                forecast_list.append({"time": time_value, "value": value})
         attrs["forecast"] = forecast_list
 
         return {k: v for k, v in attrs.items() if v is not None}
