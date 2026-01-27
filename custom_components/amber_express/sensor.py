@@ -559,24 +559,11 @@ class AmberConfirmationLagSensor(AmberBaseSensor):
         super().__init__(coordinator, entry, subentry, None)
         self._attr_unique_id = f"{self._site_id}_confirmation_lag"
         self._attr_translation_key = "confirmation_lag"
-        self._cached_lag: float | None = None
-        self._last_confirmed_elapsed: float | None = None
 
     @property
     def native_value(self) -> float | None:
-        """Return the time gap between estimate and confirmed polls.
-
-        Only updates when a new confirmed price is received.
-        """
-        stats = self.coordinator.get_polling_offset_stats()
-
-        # Only update cached value when a new confirmation occurs
-        if stats.last_confirmed_elapsed != self._last_confirmed_elapsed:
-            self._last_confirmed_elapsed = stats.last_confirmed_elapsed
-            if stats.last_estimate_elapsed is not None and stats.last_confirmed_elapsed is not None:
-                self._cached_lag = stats.last_confirmed_elapsed - stats.last_estimate_elapsed
-
-        return self._cached_lag
+        """Return the time gap between estimate and confirmed polls."""
+        return self.coordinator.get_polling_offset_stats().confirmation_lag
 
 
 class AmberApiStatusSensor(AmberBaseSensor):

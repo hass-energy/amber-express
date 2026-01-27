@@ -14,6 +14,13 @@ class PollingOffsetStats:
     last_confirmed_elapsed: float | None
     confirmatory_poll_count: int
 
+    @property
+    def confirmation_lag(self) -> float | None:
+        """Time gap between estimate and confirmed polls."""
+        if self.last_estimate_elapsed is not None and self.last_confirmed_elapsed is not None:
+            return self.last_confirmed_elapsed - self.last_estimate_elapsed
+        return None
+
 
 class PollingOffsetTracker:
     """Tracks and adjusts polling offset for confirmatory polling.
