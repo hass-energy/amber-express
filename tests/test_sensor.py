@@ -29,6 +29,7 @@ from custom_components.amber_express.sensor import (
     CHANNEL_PRICE_DETAILED_TRANSLATION_KEY,
     CHANNEL_PRICE_TRANSLATION_KEY,
     AmberApiStatusSensor,
+    AmberConfirmationLagSensor,
     AmberDetailedPriceSensor,
     AmberPriceSensor,
     AmberRenewablesSensor,
@@ -664,8 +665,8 @@ class TestAsyncSetupEntry:
 
         # With general and feed_in enabled, we should have:
         # 2 channels x 2 sensors (price, detailed price) = 4
-        # + renewables + site + polling_stats + api_status = 8
-        assert len(added_entities) == 8
+        # + renewables + site + polling_stats + api_status + confirmation_lag = 9
+        assert len(added_entities) == 9
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -701,8 +702,8 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only general channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status = 6
-        assert len(added_entities) == 6
+        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag = 7
+        assert len(added_entities) == 7
 
     async def test_setup_entry_controlled_load_channel(
         self,
@@ -738,8 +739,89 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only controlled load channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status = 6
-        assert len(added_entities) == 6
+        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag = 7
+        assert len(added_entities) == 7
+
+
+class TestAmberConfirmationLagSensor:
+    """Tests for AmberConfirmationLagSensor."""
+
+    def test_confirmation_lag_sensor_init(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test confirmation lag sensor initialization."""
+        sensor = AmberConfirmationLagSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_confirmation_lag"
+        assert sensor._attr_translation_key == "confirmation_lag"
+        assert sensor._attr_native_unit_of_measurement == "s"
+
+    def test_confirmation_lag_sensor_is_diagnostic(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test confirmation lag sensor is a diagnostic entity."""
+        from homeassistant.const import EntityCategory  # noqa: PLC0415
+
+        sensor = AmberConfirmationLagSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_confirmation_lag_sensor_no_observation(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test confirmation lag sensor with no observation returns None."""
+        # Default mock has last_estimate_elapsed=None
+        sensor = AmberConfirmationLagSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
+
+    def test_confirmation_lag_sensor_with_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test confirmation lag sensor calculates gap from observation."""
+        from custom_components.amber_express.polling_offset import PollingOffsetStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_polling_offset_stats = MagicMock(
+            return_value=PollingOffsetStats(
+                offset=15,
+                last_estimate_elapsed=15.0,
+                last_confirmed_elapsed=27.5,
+                confirmatory_poll_count=2,
+            )
+        )
+
+        sensor = AmberConfirmationLagSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        # Lag is confirmed - estimate = 27.5 - 15.0 = 12.5
+        assert sensor.native_value == 12.5
 
 
 class TestChannelTranslationKeys:

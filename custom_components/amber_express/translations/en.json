@@ -66,6 +66,7 @@
     "sensor": {
       "api_status": { "name": "API Status" },
       "confirmation_delay": { "name": "Confirmation Delay" },
+      "confirmation_lag": { "name": "Confirmation Lag" },
       "controlled_load_price": { "name": "Controlled Load Price" },
       "controlled_load_price_detailed": { "name": "Controlled Load Price Detailed" },
       "feed_in_price": { "name": "Feed In Price" },

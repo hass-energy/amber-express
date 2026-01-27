@@ -15,6 +15,9 @@
       "confirmation_delay": {
         "default": "mdi:timer-outline"
       },
+      "confirmation_lag": {
+        "default": "mdi:speedometer"
+      },
       "controlled_load_price": {
         "default": "mdi:clock-outline"
       },
