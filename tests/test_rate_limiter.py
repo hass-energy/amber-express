@@ -195,6 +195,37 @@ class TestRecordRateLimit:
 
         assert limiter.rate_limit_until is not None
 
+    def test_uses_reset_seconds_when_provided(self) -> None:
+        """Test record_rate_limit uses reset_seconds from API when provided."""
+        limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
+
+        limiter.record_rate_limit(reset_seconds=120)
+
+        # Should use reset_seconds + 2 buffer instead of initial_backoff
+        assert limiter.current_backoff == 122
+
+    def test_ignores_invalid_reset_seconds(self) -> None:
+        """Test record_rate_limit falls back to exponential when reset_seconds invalid."""
+        limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
+
+        # None falls back to exponential
+        limiter.record_rate_limit(reset_seconds=None)
+        assert limiter.current_backoff == 10
+
+        # Reset for next test
+        limiter.record_success()
+
+        # Zero falls back to exponential
+        limiter.record_rate_limit(reset_seconds=0)
+        assert limiter.current_backoff == 10
+
+        # Reset for next test
+        limiter.record_success()
+
+        # Negative falls back to exponential
+        limiter.record_rate_limit(reset_seconds=-5)
+        assert limiter.current_backoff == 10
+
 
 class TestBackoffSequence:
     """Tests for complete backoff sequences."""

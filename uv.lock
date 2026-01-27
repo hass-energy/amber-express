@@ -174,6 +174,7 @@ source = { editable = "." }
 dependencies = [
     { name = "amberelectric" },
     { name = "homeassistant" },
+    { name = "http-sf" },
 ]
 
 [package.dev-dependencies]
@@ -191,6 +192,7 @@ dev = [
 requires-dist = [
     { name = "amberelectric", specifier = ">=2.0.12" },
     { name = "homeassistant", specifier = ">=2026.1.1" },
+    { name = "http-sf", specifier = ">=1.1.1" },
 ]
 
 [package.metadata.requires-dev]
@@ -1083,6 +1085,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/42/1f/75e3daab30bcc906489010009384f1ac13aed7023b3c5f36830b6c32274b/homeassistant-2026.1.2.tar.gz", hash = "sha256:b967120a66ab3ad7d821560fcfcc0080ef2dc75e4c25c10fd56bf787c613d312", size = 30231243, upload-time = "2026-01-16T21:49:31.533Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/65/fd/d7eb8fd63de6bd944cd1dc90b4929d1d327280ce68f9f9fe52392333b644/homeassistant-2026.1.2-py3-none-any.whl", hash = "sha256:f9d0b5a7b40153572fdfc1329bf3f3dab493399217498506125f76b092576793", size = 50195006, upload-time = "2026-01-16T21:49:27.314Z" },
+]
+
+[[package]]
+name = "http-sf"
+version = "1.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/63/7d/d245b8d6c3954cb4284cdabee3c3e85aa94f76004c629a9adf8b075dd3f8/http_sf-1.1.1.tar.gz", hash = "sha256:ac8913af250437f21025520c9bc815ee0baea13836074264800463d9a9a3f5c5", size = 20442, upload-time = "2026-01-09T05:04:14.922Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/ae/c849b65f2a52c6036806e6eeb1814d02db82185a811f3b86b1da7276007b/http_sf-1.1.1-py3-none-any.whl", hash = "sha256:33855918c558ee6c1b4d69a7e7aa1f9ae61c8bc4f308b457b0cc4e7a18a0096d", size = 26148, upload-time = "2026-01-09T05:04:13.396Z" },
 ]
 
 [[package]]
