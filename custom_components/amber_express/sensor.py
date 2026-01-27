@@ -558,5 +558,13 @@ class AmberApiStatusSensor(AmberBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return API status details as attributes."""
-        return {"status_code": self.coordinator.get_api_status()}
+        """Return API status details and rate limit info as attributes."""
+        rate_limit = self.coordinator.get_rate_limit_info()
+        return {
+            "status_code": self.coordinator.get_api_status(),
+            "rate_limit_quota": rate_limit.get("limit"),
+            "rate_limit_remaining": rate_limit.get("remaining"),
+            "rate_limit_reset_seconds": rate_limit.get("reset_seconds"),
+            "rate_limit_window_seconds": rate_limit.get("window_seconds"),
+            "rate_limit_policy": rate_limit.get("policy"),
+        }

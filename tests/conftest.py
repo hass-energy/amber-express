@@ -308,6 +308,18 @@ def mock_coordinator_with_data(
             confirmatory_poll_count=0,
         )
 
+    def get_api_status() -> int:
+        return 200
+
+    def get_rate_limit_info() -> dict:
+        return {
+            "limit": 50,
+            "remaining": 45,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
+
     coordinator.get_channel_data = MagicMock(side_effect=get_channel_data)
     coordinator.get_forecasts = MagicMock(side_effect=get_forecasts)
     coordinator.get_renewables = MagicMock(side_effect=get_renewables)
@@ -317,6 +329,8 @@ def mock_coordinator_with_data(
     coordinator.get_active_channels = MagicMock(side_effect=get_active_channels)
     coordinator.get_site_info = MagicMock(side_effect=get_site_info)
     coordinator.get_polling_offset_stats = MagicMock(side_effect=get_polling_offset_stats)
+    coordinator.get_api_status = MagicMock(side_effect=get_api_status)
+    coordinator.get_rate_limit_info = MagicMock(side_effect=get_rate_limit_info)
 
     return coordinator
 
@@ -326,6 +340,32 @@ def wrap_interval(inner: MagicMock) -> MagicMock:
     wrapper = MagicMock(spec=Interval)
     wrapper.actual_instance = inner
     return wrapper
+
+
+class MockApiResponse:
+    """Mock ApiResponse for testing get_current_prices_with_http_info."""
+
+    def __init__(
+        self,
+        data: list,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Initialize mock API response."""
+        self.data = data
+        self.headers = headers or {
+            "ratelimit-policy": "50;w=300",
+            "ratelimit-limit": "50",
+            "ratelimit-remaining": "49",
+            "ratelimit-reset": "300",
+        }
+
+
+def wrap_api_response(
+    intervals: list,
+    headers: dict[str, str] | None = None,
+) -> MockApiResponse:
+    """Wrap intervals in a mock ApiResponse for testing."""
+    return MockApiResponse(intervals, headers)
 
 
 @pytest.fixture

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from http import HTTPStatus
 import logging
 from typing import Any
@@ -42,7 +43,7 @@ from .interval_processor import IntervalProcessor
 from .polling_offset import PollingOffsetStats
 from .rate_limiter import ExponentialBackoffRateLimiter
 from .smart_polling import SmartPollingManager
-from .types import ChannelData, ChannelInfo, CoordinatorData, SiteInfoData, TariffInfoData
+from .types import ChannelData, ChannelInfo, CoordinatorData, RateLimitInfo, SiteInfoData, TariffInfoData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +112,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # API status tracking (OK = 200, error codes otherwise)
         self._last_api_status: int = HTTPStatus.OK
+
+        # Rate limit info from API response headers
+        self._rate_limit_info: RateLimitInfo = {}
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
@@ -252,17 +256,24 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         next_intervals = FORECAST_INTERVALS if is_first_poll else 0
 
         try:
-            intervals = await self.hass.async_add_executor_job(
-                lambda: self._api.get_current_prices(
+            response = await self.hass.async_add_executor_job(
+                lambda: self._api.get_current_prices_with_http_info(
                     self.site_id,
                     next=next_intervals,
                     previous=0,
                     resolution=resolution,
                 )
             )
+            # Parse rate limit headers from successful response
+            self._parse_rate_limit_headers(response.headers)
             # Reset backoff and record success
             self._rate_limiter.record_success()
             self._set_api_status(HTTPStatus.OK)
+
+            if response.data is None:
+                _LOGGER.debug("API returned no data")
+                return
+            intervals = response.data
         except ApiException as err:
             if err.status is not None:
                 self._set_api_status(err.status)
@@ -327,16 +338,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _fetch_forecasts(self, resolution: int) -> dict[str, ChannelData] | None:
         """Fetch forecasts. Returns data with forecasts or None on failure."""
         try:
-            intervals_with_forecasts = await self.hass.async_add_executor_job(
-                lambda: self._api.get_current_prices(
+            response = await self.hass.async_add_executor_job(
+                lambda: self._api.get_current_prices_with_http_info(
                     self.site_id,
                     next=FORECAST_INTERVALS,
                     previous=0,
                     resolution=resolution,
                 )
             )
-            data = self._interval_processor.process_intervals(intervals_with_forecasts)
+            # Parse rate limit headers from successful response
+            self._parse_rate_limit_headers(response.headers)
             self._set_api_status(HTTPStatus.OK)
+
+            if response.data is None:
+                _LOGGER.debug("API returned no forecast data")
+                return None
+            data = self._interval_processor.process_intervals(response.data)
             _LOGGER.debug("Fetched %d forecast intervals", FORECAST_INTERVALS)
             return data
         except ApiException as err:
@@ -477,3 +494,58 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def get_api_status(self) -> int:
         """Get last API status code (200 = OK)."""
         return self._last_api_status
+
+    def _parse_rate_limit_headers(self, headers: dict[str, str] | None) -> None:
+        """Parse IETF RateLimit headers from API response.
+
+        See: https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/
+        """
+        if not headers:
+            return
+
+        headers_lower = {k.lower(): v for k, v in headers.items()}
+
+        # Parse ratelimit-policy (e.g., "50;w=300")
+        policy = headers_lower.get("ratelimit-policy")
+        limit: int | None = None
+        window: int | None = None
+
+        if policy:
+            # Parse "50;w=300" format
+            parts = policy.split(";")
+            if parts:
+                with contextlib.suppress(ValueError):
+                    limit = int(parts[0].strip())
+                for part in parts[1:]:
+                    if part.strip().startswith("w="):
+                        with contextlib.suppress(ValueError):
+                            window = int(part.strip()[2:])
+
+        # Parse individual headers
+        remaining: int | None = None
+        reset: int | None = None
+
+        if "ratelimit-remaining" in headers_lower:
+            with contextlib.suppress(ValueError):
+                remaining = int(headers_lower["ratelimit-remaining"])
+
+        if "ratelimit-reset" in headers_lower:
+            with contextlib.suppress(ValueError):
+                reset = int(headers_lower["ratelimit-reset"])
+
+        # Also check ratelimit-limit header (may override policy)
+        if "ratelimit-limit" in headers_lower:
+            with contextlib.suppress(ValueError):
+                limit = int(headers_lower["ratelimit-limit"])
+
+        self._rate_limit_info = {
+            "limit": limit,
+            "remaining": remaining,
+            "reset_seconds": reset,
+            "window_seconds": window,
+            "policy": policy,
+        }
+
+    def get_rate_limit_info(self) -> RateLimitInfo:
+        """Get rate limit information from last API response."""
+        return self._rate_limit_info

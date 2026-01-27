@@ -33,7 +33,7 @@ from custom_components.amber_express.const import (
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
-from tests.conftest import wrap_interval
+from tests.conftest import wrap_api_response, wrap_interval
 
 
 def create_mock_subentry_for_coordinator(
@@ -379,7 +379,8 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=[wrapped])):
+        mock_response = wrap_api_response([wrapped])
+        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=mock_response)):
             result = await coordinator._fetch_forecasts(30)
             assert result is not None
 
@@ -503,12 +504,13 @@ class TestAmberDataCoordinator:
 
         wrapped = wrap_interval(mock_interval)
         mock_forecast_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.26, ATTR_FORECASTS: []}}
+        mock_response = wrap_api_response([wrapped])
 
         with (
             patch.object(
                 coordinator.hass,
                 "async_add_executor_job",
-                new=AsyncMock(return_value=[wrapped]),
+                new=AsyncMock(return_value=mock_response),
             ),
             patch.object(coordinator, "_fetch_forecasts", new=AsyncMock(return_value=mock_forecast_data)),
         ):
@@ -547,10 +549,11 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=[wrapped]),
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
 
@@ -575,10 +578,11 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=[wrapped]),
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
 
@@ -606,10 +610,11 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=[wrapped]),
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
 
@@ -652,11 +657,12 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with (
             patch.object(
                 coordinator.hass,
                 "async_add_executor_job",
-                new=AsyncMock(return_value=[wrapped]),
+                new=AsyncMock(return_value=mock_response),
             ),
             patch.object(coordinator, "_fetch_forecasts", new=AsyncMock(return_value=None)),  # Forecasts fail
         ):
@@ -694,7 +700,8 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=[wrapped])):
+        mock_response = wrap_api_response([wrapped])
+        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=mock_response)):
             result = await coordinator._fetch_forecasts(30)
             assert result is not None
             # API status should be 200
@@ -729,10 +736,11 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=[wrapped]),
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
             # API status should be 200
@@ -781,10 +789,11 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=[wrapped]),
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
 
@@ -828,10 +837,11 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=[wrapped]),
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
 
@@ -870,11 +880,12 @@ class TestAmberDataCoordinator:
         mock_interval.renewables = None
 
         wrapped = wrap_interval(mock_interval)
+        mock_response = wrap_api_response([wrapped])
         with (
             patch.object(
                 coordinator.hass,
                 "async_add_executor_job",
-                new=AsyncMock(return_value=[wrapped]),
+                new=AsyncMock(return_value=mock_response),
             ),
             patch.object(coordinator, "_fetch_forecasts", new=AsyncMock()) as mock_fetch_forecasts,
         ):
