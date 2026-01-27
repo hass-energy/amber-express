@@ -565,13 +565,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if not headers:
             return None
 
-        # Headers from ApiException are a list of tuples or dict
-        if isinstance(headers, dict):
-            reset_str = headers.get("ratelimit-reset") or headers.get("Ratelimit-Reset")
-        else:
-            # List of tuples
-            headers_dict = {k.lower(): v for k, v in headers}
-            reset_str = headers_dict.get("ratelimit-reset")
+        # HTTPHeaderDict and dict-like objects have .get()
+        reset_str = None
+        if hasattr(headers, "get"):
+            reset_str = headers.get("ratelimit-reset") or headers.get("RateLimit-Reset")
 
         if reset_str:
             with contextlib.suppress(ValueError):
