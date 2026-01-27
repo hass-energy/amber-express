@@ -165,6 +165,15 @@ def _add_site_sensors(
             )
         )
 
+        # Confirmation lag sensor
+        entities.append(
+            AmberConfirmationLagSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
 
 class AmberBaseSensor(CoordinatorEntity[AmberDataCoordinator], SensorEntity):
     """Base class for Amber Express sensors."""
@@ -527,6 +536,39 @@ class AmberPollingStatsSensor(AmberBaseSensor):
             attrs["last_confirmed_elapsed"] = round(stats.last_observation["end"], 1)
 
         return attrs
+
+
+class AmberConfirmationLagSensor(AmberBaseSensor):
+    """Sensor for time gap between estimate poll and confirmed poll.
+
+    This represents the maximum time the confirmed price could have been
+    detected earlier - the gap during which confirmation actually occurred.
+    Only updates when a new confirmed price is received.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "s"
+    _attr_suggested_display_precision = 1
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the confirmation lag sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_confirmation_lag"
+        self._attr_translation_key = "confirmation_lag"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the time gap between estimate and confirmed polls."""
+        stats = self.coordinator.get_cdf_polling_stats()
+        if stats.last_observation is not None:
+            return stats.last_observation["end"] - stats.last_observation["start"]
+        return None
 
 
 class AmberApiStatusSensor(AmberBaseSensor):
