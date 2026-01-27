@@ -120,6 +120,7 @@
         "no_sites": "No sites found.",
         "no_sites_available": "No additional sites are available to add.",
         "rate_limited": "Rate limited by Amber API. Please try again later.",
+        "reconfigure_successful": "Site configuration updated successfully.",
         "unknown": "An unexpected error occurred.",
         "use_reconfigure": "To add or remove sites, use the Reconfigure option on the main Amber Electric entry."
       },
