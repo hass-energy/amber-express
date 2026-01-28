@@ -385,17 +385,22 @@ def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
 
 
 def test_update_budget_all_mass_in_past() -> None:
-    """Test update_budget when all probability mass is before elapsed time."""
+    """Test update_budget when all probability mass is before elapsed time.
+
+    When targeted CDF mass is all in the past but k is low enough for blending,
+    falls back to pure uniform distribution from elapsed to reset time.
+    """
     strategy = CDFPollingStrategy()
     strategy.start_interval(polls_per_interval=4)
 
     # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
+    # With k=4 (below K_LOW=10), w=0 so we use pure uniform from 50 to 300 (50+250)
     strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0, reset_seconds=250)
 
-    # No remaining mass to sample from - schedule should be empty
-    assert strategy.scheduled_polls == []
-    assert strategy.should_poll_for_confirmed(50.0) is False
-    assert strategy.should_poll_for_confirmed(100.0) is False
+    # Falls back to uniform: polls at 50 + [1/5, 2/5, 3/5, 4/5] * 250 = [100, 150, 200, 250]
+    assert strategy.scheduled_polls == [100.0, 150.0, 200.0, 250.0]
+    assert strategy.should_poll_for_confirmed(50.0) is False  # Before first poll
+    assert strategy.should_poll_for_confirmed(100.0) is True  # First poll time
 
 
 def test_empty_observations_list() -> None:

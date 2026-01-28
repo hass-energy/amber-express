@@ -99,6 +99,7 @@ Quantile blending interpolates poll *times* directly rather than blending probab
            self._scheduled_polls[i] = w * t_targeted + (1-w) * t_uniform
    ```
 
+
 ## Changes to [`smart_polling.py`](custom_components/amber_express/smart_polling.py)
 
 1. **Pass reset_seconds** to `CDFPollingStrategy.update_budget()`:

@@ -248,6 +248,10 @@ class CDFPollingStrategy:
         # Compute poll times via inverse CDF
         k = self._polls_per_interval
 
+        # Compute blend weight early - we may need pure uniform fallback
+        w = self._compute_blend_weight(k)
+        uniform_start = condition_on_elapsed if condition_on_elapsed else 0.0
+
         if condition_on_elapsed is not None and condition_on_elapsed > 0:
             # Conditional sampling: we know T > elapsed, so sample from P(T | T > t)
             # F_conditional(x) = (F(x) - F(t)) / (1 - F(t))
@@ -255,8 +259,13 @@ class CDFPollingStrategy:
             f_elapsed = self._cdf_at(condition_on_elapsed, cdf_points)
 
             if f_elapsed >= 1.0:
-                # All probability mass is before elapsed - shouldn't happen
-                self._scheduled_polls = []
+                # All probability mass is before elapsed - use pure uniform if blending enabled
+                if w < 1.0 and reset_seconds is not None:
+                    uniform_end = uniform_start + reset_seconds
+                    uniform_probs = [j / (k + 1) for j in range(1, k + 1)]
+                    self._scheduled_polls = [uniform_start + p * (uniform_end - uniform_start) for p in uniform_probs]
+                else:
+                    self._scheduled_polls = []
                 return
 
             # Map uniform [0,1] targets to conditional targets
@@ -269,16 +278,12 @@ class CDFPollingStrategy:
         # Compute targeted poll times from CDF
         targeted_polls = [self._inverse_cdf(p, cdf_points) for p in target_probabilities]
 
-        # Apply quantile blending if we have reset_seconds and weight < 1
-        w = self._compute_blend_weight(k)
-
         if w >= 1.0 or reset_seconds is None:
             # Pure targeted CDF (no blending needed)
             self._scheduled_polls = targeted_polls
         else:
             # Blend targeted with uniform distribution
             # Uniform spans from elapsed to reset time
-            uniform_start = condition_on_elapsed if condition_on_elapsed else 0.0
             uniform_end = uniform_start + reset_seconds
 
             # For uniform CDF, quantile p maps to: start + p * (end - start)

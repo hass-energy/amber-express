@@ -384,11 +384,9 @@ def mock_coordinator_with_data(
     return coordinator
 
 
-def wrap_interval(inner: MagicMock) -> MagicMock:
+def wrap_interval(inner: CurrentInterval | ForecastInterval) -> Interval:
     """Wrap an interval in an Interval wrapper for testing."""
-    wrapper = MagicMock(spec=Interval)
-    wrapper.actual_instance = inner
-    return wrapper
+    return Interval(actual_instance=inner)
 
 
 class MockApiResponse:
