@@ -24,25 +24,34 @@ class AdvancedPriceData(TypedDict, total=False):
 class ChannelData(TypedDict, total=False):
     """Per-channel price data in internal format.
 
-    Also used for forecast entries - each forecast contains the same
-    fields as a current interval (except nested forecasts).
+    Required fields (always present when the dict has interval data):
+    - per_kwh, spot_per_kwh, start_time, end_time, nem_time
+    - renewables, descriptor, spike_status, estimate
+
+    Optional fields (only present when SDK provides them):
+    - advanced_price_predicted, demand_window, tariff_period, tariff_season, tariff_block
+    - forecasts (only on top-level channel entries, not forecast items)
+
+    Note: total=False allows incremental building and partial dicts (e.g., forecasts-only).
     """
 
-    per_kwh: float | None
-    spot_per_kwh: float | None
-    start_time: str | None
-    end_time: str | None
-    nem_time: str | None
-    renewables: float | None
-    descriptor: str | None
-    spike_status: str | None
-    estimate: bool | None
+    # Required fields (SDK guarantees these values when interval data exists)
+    per_kwh: float
+    spot_per_kwh: float
+    start_time: str
+    end_time: str
+    nem_time: str
+    renewables: float
+    descriptor: str
+    spike_status: str
+    estimate: bool
+
+    # Optional fields (from SDK optional fields)
     advanced_price_predicted: AdvancedPriceData
-    demand_window: bool | None
-    tariff_period: str | None
-    tariff_season: str | None
-    tariff_block: float | None
-    # Forecasts are ChannelData without nested forecasts
+    demand_window: bool
+    tariff_period: str
+    tariff_season: str
+    tariff_block: float
     forecasts: list[dict]
 
 

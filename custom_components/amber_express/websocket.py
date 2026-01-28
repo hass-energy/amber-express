@@ -309,11 +309,11 @@ class AmberWebSocketClient:
     def _extract_channel_data(self, interval: CurrentInterval) -> ChannelData:
         """Extract data from a parsed CurrentInterval object."""
         result: ChannelData = {
-            ATTR_PER_KWH: cents_to_dollars(interval.per_kwh),
-            ATTR_SPOT_PER_KWH: cents_to_dollars(interval.spot_per_kwh),
+            ATTR_PER_KWH: cents_to_dollars(interval.per_kwh),  # type: ignore[typeddict-item]
+            ATTR_SPOT_PER_KWH: cents_to_dollars(interval.spot_per_kwh),  # type: ignore[typeddict-item]
             ATTR_START_TIME: interval.start_time.isoformat(),
             ATTR_END_TIME: interval.end_time.isoformat(),
-            ATTR_NEM_TIME: interval.nem_time.isoformat() if interval.nem_time else None,
+            ATTR_NEM_TIME: interval.nem_time.isoformat(),
             ATTR_RENEWABLES: interval.renewables,
             ATTR_DESCRIPTOR: interval.descriptor.value,
             ATTR_SPIKE_STATUS: interval.spike_status.value,

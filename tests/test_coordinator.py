@@ -435,8 +435,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_forecast_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.26, ATTR_FORECASTS: []}}
@@ -483,8 +483,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
@@ -512,8 +512,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="feedIn")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
@@ -544,8 +544,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
@@ -593,8 +593,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
@@ -650,8 +650,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
@@ -700,8 +700,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
@@ -745,8 +745,8 @@ class TestAmberDataCoordinator:
         mock_interval.channel_type = MagicMock(value="general")
         mock_interval.advanced_price = None
         mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
+        mock_interval.nem_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        mock_interval.renewables = 45.0
 
         wrapped = wrap_interval(mock_interval)
         mock_response = wrap_api_response([wrapped])
