@@ -12,7 +12,6 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_change
 
-from .cdf_storage import CDFObservationStore
 from .const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
@@ -99,12 +98,8 @@ async def _setup_site(
     """Set up a single site from a subentry."""
     subentry_id = subentry.subentry_id
 
-    # Create and load CDF observation store
-    cdf_store = CDFObservationStore(hass, subentry_id)
-    observations = await cdf_store.async_load()
-
     # Create the data coordinator for this site
-    coordinator = AmberDataCoordinator(hass, entry, subentry, cdf_store=cdf_store, observations=observations)
+    coordinator = AmberDataCoordinator(hass, entry, subentry)
 
     # Create WebSocket client if enabled
     websocket_enabled = subentry.data.get(CONF_ENABLE_WEBSOCKET, DEFAULT_ENABLE_WEBSOCKET)

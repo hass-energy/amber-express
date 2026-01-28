@@ -17,7 +17,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 import http_sf
 
 from .cdf_polling import CDFPollingStats, IntervalObservation
-from .cdf_storage import CDFObservationStore
 from .const import (
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
@@ -65,7 +64,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         entry: ConfigEntry,
         subentry: ConfigSubentry,
         *,
-        cdf_store: CDFObservationStore,
         observations: list[IntervalObservation] | None = None,
     ) -> None:
         """Initialize the coordinator.
@@ -74,8 +72,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             hass: Home Assistant instance.
             entry: Main config entry (contains API token).
             subentry: Site subentry (contains site-specific config).
-            cdf_store: Store for persisting CDF observations.
-            observations: Optional pre-loaded observations from storage.
+            observations: Optional pre-loaded observations.
 
         """
         super().__init__(
@@ -102,7 +99,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Smart polling manager with CDF strategy
         self._polling_manager = SmartPollingManager(observations)
-        self._cdf_store = cdf_store
 
         # Exponential backoff for 429 errors
         self._rate_limiter = ExponentialBackoffRateLimiter()
@@ -365,9 +361,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if is_estimate is False:
             # Record observation for CDF strategy
             self._polling_manager.on_confirmed_received()
-
-            # Persist updated observations
-            await self._cdf_store.async_save(self._polling_manager.observations)
 
             # If not first poll, we need to fetch forecasts separately
             if not is_first_poll:
