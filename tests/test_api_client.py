@@ -16,7 +16,7 @@ from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.amber_express.api_client import AmberApiClient, FetchResult
+from custom_components.amber_express.api_client import AmberApiClient, AmberApiError, RateLimitedError
 from custom_components.amber_express.rate_limiter import ExponentialBackoffRateLimiter
 
 
@@ -103,21 +103,22 @@ class TestAmberApiClient:
             assert result == []
 
     async def test_fetch_sites_api_exception(self, api_client: AmberApiClient) -> None:
-        """Test site fetch with API exception."""
+        """Test site fetch with API exception raises AmberApiError."""
         with patch.object(
             api_client._hass,
             "async_add_executor_job",
             new=AsyncMock(side_effect=ApiException(status=500)),
         ):
-            result = await api_client.fetch_sites()
+            with pytest.raises(AmberApiError) as exc_info:
+                await api_client.fetch_sites()
 
-            assert result is None
+            assert exc_info.value.status == 500
             assert api_client.last_status == 500
 
     async def test_fetch_sites_rate_limited(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
-        """Test site fetch with rate limiting."""
+        """Test site fetch with rate limiting raises RateLimitedError."""
         err = ApiException(status=429)
         err.headers = {"ratelimit-reset": "60"}
 
@@ -126,9 +127,10 @@ class TestAmberApiClient:
             "async_add_executor_job",
             new=AsyncMock(side_effect=err),
         ):
-            result = await api_client.fetch_sites()
+            with pytest.raises(RateLimitedError) as exc_info:
+                await api_client.fetch_sites()
 
-            assert result is None
+            assert exc_info.value.reset_seconds == 60
             assert api_client.last_status == 429
             assert rate_limiter.is_limited() is True
 
@@ -146,11 +148,8 @@ class TestAmberApiClient:
         ):
             result = await api_client.fetch_current_prices("test_site")
 
-            assert isinstance(result, FetchResult)
-            assert result.intervals is not None
-            assert len(result.intervals) == 1
-            assert result.status == HTTPStatus.OK
-            assert result.rate_limited is False
+            assert len(result) == 1
+            assert api_client.last_status == HTTPStatus.OK
             assert api_client.rate_limit_info.get("remaining") == 45
 
     async def test_fetch_current_prices_with_forecasts(self, api_client: AmberApiClient) -> None:
@@ -167,34 +166,30 @@ class TestAmberApiClient:
         ):
             result = await api_client.fetch_current_prices("test_site", next_intervals=9, resolution=30)
 
-            assert result.intervals is not None
-            assert len(result.intervals) == 10
+            assert len(result) == 10
 
     async def test_fetch_current_prices_rate_limited_backoff(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
-        """Test price fetch when already in rate limit backoff."""
+        """Test price fetch when already in rate limit backoff raises RateLimitedError."""
         # Put rate limiter into backoff mode
         rate_limiter.record_rate_limit(60)
 
-        result = await api_client.fetch_current_prices("test_site")
-
-        assert result.intervals is None
-        assert result.status == 429
-        assert result.rate_limited is True
+        with pytest.raises(RateLimitedError):
+            await api_client.fetch_current_prices("test_site")
 
     async def test_fetch_current_prices_api_exception(self, api_client: AmberApiClient) -> None:
-        """Test price fetch with API exception."""
+        """Test price fetch with API exception raises AmberApiError."""
         with patch.object(
             api_client._hass,
             "async_add_executor_job",
             new=AsyncMock(side_effect=ApiException(status=503)),
         ):
-            result = await api_client.fetch_current_prices("test_site")
+            with pytest.raises(AmberApiError) as exc_info:
+                await api_client.fetch_current_prices("test_site")
 
-            assert result.intervals is None
-            assert result.status == 503
-            assert result.rate_limited is False
+            assert exc_info.value.status == 503
+            assert api_client.last_status == 503
 
     async def test_fetch_current_prices_rate_limit_triggers_backoff(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
@@ -208,24 +203,11 @@ class TestAmberApiClient:
             "async_add_executor_job",
             new=AsyncMock(side_effect=err),
         ):
-            result = await api_client.fetch_current_prices("test_site")
+            with pytest.raises(RateLimitedError) as exc_info:
+                await api_client.fetch_current_prices("test_site")
 
-            assert result.intervals is None
-            assert result.status == 429
-            assert result.rate_limited is True
+            assert exc_info.value.reset_seconds == 120
             assert rate_limiter.is_limited() is True
-
-    async def test_fetch_current_prices_generic_exception(self, api_client: AmberApiClient) -> None:
-        """Test price fetch with generic exception."""
-        with patch.object(
-            api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(side_effect=Exception("Network error")),
-        ):
-            result = await api_client.fetch_current_prices("test_site")
-
-            assert result.intervals is None
-            assert result.status == HTTPStatus.INTERNAL_SERVER_ERROR
 
     async def test_fetch_current_prices_resets_backoff_on_success(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
@@ -236,8 +218,9 @@ class TestAmberApiClient:
         # Wait for backoff to expire (simulate)
         rate_limiter._rate_limit_until = None  # Clear rate limit
 
+        interval = _make_interval()
         mock_response = MagicMock()
-        mock_response.data = []
+        mock_response.data = [interval]
         mock_response.headers = {}
 
         with patch.object(
@@ -412,11 +395,13 @@ class TestApiClientErrorExtraction:
         assert result == 120
 
     async def test_fetch_sites_generic_exception(self, api_client: AmberApiClient) -> None:
-        """Test fetch_sites with generic exception."""
-        with patch.object(
-            api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(side_effect=Exception("Network error")),
+        """Test fetch_sites with generic exception propagates."""
+        with (
+            patch.object(
+                api_client._hass,
+                "async_add_executor_job",
+                new=AsyncMock(side_effect=Exception("Network error")),
+            ),
+            pytest.raises(Exception, match="Network error"),
         ):
-            result = await api_client.fetch_sites()
-            assert result is None
+            await api_client.fetch_sites()

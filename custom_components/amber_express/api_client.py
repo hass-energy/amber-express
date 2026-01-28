@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
 from http import HTTPStatus
 import logging
 from typing import TYPE_CHECKING, TypeGuard
@@ -28,6 +27,34 @@ _LOGGER = logging.getLogger(__name__)
 HTTP_TOO_MANY_REQUESTS = 429
 
 
+# =============================================================================
+# Exceptions
+# =============================================================================
+
+
+class AmberApiError(Exception):
+    """Raised when the Amber API returns an error."""
+
+    def __init__(self, message: str, status: int) -> None:
+        """Initialize with message and HTTP status code."""
+        super().__init__(message)
+        self.status = status
+
+
+class RateLimitedError(AmberApiError):
+    """Raised when the API rate limit is exceeded."""
+
+    def __init__(self, reset_seconds: int | None = None) -> None:
+        """Initialize with optional reset time in seconds."""
+        super().__init__("Rate limited by Amber API", HTTP_TOO_MANY_REQUESTS)
+        self.reset_seconds = reset_seconds
+
+
+# =============================================================================
+# TypeGuards
+# =============================================================================
+
+
 def _is_site_list(data: object) -> TypeGuard[list[Site]]:
     """Validate data is a list of Site objects."""
     return isinstance(data, list) and all(isinstance(site, Site) for site in data)
@@ -36,15 +63,6 @@ def _is_site_list(data: object) -> TypeGuard[list[Site]]:
 def _is_interval_list(data: object) -> TypeGuard[list[Interval]]:
     """Validate data is a list of Interval objects."""
     return isinstance(data, list) and all(isinstance(item, Interval) for item in data)
-
-
-@dataclass
-class FetchResult:
-    """Result of fetching prices from the API."""
-
-    intervals: list[Interval] | None
-    status: int
-    rate_limited: bool = False
 
 
 class AmberApiClient:
@@ -97,11 +115,15 @@ class AmberApiClient:
         """Get rate limit information from last API response."""
         return self._rate_limit_info
 
-    async def fetch_sites(self) -> list[Site] | None:
+    async def fetch_sites(self) -> list[Site]:
         """Fetch all sites for this API token.
 
         Returns:
-            List of Site objects, or None on error.
+            List of Site objects.
+
+        Raises:
+            RateLimitedError: If rate limited by the API.
+            AmberApiError: If the API returns an error.
 
         """
         try:
@@ -109,21 +131,20 @@ class AmberApiClient:
             self._parse_rate_limit_headers(response.headers)
             self._last_api_status = HTTPStatus.OK
             if not _is_site_list(response.data):
-                _LOGGER.warning("Unexpected response format from get_sites")
-                return None
+                msg = "Unexpected response format from get_sites"
+                raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
             return response.data
         except ApiException as err:
+            status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
+            self._last_api_status = status
+
             if err.status == HTTP_TOO_MANY_REQUESTS:
                 reset_seconds = self._get_reset_from_error(err)
                 self._rate_limiter.record_rate_limit(reset_seconds)
-                self._last_api_status = HTTP_TOO_MANY_REQUESTS
-            else:
-                self._last_api_status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
-                _LOGGER.warning("Failed to fetch sites: %s", err)
-            return None
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch sites: %s", err)
-            return None
+                raise RateLimitedError(reset_seconds) from err
+
+            msg = f"Failed to fetch sites: {err}"
+            raise AmberApiError(msg, status) from err
 
     async def fetch_current_prices(
         self,
@@ -131,7 +152,7 @@ class AmberApiClient:
         *,
         next_intervals: int = 0,
         resolution: int = 30,
-    ) -> FetchResult:
+    ) -> list[Interval]:
         """Fetch current prices and optionally forecasts.
 
         Args:
@@ -140,14 +161,18 @@ class AmberApiClient:
             resolution: Interval resolution in minutes (5 or 30)
 
         Returns:
-            FetchResult with intervals, status, and rate limit flag
+            List of Interval objects.
+
+        Raises:
+            RateLimitedError: If rate limited by the API.
+            AmberApiError: If the API returns an error.
 
         """
         # Check if we're in a rate limit backoff period
         if self._rate_limiter.is_limited():
             remaining = self._rate_limiter.remaining_seconds()
             _LOGGER.debug("Rate limit backoff: %.0f seconds remaining", remaining)
-            return FetchResult(intervals=None, status=HTTP_TOO_MANY_REQUESTS, rate_limited=True)
+            raise RateLimitedError
 
         try:
             response = await self._hass.async_add_executor_job(
@@ -163,13 +188,10 @@ class AmberApiClient:
             self._last_api_status = HTTPStatus.OK
 
             if not _is_interval_list(response.data):
-                _LOGGER.warning("Unexpected response format from get_current_prices")
-                return FetchResult(intervals=None, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                msg = "Unexpected response format from get_current_prices"
+                raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-            return FetchResult(
-                intervals=response.data,
-                status=HTTPStatus.OK,
-            )
+            return response.data
         except ApiException as err:
             status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
             self._last_api_status = status
@@ -177,13 +199,10 @@ class AmberApiClient:
             if err.status == HTTP_TOO_MANY_REQUESTS:
                 reset_seconds = self._get_reset_from_error(err)
                 self._rate_limiter.record_rate_limit(reset_seconds)
-                return FetchResult(intervals=None, status=status, rate_limited=True)
+                raise RateLimitedError(reset_seconds) from err
 
-            _LOGGER.warning("Amber API error (%d): %s", status, err.reason)
-            return FetchResult(intervals=None, status=status)
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch Amber data: %s", err)
-            return FetchResult(intervals=None, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            msg = f"Amber API error ({status}): {err.reason}"
+            raise AmberApiError(msg, status) from err
 
     def _parse_rate_limit_headers(self, headers: dict[str, str] | None) -> None:
         """Parse IETF RateLimit headers from API response.

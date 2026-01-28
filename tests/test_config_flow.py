@@ -9,6 +9,7 @@ from homeassistant.data_entry_flow import FlowResultType
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.amber_express.api_client import AmberApiError
 from custom_components.amber_express.config_flow import validate_api_token
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,
@@ -131,9 +132,8 @@ async def test_form_other_api_exception(hass: HomeAssistant) -> None:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
-        # Server error - returns None with status 500
-        mock_client.fetch_sites = AsyncMock(return_value=None)
-        mock_client.last_status = 500
+        # Server error - raises AmberApiError with status 500
+        mock_client.fetch_sites = AsyncMock(side_effect=AmberApiError("Server error", 500))
 
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 

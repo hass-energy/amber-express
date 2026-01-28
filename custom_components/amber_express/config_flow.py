@@ -23,7 +23,8 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
-from .api_client import AmberApiClient
+from .api_client import AmberApiClient, AmberApiError
+from .api_client import RateLimitedError as ApiRateLimitedError
 from .const import (
     API_DEVELOPER_URL,
     CONF_API_TOKEN,
@@ -70,17 +71,15 @@ async def validate_api_token(hass: HomeAssistant, api_token: str) -> list[dict[s
     rate_limiter = ExponentialBackoffRateLimiter()
     client = AmberApiClient(hass, api_token, rate_limiter)
 
-    sites = await client.fetch_sites()
-
-    # Handle errors based on status code
-    if sites is None:
-        if client.last_status == HTTP_FORBIDDEN:
-            raise InvalidAuthError
-        if client.last_status == HTTP_TOO_MANY_REQUESTS:
-            raise RateLimitedError
-        # Other errors - raise generic
-        msg = f"Failed to fetch sites: API returned status {client.last_status}"
-        raise HomeAssistantError(msg)
+    try:
+        sites = await client.fetch_sites()
+    except ApiRateLimitedError as err:
+        raise RateLimitedError from err
+    except AmberApiError as err:
+        if err.status == HTTP_FORBIDDEN:
+            raise InvalidAuthError from err
+        msg = f"Failed to fetch sites: {err}"
+        raise HomeAssistantError(msg) from err
 
     if not sites:
         raise NoSitesFoundError

@@ -14,6 +14,7 @@ from amberelectric.models.spike_status import SpikeStatus
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.amber_express.api_client import AmberApiError, RateLimitedError
 from custom_components.amber_express.cdf_polling import CDFPollingStats
 from custom_components.amber_express.const import (
     ATTR_DESCRIPTOR,
@@ -176,9 +177,8 @@ def mock_amber_api_invalid() -> Generator[MagicMock]:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
-        # Mock 403 error - returns None with status 403
-        mock_client.fetch_sites = AsyncMock(return_value=None)
-        mock_client.last_status = 403
+        # Mock 403 error - raises AmberApiError with status 403
+        mock_client.fetch_sites = AsyncMock(side_effect=AmberApiError("Forbidden", 403))
 
         yield mock_client
 
@@ -204,9 +204,8 @@ def mock_amber_api_rate_limited() -> Generator[MagicMock]:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
-        # Mock 429 error - returns None with status 429
-        mock_client.fetch_sites = AsyncMock(return_value=None)
-        mock_client.last_status = 429
+        # Mock 429 error - raises RateLimitedError
+        mock_client.fetch_sites = AsyncMock(side_effect=RateLimitedError(60))
 
         yield mock_client
 
@@ -218,9 +217,8 @@ def mock_amber_api_unknown_error() -> Generator[MagicMock]:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
-        # Mock server error - returns None with status 500
-        mock_client.fetch_sites = AsyncMock(return_value=None)
-        mock_client.last_status = 500
+        # Mock server error - raises AmberApiError with status 500
+        mock_client.fetch_sites = AsyncMock(side_effect=AmberApiError("Server error", 500))
 
         yield mock_client
 

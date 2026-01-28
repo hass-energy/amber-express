@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from .api_client import AmberApiClient
+from .api_client import AmberApiClient, AmberApiError, RateLimitedError
 from .cdf_polling import CDFPollingStats, IntervalObservation
 from .const import (
     ATTR_DEMAND_WINDOW,
@@ -302,8 +302,13 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Fetch site information including channels and tariff codes."""
         _LOGGER.debug("Fetching site info for site %s", self.site_id)
 
-        sites = await self._api_client.fetch_sites()
-        if sites is None:
+        try:
+            sites = await self._api_client.fetch_sites()
+        except RateLimitedError:
+            _LOGGER.debug("Rate limited while fetching site info")
+            return
+        except AmberApiError as err:
+            _LOGGER.warning("Failed to fetch site info: %s", err)
             return
 
         # Find our site
@@ -368,22 +373,23 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Subsequent polls: fetch without forecasts (just checking for confirmed)
         next_intervals = FORECAST_INTERVALS if is_first_poll else 0
 
-        result = await self._api_client.fetch_current_prices(
-            self.site_id,
-            next_intervals=next_intervals,
-            resolution=resolution,
-        )
-
-        # Update polling manager with rate limit info
-        self._polling_manager.update_budget(self._api_client.rate_limit_info)
-
-        if result.intervals is None:
-            if not result.rate_limited:
-                _LOGGER.debug("API returned no data")
+        try:
+            intervals = await self._api_client.fetch_current_prices(
+                self.site_id,
+                next_intervals=next_intervals,
+                resolution=resolution,
+            )
+        except RateLimitedError:
             return
+        except AmberApiError as err:
+            _LOGGER.debug("API error: %s", err)
+            return
+        finally:
+            # Update polling manager with rate limit info regardless of success/failure
+            self._polling_manager.update_budget(self._api_client.rate_limit_info)
 
         # Process the intervals
-        data = self._interval_processor.process_intervals(result.intervals)
+        data = self._interval_processor.process_intervals(intervals)
         general_data = data.get(CHANNEL_GENERAL, {})
 
         if not general_data:
@@ -431,18 +437,19 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def _fetch_forecasts(self, resolution: int) -> dict[str, ChannelData] | None:
         """Fetch forecasts. Returns data with forecasts or None on failure."""
-        result = await self._api_client.fetch_current_prices(
-            self.site_id,
-            next_intervals=FORECAST_INTERVALS,
-            resolution=resolution,
-        )
-
-        if result.intervals is None:
-            if not result.rate_limited:
-                _LOGGER.debug("API returned no forecast data")
+        try:
+            intervals = await self._api_client.fetch_current_prices(
+                self.site_id,
+                next_intervals=FORECAST_INTERVALS,
+                resolution=resolution,
+            )
+        except RateLimitedError:
+            return None
+        except AmberApiError as err:
+            _LOGGER.debug("Failed to fetch forecasts: %s", err)
             return None
 
-        data = self._interval_processor.process_intervals(result.intervals)
+        data = self._interval_processor.process_intervals(intervals)
         _LOGGER.debug("Fetched %d forecast intervals", FORECAST_INTERVALS)
         return data
 

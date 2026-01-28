@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.amber_express.api_client import AmberApiError
 from custom_components.amber_express.const import (
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
@@ -276,7 +277,11 @@ class TestAmberDataCoordinator:
         # Save initial site info from subentry
         initial_site_info = coordinator._site_info.copy()
 
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=Exception("Error"))):
+        with patch.object(
+            coordinator._api_client,
+            "fetch_sites",
+            new=AsyncMock(side_effect=AmberApiError("Error", 500)),
+        ):
             await coordinator._fetch_site_info()
             # Site info should be unchanged from subentry data
             assert coordinator._site_info == initial_site_info
@@ -334,10 +339,12 @@ class TestAmberDataCoordinator:
         ):
             await coordinator._fetch_amber_data()
 
-    async def test_fetch_amber_data_generic_exception(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data handles generic exceptions."""
+    async def test_fetch_amber_data_api_error(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _fetch_amber_data handles API errors."""
         with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=Exception("Generic error"))
+            coordinator._api_client,
+            "fetch_current_prices",
+            new=AsyncMock(side_effect=AmberApiError("API error", 500)),
         ):
             await coordinator._fetch_amber_data()
 
@@ -371,9 +378,13 @@ class TestAmberDataCoordinator:
             result = await coordinator._fetch_forecasts(30)
             assert result is None
 
-    async def test_fetch_forecasts_exception(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts handles generic exception."""
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=Exception("Error"))):
+    async def test_fetch_forecasts_api_error(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _fetch_forecasts handles API error."""
+        with patch.object(
+            coordinator._api_client,
+            "fetch_current_prices",
+            new=AsyncMock(side_effect=AmberApiError("Error", 500)),
+        ):
             result = await coordinator._fetch_forecasts(30)
             assert result is None
 
