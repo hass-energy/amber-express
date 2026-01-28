@@ -6,8 +6,10 @@ from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any
 
+from amberelectric.models import Site, TariffInformation
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.event import async_call_later, async_track_time_change
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -43,7 +45,7 @@ from .data_source import DataSourceMerger
 from .interval_processor import IntervalProcessor
 from .rate_limiter import ExponentialBackoffRateLimiter
 from .smart_polling import SmartPollingManager
-from .types import ChannelData, ChannelInfo, CoordinatorData, RateLimitInfo, SiteInfoData, TariffInfoData
+from .types import ChannelData, CoordinatorData, RateLimitInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -115,8 +117,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Data source merger for combining polling and websocket data
         self._data_sources = DataSourceMerger()
 
-        # Site info (from subentry, updated in start())
-        self._site_info: SiteInfoData = self._build_site_info_from_subentry()
+        # Site info is fetched in start() - required for operation
+        self._site: Site
 
         # Merged data (exposed via data_sources)
         self.current_data: CoordinatorData = {}
@@ -138,14 +140,15 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Start the coordinator polling lifecycle.
 
         Fetches site info, creates the polling manager, then starts polling.
+        Raises ConfigEntryNotReady if site info cannot be fetched.
         """
         # Fetch site info first to get interval_length and rate limit info
-        await self._fetch_site_info()
+        self._site = await self._fetch_site_info()
 
         # Create polling manager with site's interval length and initial poll budget
         rate_limit_info = self._api_client.rate_limit_info
         self._polling_manager = SmartPollingManager(
-            int(self._site_info["interval_length"]),
+            int(self._site.interval_length),
             rate_limit_info["remaining"],
             self._observations,
         )
@@ -259,27 +262,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Start the sub-second polling chain for confirmatory polls
         self._schedule_next_poll()
 
-    def _build_site_info_from_subentry(self) -> SiteInfoData:
-        """Build initial site info from subentry data."""
-        data = self.subentry.data
-        channels_raw = data.get("channels", [])
-        channels: list[ChannelInfo] = [
-            {
-                "identifier": ch.get("identifier"),
-                "type": ch.get("type", ""),
-                "tariff": ch.get("tariff"),
-            }
-            for ch in channels_raw
-            if isinstance(ch, dict)
-        ]
-        return {
-            "id": data.get(CONF_SITE_ID, ""),
-            "nmi": data.get("nmi", ""),
-            "network": data.get("network"),
-            "status": "active",
-            "channels": channels,
-        }
-
     @property
     def has_confirmed_price(self) -> bool:
         """Check if we have a confirmed price for this interval."""
@@ -303,51 +285,40 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         return self.current_data
 
-    async def _fetch_site_info(self) -> None:
-        """Fetch site information including channels and tariff codes."""
+    async def _fetch_site_info(self) -> Site:
+        """Fetch site information from the API.
+
+        Returns the Site object for the configured site ID.
+        Raises ConfigEntryNotReady if site info cannot be fetched.
+        """
         _LOGGER.debug("Fetching site info for site %s", self.site_id)
 
         try:
             sites = await self._api_client.fetch_sites()
-        except RateLimitedError:
-            _LOGGER.debug("Rate limited while fetching site info")
-            return
+        except RateLimitedError as err:
+            msg = "Rate limited while fetching site info"
+            raise ConfigEntryNotReady(msg) from err
         except AmberApiError as err:
-            _LOGGER.warning("Failed to fetch site info: %s", err)
-            return
+            msg = f"Failed to fetch site info: {err}"
+            raise ConfigEntryNotReady(msg) from err
 
         # Find our site
         for site in sites:
             if site.id == self.site_id:
-                # Extract channel info including tariff codes
-                channels_info: list[ChannelInfo] = []
-                for ch in site.channels:
-                    channel_info: ChannelInfo = {
-                        "identifier": ch.identifier,
-                        "type": ch.type.value,
-                        "tariff": ch.tariff,
-                    }
-                    channels_info.append(channel_info)
+                _LOGGER.debug(
+                    "Fetched site info: id=%s, network=%s, interval_length=%s",
+                    site.id,
+                    site.network,
+                    site.interval_length,
+                )
+                return site
 
-                self._site_info = {
-                    "id": site.id,
-                    "nmi": site.nmi,
-                    "network": site.network,
-                    "status": site.status.value,
-                    "channels": channels_info,
-                    "active_from": str(site.active_from) if site.active_from else None,
-                    "interval_length": site.interval_length,
-                }
-                _LOGGER.debug("Fetched site info: %s", self._site_info)
-                return
-
-        _LOGGER.warning("Site %s not found in API response", self.site_id)
+        msg = f"Site {self.site_id} not found in API response"
+        raise ConfigEntryNotReady(msg)
 
     async def _fetch_amber_data(self) -> None:
         """Fetch current prices and forecasts from Amber API."""
-        # Use site's interval_length for resolution (default to 30 if not available)
-        interval_length = self._site_info.get("interval_length")
-        resolution = int(interval_length) if interval_length is not None else 30
+        resolution = int(self._site.interval_length)
 
         # Skip if we already have confirmed price for this interval
         if self._polling_manager.has_confirmed_price and not self._polling_manager.forecasts_pending:
@@ -545,18 +516,27 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             return general_data.get(ATTR_DEMAND_WINDOW)
         return None
 
-    def get_tariff_info(self) -> TariffInfoData:
+    def get_tariff_info(self) -> TariffInformation | None:
         """Get current tariff information."""
         general_data = self.get_channel_data(CHANNEL_GENERAL)
         if not general_data:
-            return {}
+            return None
 
-        return {
-            "period": general_data.get(ATTR_TARIFF_PERIOD),
-            "season": general_data.get(ATTR_TARIFF_SEASON),
-            "block": general_data.get(ATTR_TARIFF_BLOCK),
-            "demand_window": general_data.get(ATTR_DEMAND_WINDOW),
-        }
+        # Only return tariff info if we have any tariff data
+        period = general_data.get(ATTR_TARIFF_PERIOD)
+        season = general_data.get(ATTR_TARIFF_SEASON)
+        block = general_data.get(ATTR_TARIFF_BLOCK)
+        demand_window = general_data.get(ATTR_DEMAND_WINDOW)
+
+        if period is None and season is None and block is None and demand_window is None:
+            return None
+
+        return TariffInformation(
+            period=period,
+            season=season,
+            block=block,
+            demand_window=demand_window,
+        )
 
     def get_active_channels(self) -> list[str]:
         """Get list of active channels from the current data."""
@@ -566,9 +546,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             if channel in self.current_data
         ]
 
-    def get_site_info(self) -> SiteInfoData:
+    def get_site_info(self) -> Site:
         """Get site information including channels and tariff codes."""
-        return self._site_info
+        return self._site
 
     def get_cdf_polling_stats(self) -> CDFPollingStats:
         """Get CDF polling statistics for diagnostics."""

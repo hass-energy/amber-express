@@ -10,6 +10,7 @@ import json
 import logging
 
 import aiohttp
+from amberelectric.models import CurrentInterval
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -36,7 +37,7 @@ from .const import (
     WS_MIN_RECONNECT_DELAY,
     WS_STALE_TIMEOUT,
 )
-from .types import AdvancedPriceData, ChannelData, WSPriceInterval, is_ws_price_update
+from .types import AdvancedPriceData, ChannelData, is_ws_price_update
 from .utils import cents_to_dollars
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,8 +59,8 @@ class AmberWebSocketClient:
     - Subscribing to price updates for a specific site
     - Reconnecting with exponential backoff on connection failures
     - Detecting stale connections (no updates for 5+ minutes) and reconnecting
-    - Parsing incoming JSON messages and validating structure
-    - Extracting price data from camelCase wire format to internal ChannelData
+    - Parsing incoming JSON messages into SDK CurrentInterval objects
+    - Extracting price data to internal ChannelData format
     - Invoking callback with processed data for coordinator integration
 
     The WebSocket provides real-time current interval prices but NOT forecasts.
@@ -282,50 +283,52 @@ class AmberWebSocketClient:
 
         result: dict[str, ChannelData] = {}
 
-        for price_interval in data["prices"]:
-            channel_type_raw = price_interval.get("channelType", "")
-            if not channel_type_raw:
+        for price_dict in data["prices"]:
+            # Parse the camelCase JSON dict into an SDK CurrentInterval object
+            try:
+                interval = CurrentInterval.from_dict(price_dict)
+            except Exception as err:
+                _LOGGER.warning("Failed to parse WebSocket price interval: %s", err)
                 continue
-            channel = WS_CHANNEL_TYPE_MAP.get(channel_type_raw, channel_type_raw)
 
-            processed = self._extract_channel_data(price_interval)
+            # Map channel type to our internal constant
+            channel_type_value = interval.channel_type.value
+            channel = WS_CHANNEL_TYPE_MAP.get(channel_type_value) or channel_type_value
+
+            processed = self._extract_channel_data(interval)
             if processed:
                 result[channel] = processed
 
         return result if result else None
 
-    def _extract_channel_data(self, interval: WSPriceInterval) -> ChannelData | None:
-        """Extract data from a price interval in the WebSocket message."""
-        per_kwh = cents_to_dollars(interval.get("perKwh"))
-        spot_per_kwh = cents_to_dollars(interval.get("spotPerKwh"))
-
+    def _extract_channel_data(self, interval: CurrentInterval) -> ChannelData:
+        """Extract data from a parsed CurrentInterval object."""
         result: ChannelData = {
-            ATTR_PER_KWH: per_kwh,
-            ATTR_SPOT_PER_KWH: spot_per_kwh,
-            ATTR_START_TIME: interval.get("startTime"),
-            ATTR_END_TIME: interval.get("endTime"),
-            ATTR_NEM_TIME: interval.get("nemTime"),
-            ATTR_RENEWABLES: interval.get("renewables"),
-            ATTR_DESCRIPTOR: interval.get("descriptor"),
-            ATTR_SPIKE_STATUS: interval.get("spikeStatus"),
-            ATTR_ESTIMATE: interval.get("estimate"),
+            ATTR_PER_KWH: cents_to_dollars(interval.per_kwh),
+            ATTR_SPOT_PER_KWH: cents_to_dollars(interval.spot_per_kwh),
+            ATTR_START_TIME: interval.start_time.isoformat(),
+            ATTR_END_TIME: interval.end_time.isoformat(),
+            ATTR_NEM_TIME: interval.nem_time.isoformat() if interval.nem_time else None,
+            ATTR_RENEWABLES: interval.renewables,
+            ATTR_DESCRIPTOR: interval.descriptor.value,
+            ATTR_SPIKE_STATUS: interval.spike_status.value,
+            ATTR_ESTIMATE: interval.estimate,
         }
 
-        # Get advanced price if available
-        advanced_price = interval.get("advancedPrice")
-        if advanced_price:
+        # Get advanced price if available (SDK guarantees all fields are floats when present)
+        if interval.advanced_price:
+            ap = interval.advanced_price
             advanced_price_data: AdvancedPriceData = {
-                "low": cents_to_dollars(advanced_price.get("low")),
-                "predicted": cents_to_dollars(advanced_price.get("predicted")),
-                "high": cents_to_dollars(advanced_price.get("high")),
+                "low": cents_to_dollars(ap.low),  # type: ignore[typeddict-item]
+                "predicted": cents_to_dollars(ap.predicted),  # type: ignore[typeddict-item]
+                "high": cents_to_dollars(ap.high),  # type: ignore[typeddict-item]
             }
             result[ATTR_ADVANCED_PRICE] = advanced_price_data
 
         # Get tariff information if available
-        tariff_info = interval.get("tariffInformation")
-        if tariff_info:
-            result[ATTR_DEMAND_WINDOW] = tariff_info.get("demandWindow")
-            result[ATTR_TARIFF_PERIOD] = tariff_info.get("period")
-            result[ATTR_TARIFF_SEASON] = tariff_info.get("season")
+        if interval.tariff_information:
+            result[ATTR_DEMAND_WINDOW] = interval.tariff_information.demand_window
+            result[ATTR_TARIFF_PERIOD] = interval.tariff_information.period
+            result[ATTR_TARIFF_SEASON] = interval.tariff_information.season
 
         return result

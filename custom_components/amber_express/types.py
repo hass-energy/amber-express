@@ -5,52 +5,19 @@ from __future__ import annotations
 from typing import TypedDict, TypeGuard
 
 # =============================================================================
-# WebSocket Types (camelCase, matches wire format)
+# WebSocket Types (minimal wrapper for message envelope)
 # =============================================================================
 
 
-class WSTariffInformation(TypedDict, total=False):
-    """Tariff information from WebSocket message."""
-
-    period: str | None
-    season: str | None
-    block: float | None
-    demandWindow: bool | None
-
-
-class WSAdvancedPrice(TypedDict, total=False):
-    """Advanced price data from WebSocket message."""
-
-    low: float
-    predicted: float
-    high: float
-
-
-class WSPriceInterval(TypedDict, total=False):
-    """Price interval from WebSocket message."""
-
-    type: str
-    date: str
-    duration: int
-    startTime: str
-    endTime: str
-    nemTime: str
-    perKwh: float
-    renewables: float
-    spotPerKwh: float
-    channelType: str
-    spikeStatus: str
-    tariffInformation: WSTariffInformation
-    descriptor: str
-    estimate: bool
-    advancedPrice: WSAdvancedPrice
-
-
 class WSPriceUpdate(TypedDict):
-    """Price update message from WebSocket."""
+    """Price update message from WebSocket.
+
+    The prices list contains CurrentInterval-compatible dicts that are
+    parsed into SDK CurrentInterval objects using CurrentInterval.from_dict().
+    """
 
     siteId: str
-    prices: list[WSPriceInterval]
+    prices: list[dict]
 
 
 # =============================================================================
@@ -59,11 +26,15 @@ class WSPriceUpdate(TypedDict):
 
 
 class AdvancedPriceData(TypedDict, total=False):
-    """Advanced price data in internal format."""
+    """Advanced price data in internal format.
 
-    low: float | None
-    predicted: float | None
-    high: float | None
+    All fields are required floats when the dict is present - the SDK's
+    AdvancedPrice model requires all fields, so they're guaranteed when available.
+    """
+
+    low: float
+    predicted: float
+    high: float
 
 
 class ChannelData(TypedDict, total=False):
@@ -89,35 +60,6 @@ class ChannelData(TypedDict, total=False):
     tariff_block: float | None
     # Forecasts are ChannelData without nested forecasts
     forecasts: list[dict]
-
-
-class ChannelInfo(TypedDict):
-    """Channel information from site info."""
-
-    identifier: str | None
-    type: str
-    tariff: str | None
-
-
-class SiteInfoData(TypedDict, total=False):
-    """Site information data."""
-
-    id: str
-    nmi: str
-    network: str
-    status: str
-    channels: list[ChannelInfo]
-    active_from: str | None
-    interval_length: float
-
-
-class TariffInfoData(TypedDict, total=False):
-    """Current tariff information."""
-
-    period: str | None
-    season: str | None
-    block: float | None
-    demand_window: bool | None
 
 
 class RateLimitInfo(TypedDict):
@@ -149,19 +91,21 @@ class CoordinatorData(TypedDict, total=False):
 # =============================================================================
 
 
-def is_ws_price_interval(data: object) -> TypeGuard[WSPriceInterval]:
-    """Validate a price interval from WebSocket."""
+def is_ws_price_update(data: object) -> TypeGuard[WSPriceUpdate]:
+    """Validate a price update message from WebSocket.
+
+    Checks the envelope structure. Individual prices are validated when
+    parsing via CurrentInterval.from_dict().
+    """
     if not isinstance(data, dict):
         return False
-    # Required fields for processing
-    return isinstance(data.get("channelType"), str) and isinstance(data.get("perKwh"), int | float)
-
-
-def is_ws_price_update(data: object) -> TypeGuard[WSPriceUpdate]:
-    """Validate a price update message from WebSocket."""
-    if not isinstance(data, dict):
+    if not isinstance(data.get("siteId"), str):
         return False
     prices = data.get("prices")
     if not isinstance(prices, list):
         return False
-    return all(is_ws_price_interval(p) for p in prices)
+    # Basic validation - each price must be a dict with required fields
+    return all(
+        isinstance(p, dict) and isinstance(p.get("channelType"), str) and isinstance(p.get("perKwh"), int | float)
+        for p in prices
+    )

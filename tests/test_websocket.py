@@ -6,11 +6,13 @@
 
 import asyncio
 from datetime import UTC, datetime
+import json
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
+from amberelectric.models import AdvancedPrice, TariffInformation
 from homeassistant.core import HomeAssistant
 import pytest
 
@@ -38,9 +40,38 @@ from custom_components.amber_express.const import (
     WS_MIN_RECONNECT_DELAY,
 )
 from custom_components.amber_express.websocket import WS_CHANNEL_TYPE_MAP, AmberWebSocketClient
+from tests.conftest import make_current_interval
 
 # Suppress unawaited coroutine warnings in tests
 pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning")
+
+
+def make_ws_price_interval(
+    *,
+    channel_type: str = "general",
+    per_kwh: float = 25.0,
+    spot_per_kwh: float = 20.0,
+    renewables: float = 45.0,
+    estimate: bool = False,
+    descriptor: str = "neutral",
+    spike_status: str = "none",
+) -> dict:
+    """Create valid WebSocket price interval data matching SDK CurrentInterval format."""
+    return {
+        "type": "CurrentInterval",
+        "date": "2024-01-01",
+        "duration": 5,
+        "startTime": "2024-01-01T10:00:00Z",
+        "endTime": "2024-01-01T10:05:00Z",
+        "nemTime": "2024-01-01T21:00:00+11:00",
+        "perKwh": per_kwh,
+        "spotPerKwh": spot_per_kwh,
+        "renewables": renewables,
+        "channelType": channel_type,
+        "spikeStatus": spike_status,
+        "descriptor": descriptor,
+        "estimate": estimate,
+    }
 
 
 class TestWSChannelTypeMap:
@@ -290,23 +321,25 @@ class TestAmberWebSocketClient:
         self, ws_client: AmberWebSocketClient, mock_on_message: MagicMock
     ) -> None:
         """Test _handle_message with price update."""
-        message = """{
-            "service": "live-prices",
-            "action": "price-update",
-            "data": {
-                "prices": [{
-                    "channelType": "general",
-                    "perKwh": 25.0,
-                    "spotPerKwh": 20.0,
-                    "descriptor": "neutral",
-                    "spikeStatus": "none",
-                    "startTime": "2024-01-01T10:00:00",
-                    "endTime": "2024-01-01T10:05:00",
-                    "renewables": 45.5,
-                    "estimate": false
-                }]
+        price_data = make_ws_price_interval(
+            channel_type="general",
+            per_kwh=25.0,
+            spot_per_kwh=20.0,
+            descriptor="neutral",
+            spike_status="none",
+            renewables=45.5,
+            estimate=False,
+        )
+        message = json.dumps(
+            {
+                "service": "live-prices",
+                "action": "price-update",
+                "data": {
+                    "siteId": "test",
+                    "prices": [price_data],
+                },
             }
-        }"""
+        )
 
         await ws_client._handle_message(message)
 
@@ -339,19 +372,18 @@ class TestAmberWebSocketClient:
     def test_process_price_update_with_prices(self, ws_client: AmberWebSocketClient) -> None:
         """Test _process_price_update with price data."""
         data = {
+            "siteId": "test",
             "prices": [
-                {
-                    "channelType": "general",
-                    "perKwh": 25.0,
-                    "spotPerKwh": 20.0,
-                    "descriptor": "neutral",
-                    "spikeStatus": "none",
-                    "startTime": "2024-01-01T10:00:00",
-                    "endTime": "2024-01-01T10:05:00",
-                    "renewables": 45.5,
-                    "estimate": False,
-                }
-            ]
+                make_ws_price_interval(
+                    channel_type="general",
+                    per_kwh=25.0,
+                    spot_per_kwh=20.0,
+                    descriptor="neutral",
+                    spike_status="none",
+                    renewables=45.5,
+                    estimate=False,
+                )
+            ],
         }
 
         result = ws_client._process_price_update(data)
@@ -368,12 +400,8 @@ class TestAmberWebSocketClient:
     def test_process_price_update_feed_in(self, ws_client: AmberWebSocketClient) -> None:
         """Test _process_price_update with feed-in channel."""
         data = {
-            "prices": [
-                {
-                    "channelType": "feedIn",
-                    "perKwh": 10.0,
-                }
-            ]
+            "siteId": "test",
+            "prices": [make_ws_price_interval(channel_type="feedIn", per_kwh=10.0)],
         }
 
         result = ws_client._process_price_update(data)
@@ -383,23 +411,20 @@ class TestAmberWebSocketClient:
         assert result[CHANNEL_FEED_IN][ATTR_PER_KWH] == 0.10
 
     def test_process_price_update_unknown_channel(self, ws_client: AmberWebSocketClient) -> None:
-        """Test _process_price_update with unknown channel type."""
+        """Test _process_price_update with unknown channel type fails to parse."""
+        # SDK's ChannelType enum only accepts valid values, so unknown fails
         data = {
-            "prices": [
-                {
-                    "channelType": "unknown",
-                    "perKwh": 25.0,
-                }
-            ]
+            "siteId": "test",
+            "prices": [make_ws_price_interval(channel_type="unknown")],
         }
 
         result = ws_client._process_price_update(data)
 
-        assert result is not None
-        assert "unknown" in result
+        # Unknown channel types fail SDK parsing, so result is None
+        assert result is None
 
     def test_process_price_update_no_channel_type(self, ws_client: AmberWebSocketClient) -> None:
-        """Test _process_price_update with missing channel type."""
+        """Test _process_price_update with missing channel type fails validation."""
         data = {
             "prices": [
                 {
@@ -413,83 +438,63 @@ class TestAmberWebSocketClient:
         assert result is None
 
     def test_extract_channel_data_minimal(self, ws_client: AmberWebSocketClient) -> None:
-        """Test _extract_channel_data with minimal required data."""
-        data = {
-            "channelType": "general",
-            "perKwh": 25.0,
-        }
-        result = ws_client._extract_channel_data(data)
+        """Test _extract_channel_data with minimal CurrentInterval."""
+        interval = make_current_interval(per_kwh=25.0)
+        result = ws_client._extract_channel_data(interval)
         assert result is not None
         assert result[ATTR_PER_KWH] == 0.25
 
     def test_extract_channel_data_full(self, ws_client: AmberWebSocketClient) -> None:
         """Test _extract_channel_data with full data."""
-        data = {
-            "perKwh": 25.0,
-            "spotPerKwh": 20.0,
-            "descriptor": "neutral",
-            "spikeStatus": "none",
-            "startTime": "2024-01-01T10:00:00",
-            "endTime": "2024-01-01T10:05:00",
-            "nemTime": "2024-01-01T10:00:00",
-            "renewables": 45.5,
-            "estimate": False,
-        }
+        interval = make_current_interval(
+            per_kwh=25.0,
+            spot_per_kwh=20.0,
+            renewables=45.5,
+            estimate=False,
+        )
 
-        result = ws_client._extract_channel_data(data)
+        result = ws_client._extract_channel_data(interval)
 
         assert result[ATTR_PER_KWH] == 0.25
         assert result[ATTR_SPOT_PER_KWH] == 0.20
         assert result[ATTR_DESCRIPTOR] == "neutral"
         assert result[ATTR_SPIKE_STATUS] == "none"
-        assert result[ATTR_START_TIME] == "2024-01-01T10:00:00"
-        assert result[ATTR_END_TIME] == "2024-01-01T10:05:00"
-        assert result[ATTR_NEM_TIME] == "2024-01-01T10:00:00"
+        # CurrentInterval uses datetime objects, so start_time is ISO formatted
+        assert ATTR_START_TIME in result
+        assert ATTR_END_TIME in result
+        assert ATTR_NEM_TIME in result
         assert result[ATTR_RENEWABLES] == 45.5
         assert result[ATTR_ESTIMATE] is False
 
     def test_extract_channel_data_with_advanced_price(self, ws_client: AmberWebSocketClient) -> None:
         """Test _extract_channel_data with advanced price."""
-        data = {
-            "perKwh": 25.0,
-            "advancedPrice": {
-                "low": 20.0,
-                "predicted": 25.0,
-                "high": 30.0,
-            },
-        }
+        advanced = AdvancedPrice(low=20.0, predicted=25.0, high=30.0)
+        interval = make_current_interval(per_kwh=25.0, advanced_price=advanced)
 
-        result = ws_client._extract_channel_data(data)
+        result = ws_client._extract_channel_data(interval)
 
         assert result[ATTR_PER_KWH] == 0.25
         assert result[ATTR_ADVANCED_PRICE]["low"] == 0.20
         assert result[ATTR_ADVANCED_PRICE]["predicted"] == 0.25
         assert result[ATTR_ADVANCED_PRICE]["high"] == 0.30
 
-    def test_extract_channel_data_null_values(self, ws_client: AmberWebSocketClient) -> None:
-        """Test _extract_channel_data with null values."""
-        data = {
-            "perKwh": None,
-            "spotPerKwh": None,
-        }
+    def test_extract_channel_data_no_advanced_price(self, ws_client: AmberWebSocketClient) -> None:
+        """Test _extract_channel_data without advanced price."""
+        interval = make_current_interval(per_kwh=25.0)
 
-        result = ws_client._extract_channel_data(data)
+        result = ws_client._extract_channel_data(interval)
 
-        assert result[ATTR_PER_KWH] is None
-        assert result[ATTR_SPOT_PER_KWH] is None
+        assert result[ATTR_PER_KWH] == 0.25
+        assert ATTR_ADVANCED_PRICE not in result
 
     def test_extract_channel_data_with_tariff_info(self, ws_client: AmberWebSocketClient) -> None:
         """Test _extract_channel_data with tariff information."""
-        data = {
-            "perKwh": 15.0,
-            "tariffInformation": {
-                "period": "peak",
-                "season": "summer",
-                "demandWindow": True,
-            },
-        }
+        tariff = TariffInformation(period="peak", season="summer", demand_window=True)
+        interval = make_current_interval(per_kwh=15.0)
+        # SDK CurrentInterval has tariff_information as optional field
+        interval.tariff_information = tariff
 
-        result = ws_client._extract_channel_data(data)
+        result = ws_client._extract_channel_data(interval)
 
         assert result[ATTR_PER_KWH] == 0.15
         assert result[ATTR_DEMAND_WINDOW] is True

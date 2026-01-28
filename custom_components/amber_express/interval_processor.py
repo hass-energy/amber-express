@@ -149,12 +149,13 @@ class IntervalProcessor:
             ATTR_ESTIMATE: is_estimate,
         }
 
-        # Add advanced price data if available (optional field)
+        # Add advanced price data if available (SDK guarantees all fields are floats when present)
         if interval.advanced_price:
+            ap = interval.advanced_price
             advanced_price_data: AdvancedPriceData = {
-                "low": cents_to_dollars(interval.advanced_price.low),
-                "predicted": cents_to_dollars(interval.advanced_price.predicted),
-                "high": cents_to_dollars(interval.advanced_price.high),
+                "low": cents_to_dollars(ap.low),  # type: ignore[typeddict-item]
+                "predicted": cents_to_dollars(ap.predicted),  # type: ignore[typeddict-item]
+                "high": cents_to_dollars(ap.high),  # type: ignore[typeddict-item]
             }
             data[ATTR_ADVANCED_PRICE] = advanced_price_data
 

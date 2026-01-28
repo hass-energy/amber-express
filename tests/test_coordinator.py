@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from amberelectric.models import CurrentInterval, Interval
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -71,8 +72,9 @@ class TestAmberDataCoordinator:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
         coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
-        # Create polling manager for tests (normally done in start())
+        # Create polling manager and set site for tests (normally done in start())
         coord._polling_manager = SmartPollingManager(5, 4)
+        coord._site = make_site(site_id=coord.site_id, interval_length=5)
         return coord
 
     def test_coordinator_init(self, coordinator: AmberDataCoordinator) -> None:
@@ -162,7 +164,7 @@ class TestAmberDataCoordinator:
         assert coordinator.is_demand_window() is None
 
     def test_get_tariff_info(self, coordinator: AmberDataCoordinator) -> None:
-        """Test get_tariff_info."""
+        """Test get_tariff_info returns TariffInformation."""
         coordinator.current_data = {
             CHANNEL_GENERAL: {
                 ATTR_TARIFF_PERIOD: "peak",
@@ -172,16 +174,17 @@ class TestAmberDataCoordinator:
             }
         }
         result = coordinator.get_tariff_info()
-        assert result["period"] == "peak"
-        assert result["season"] == "summer"
-        assert result["block"] == 1
-        assert result["demand_window"] is True
+        assert result is not None
+        assert result.period == "peak"
+        assert result.season == "summer"
+        assert result.block == 1
+        assert result.demand_window is True
 
     def test_get_tariff_info_no_data(self, coordinator: AmberDataCoordinator) -> None:
-        """Test get_tariff_info with no data."""
+        """Test get_tariff_info with no data returns None."""
         coordinator.current_data = {}
         result = coordinator.get_tariff_info()
-        assert result == {}
+        assert result is None
 
     def test_get_active_channels(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_active_channels."""
@@ -192,10 +195,12 @@ class TestAmberDataCoordinator:
         assert CHANNEL_CONTROLLED_LOAD not in result
 
     def test_get_site_info(self, coordinator: AmberDataCoordinator) -> None:
-        """Test get_site_info."""
-        coordinator._site_info = {"id": "test", "network": "Ausgrid"}
+        """Test get_site_info returns the Site object."""
+        site = make_site(site_id="test", network="Ausgrid")
+        coordinator._site = site
         result = coordinator.get_site_info()
-        assert result == {"id": "test", "network": "Ausgrid"}
+        assert result.id == "test"
+        assert result.network == "Ausgrid"
 
     def test_update_from_sources_integration(self, coordinator: AmberDataCoordinator) -> None:
         """Test _update_from_sources correctly integrates with DataSourceMerger."""
@@ -229,7 +234,7 @@ class TestAmberDataCoordinator:
             mock_merge.assert_called_once()
 
     async def test_fetch_site_info(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_site_info."""
+        """Test _fetch_site_info returns the Site object."""
         site = make_site(site_id=coordinator.site_id)
 
         with patch.object(
@@ -237,55 +242,50 @@ class TestAmberDataCoordinator:
             "async_add_executor_job",
             new=AsyncMock(return_value=wrap_api_response([site])),
         ):
-            await coordinator._fetch_site_info()
+            result = await coordinator._fetch_site_info()
 
-            assert coordinator._site_info["id"] == coordinator.site_id
-            assert coordinator._site_info["nmi"] == "1234567890"
-            assert coordinator._site_info["network"] == "Ausgrid"
-            assert len(coordinator._site_info["channels"]) == 1
+            assert result.id == coordinator.site_id
+            assert result.nmi == "1234567890"
+            assert result.network == "Ausgrid"
+            assert len(result.channels) == 1
 
     async def test_fetch_site_info_not_found(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_site_info when site not found keeps initial info."""
-        mock_site = MagicMock()
-        mock_site.id = "different_site"
+        """Test _fetch_site_info raises ConfigEntryNotReady when site not found."""
+        other_site = make_site(site_id="different_site")
 
-        # Save initial site info from subentry
-        initial_site_info = coordinator._site_info.copy()
-
-        with patch.object(
-            coordinator.hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=wrap_api_response([mock_site])),
+        with (
+            patch.object(
+                coordinator.hass,
+                "async_add_executor_job",
+                new=AsyncMock(return_value=wrap_api_response([other_site])),
+            ),
+            pytest.raises(ConfigEntryNotReady, match="not found"),
         ):
             await coordinator._fetch_site_info()
-            # Site info should be unchanged from subentry data
-            assert coordinator._site_info == initial_site_info
 
     async def test_fetch_site_info_exception(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_site_info handles exception and keeps initial info."""
-        # Save initial site info from subentry
-        initial_site_info = coordinator._site_info.copy()
-
-        with patch.object(
-            coordinator._api_client,
-            "fetch_sites",
-            new=AsyncMock(side_effect=AmberApiError("Error", 500)),
+        """Test _fetch_site_info raises ConfigEntryNotReady on API error."""
+        with (
+            patch.object(
+                coordinator._api_client,
+                "fetch_sites",
+                new=AsyncMock(side_effect=AmberApiError("Error", 500)),
+            ),
+            pytest.raises(ConfigEntryNotReady, match="Failed to fetch site info"),
         ):
             await coordinator._fetch_site_info()
-            # Site info should be unchanged from subentry data
-            assert coordinator._site_info == initial_site_info
 
-    async def test_fetch_site_info_429_records_rate_limit(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_site_info handles 429 and records rate limit."""
+    async def test_fetch_site_info_429_raises_config_entry_not_ready(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _fetch_site_info raises ConfigEntryNotReady on rate limit."""
         # Create a mock ApiException with headers
         err = ApiException(status=429)
         err.headers = make_rate_limit_headers(reset=120)
 
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
+        with (
+            patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)),
+            pytest.raises(ConfigEntryNotReady, match="Rate limited"),
+        ):
             await coordinator._fetch_site_info()
-            # Should have recorded rate limit with reset from headers
-            assert coordinator._rate_limiter.is_limited() is True
-            assert coordinator._rate_limiter.current_backoff == 122  # 120 + 2 buffer
 
     async def test_fetch_amber_data_rate_limit_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data respects rate limit backoff."""
@@ -421,6 +421,7 @@ class TestAmberDataCoordinator:
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Create a confirmed interval (estimate=False)
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -469,6 +470,7 @@ class TestAmberDataCoordinator:
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -572,6 +574,7 @@ class TestAmberDataCoordinator:
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Simulate that first poll already happened (estimate received)
         # This makes the next poll a "subsequent" poll that would need separate forecast fetch
@@ -634,6 +637,7 @@ class TestAmberDataCoordinator:
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -676,6 +680,7 @@ class TestAmberDataCoordinator:
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Simulate first poll already happened with data
         coordinator._polling_manager._poll_count_this_interval = 1
@@ -726,6 +731,7 @@ class TestAmberDataCoordinator:
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Create a confirmed interval
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -771,8 +777,9 @@ class TestCoordinatorLifecycle:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
         coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
-        # Create polling manager for tests (normally done in start())
+        # Create polling manager and set site for tests (normally done in start())
         coord._polling_manager = SmartPollingManager(5, 4)
+        coord._site = make_site(site_id=coord.site_id, interval_length=5)
         return coord
 
     async def test_start_calls_first_refresh(
@@ -781,12 +788,11 @@ class TestCoordinatorLifecycle:
         hass: HomeAssistant,  # noqa: ARG002
     ) -> None:
         """Test that start() calls async_config_entry_first_refresh."""
-        # Set up data that _fetch_site_info populates in real code
-        coordinator._site_info["interval_length"] = 5
+        site = make_site(site_id=coordinator.site_id, interval_length=5)
         coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50}
 
         with (
-            patch.object(coordinator, "_fetch_site_info", new=AsyncMock()) as mock_fetch_site,
+            patch.object(coordinator, "_fetch_site_info", new=AsyncMock(return_value=site)) as mock_fetch_site,
             patch.object(coordinator, "async_config_entry_first_refresh", new=AsyncMock()) as mock_refresh,
             patch("custom_components.amber_express.coordinator.async_track_time_change") as mock_track,
         ):
@@ -805,12 +811,11 @@ class TestCoordinatorLifecycle:
     ) -> None:
         """Test that start() sets up interval detection."""
         mock_unsub = MagicMock()
-        # Set up data that _fetch_site_info populates in real code
-        coordinator._site_info["interval_length"] = 5
+        site = make_site(site_id=coordinator.site_id, interval_length=5)
         coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50}
 
         with (
-            patch.object(coordinator, "_fetch_site_info", new=AsyncMock()),
+            patch.object(coordinator, "_fetch_site_info", new=AsyncMock(return_value=site)),
             patch.object(coordinator, "async_config_entry_first_refresh", new=AsyncMock()),
             patch(
                 "custom_components.amber_express.coordinator.async_track_time_change",
