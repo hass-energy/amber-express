@@ -324,7 +324,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     }
                     channels_info.append(channel_info)
 
-                self._site_info: SiteInfoData = {
+                self._site_info = {
                     "id": site.id,
                     "nmi": site.nmi,
                     "network": site.network,
