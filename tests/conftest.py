@@ -4,7 +4,6 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import amberelectric
 from amberelectric.models import CurrentInterval, ForecastInterval, Interval
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry

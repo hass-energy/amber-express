@@ -20,7 +20,7 @@ def rate_limiter() -> ExponentialBackoffRateLimiter:
 @pytest.fixture
 def api_client(hass: HomeAssistant, rate_limiter: ExponentialBackoffRateLimiter) -> AmberApiClient:
     """Create an API client for testing."""
-    return AmberApiClient(hass, "test_token", rate_limiter)  # noqa: S106
+    return AmberApiClient(hass, "test_token", rate_limiter)
 
 
 class TestAmberApiClient:
@@ -129,9 +129,7 @@ class TestAmberApiClient:
             "async_add_executor_job",
             new=AsyncMock(return_value=mock_response),
         ):
-            result = await api_client.fetch_current_prices(
-                "test_site", next_intervals=9, resolution=30
-            )
+            result = await api_client.fetch_current_prices("test_site", next_intervals=9, resolution=30)
 
             assert result.intervals is not None
             assert len(result.intervals) == 10

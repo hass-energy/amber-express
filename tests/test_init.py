@@ -5,11 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.amber_express import (
-    async_setup_entry,
-    async_unload_entry,
-    async_update_listener,
-)
+from custom_components.amber_express import async_setup_entry, async_unload_entry, async_update_listener
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
