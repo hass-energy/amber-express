@@ -2,23 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict, TypeGuard
-
-# =============================================================================
-# WebSocket Types (minimal wrapper for message envelope)
-# =============================================================================
-
-
-class WSPriceUpdate(TypedDict):
-    """Price update message from WebSocket.
-
-    The prices list contains CurrentInterval-compatible dicts that are
-    parsed into SDK CurrentInterval objects using CurrentInterval.from_dict().
-    """
-
-    siteId: str
-    prices: list[dict]
-
+from typing import TypedDict
 
 # =============================================================================
 # Internal Data Types (snake_case, processed format)
@@ -84,28 +68,3 @@ class CoordinatorData(TypedDict, total=False):
     _source: str
     _polling_timestamp: str | None
     _websocket_timestamp: str | None
-
-
-# =============================================================================
-# TypeGuards for WebSocket Validation
-# =============================================================================
-
-
-def is_ws_price_update(data: object) -> TypeGuard[WSPriceUpdate]:
-    """Validate a price update message from WebSocket.
-
-    Checks the envelope structure. Individual prices are validated when
-    parsing via CurrentInterval.from_dict().
-    """
-    if not isinstance(data, dict):
-        return False
-    if not isinstance(data.get("siteId"), str):
-        return False
-    prices = data.get("prices")
-    if not isinstance(prices, list):
-        return False
-    # Basic validation - each price must be a dict with required fields
-    return all(
-        isinstance(p, dict) and isinstance(p.get("channelType"), str) and isinstance(p.get("perKwh"), int | float)
-        for p in prices
-    )

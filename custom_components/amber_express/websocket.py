@@ -37,7 +37,7 @@ from .const import (
     WS_MIN_RECONNECT_DELAY,
     WS_STALE_TIMEOUT,
 )
-from .types import AdvancedPriceData, ChannelData, is_ws_price_update
+from .types import AdvancedPriceData, ChannelData
 from .utils import cents_to_dollars
 
 _LOGGER = logging.getLogger(__name__)
@@ -277,13 +277,18 @@ class AmberWebSocketClient:
 
     def _process_price_update(self, data: object) -> dict[str, ChannelData] | None:
         """Process a price update message from the WebSocket."""
-        if not is_ws_price_update(data):
-            _LOGGER.debug("WebSocket message failed validation")
+        if not isinstance(data, dict):
+            _LOGGER.debug("WebSocket message is not a dict")
+            return None
+
+        prices = data.get("prices")
+        if not isinstance(prices, list):
+            _LOGGER.debug("WebSocket message has no prices list")
             return None
 
         result: dict[str, ChannelData] = {}
 
-        for price_dict in data["prices"]:
+        for price_dict in prices:
             # Parse the camelCase JSON dict into an SDK CurrentInterval object
             try:
                 interval = CurrentInterval.from_dict(price_dict)
