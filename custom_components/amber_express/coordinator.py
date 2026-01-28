@@ -311,23 +311,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             if site.id == self.site_id:
                 # Extract channel info including tariff codes
                 channels_info: list[ChannelInfo] = []
-                for ch in site.channels or []:
-                    channel_type = ch.type.value if hasattr(ch.type, "value") else str(ch.type)
+                for ch in site.channels:
                     channel_info: ChannelInfo = {
-                        "identifier": getattr(ch, "identifier", None),
-                        "type": channel_type,
-                        "tariff": getattr(ch, "tariff", None),
+                        "identifier": ch.identifier,
+                        "type": ch.type.value,
+                        "tariff": ch.tariff,
                     }
                     channels_info.append(channel_info)
 
                 self._site_info: SiteInfoData = {
                     "id": site.id,
                     "nmi": site.nmi,
-                    "network": getattr(site, "network", None),
-                    "status": site.status.value if hasattr(site.status, "value") else str(site.status),
+                    "network": site.network,
+                    "status": site.status.value,
                     "channels": channels_info,
-                    "active_from": getattr(site, "active_from", None),
-                    "interval_length": getattr(site, "interval_length", None),
+                    "active_from": str(site.active_from) if site.active_from else None,
+                    "interval_length": site.interval_length,
                 }
                 _LOGGER.debug("Fetched site info: %s", self._site_info)
                 return

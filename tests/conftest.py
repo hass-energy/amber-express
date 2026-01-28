@@ -1,10 +1,16 @@
 """Pytest fixtures for Amber Express tests."""
 
 from collections.abc import Generator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from amberelectric.models import CurrentInterval, ForecastInterval, Interval
+from amberelectric.models import CurrentInterval, ForecastInterval, Interval, Site
+from amberelectric.models.advanced_price import AdvancedPrice
+from amberelectric.models.channel import Channel
+from amberelectric.models.channel_type import ChannelType
+from amberelectric.models.price_descriptor import PriceDescriptor
+from amberelectric.models.site_status import SiteStatus
+from amberelectric.models.spike_status import SpikeStatus
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -395,6 +401,99 @@ def wrap_api_response(
 ) -> MockApiResponse:
     """Wrap intervals in a mock ApiResponse for testing."""
     return MockApiResponse(intervals, headers)
+
+
+# =============================================================================
+# Real SDK Object Factories
+# =============================================================================
+
+
+def make_site(
+    *,
+    site_id: str = "01ABCDEFGHIJKLMNOPQRSTUV",
+    nmi: str = "1234567890",
+    network: str = "Ausgrid",
+    status: SiteStatus = SiteStatus.ACTIVE,
+    interval_length: float = 30,
+    channels: list[Channel] | None = None,
+    active_from: date | None = None,
+) -> Site:
+    """Create a real Site object for testing."""
+    if channels is None:
+        channels = [Channel(identifier="E1", type=ChannelType.GENERAL, tariff="EA116")]
+    return Site(
+        id=site_id,
+        nmi=nmi,
+        network=network,
+        status=status,
+        interval_length=interval_length,
+        channels=channels,
+        active_from=active_from,
+    )
+
+
+def make_current_interval(
+    *,
+    per_kwh: float = 25.0,
+    spot_per_kwh: float = 20.0,
+    renewables: float = 45.0,
+    estimate: bool = False,
+    channel_type: ChannelType = ChannelType.GENERAL,
+    descriptor: PriceDescriptor = PriceDescriptor.NEUTRAL,
+    spike_status: SpikeStatus = SpikeStatus.NONE,
+    start_time: datetime | None = None,
+    advanced_price: AdvancedPrice | None = None,
+) -> CurrentInterval:
+    """Create a real CurrentInterval object for testing."""
+    start = start_time or datetime(2024, 1, 1, 9, 30, 0, tzinfo=UTC)
+    end = start + timedelta(minutes=30)
+    return CurrentInterval(
+        type="CurrentInterval",
+        duration=30,
+        spot_per_kwh=spot_per_kwh,
+        per_kwh=per_kwh,
+        var_date=date(2024, 1, 1),
+        nem_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
+        start_time=start,
+        end_time=end,
+        renewables=renewables,
+        channel_type=channel_type,
+        spike_status=spike_status,
+        descriptor=descriptor,
+        estimate=estimate,
+        advanced_price=advanced_price,
+    )
+
+
+def make_forecast_interval(
+    *,
+    per_kwh: float = 26.0,
+    spot_per_kwh: float = 20.0,
+    renewables: float = 45.0,
+    channel_type: ChannelType = ChannelType.GENERAL,
+    descriptor: PriceDescriptor = PriceDescriptor.NEUTRAL,
+    spike_status: SpikeStatus = SpikeStatus.NONE,
+    start_time: datetime | None = None,
+    advanced_price: AdvancedPrice | None = None,
+) -> ForecastInterval:
+    """Create a real ForecastInterval object for testing."""
+    start = start_time or datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+    end = start + timedelta(minutes=30)
+    return ForecastInterval(
+        type="ForecastInterval",
+        duration=30,
+        spot_per_kwh=spot_per_kwh,
+        per_kwh=per_kwh,
+        var_date=date(2024, 1, 1),
+        nem_time=datetime(2024, 1, 1, 10, 30, 0, tzinfo=UTC),
+        start_time=start,
+        end_time=end,
+        renewables=renewables,
+        channel_type=channel_type,
+        spike_status=spike_status,
+        descriptor=descriptor,
+        advanced_price=advanced_price,
+    )
 
 
 @pytest.fixture

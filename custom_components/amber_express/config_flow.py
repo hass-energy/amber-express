@@ -89,26 +89,24 @@ async def validate_api_token(hass: HomeAssistant, api_token: str) -> list[dict[s
     site_list = []
     for site in sites:
         # Extract full channel info including tariff codes
-        channels_info = []
-        for ch in site.channels or []:
-            channel_type = ch.type.value if hasattr(ch.type, "value") else str(ch.type)
-            channels_info.append(
-                {
-                    "identifier": getattr(ch, "identifier", None),
-                    "type": channel_type,
-                    "tariff": getattr(ch, "tariff", None),
-                }
-            )
+        channels_info = [
+            {
+                "identifier": ch.identifier,
+                "type": ch.type.value,
+                "tariff": ch.tariff,
+            }
+            for ch in site.channels
+        ]
 
         site_list.append(
             {
                 "id": site.id,
                 "nmi": site.nmi,
-                "status": site.status.value if hasattr(site.status, "value") else str(site.status),
-                "network": getattr(site, "network", None),
+                "status": site.status.value,
+                "network": site.network,
                 "channels": channels_info,
-                "active_from": getattr(site, "active_from", None),
-                "interval_length": getattr(site, "interval_length", None),
+                "active_from": str(site.active_from) if site.active_from else None,
+                "interval_length": site.interval_length,
             }
         )
 

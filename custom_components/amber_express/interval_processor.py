@@ -85,27 +85,21 @@ class IntervalProcessor:
             if actual is None:
                 continue
 
-            # Get channel type from the actual interval
-            if not hasattr(actual, "channel_type"):
-                _LOGGER.debug("Interval missing channel_type: %s", type(actual).__name__)
-                continue
-
-            channel_type_raw = (
-                actual.channel_type.value if hasattr(actual.channel_type, "value") else str(actual.channel_type)
-            )
-            channel = CHANNEL_TYPE_MAP.get(channel_type_raw, channel_type_raw)
-
-            if channel not in forecast_intervals:
-                forecast_intervals[channel] = []
-
-            # Determine interval type
+            # Determine interval type and extract channel
             # CurrentInterval = the current price (check estimate field for confirmed status)
             # ActualInterval = historical confirmed prices (past intervals, not current)
             # ForecastInterval = future prediction
             if isinstance(actual, CurrentInterval):
-                # CurrentInterval is the current price - always use it
+                channel_type: str = actual.channel_type.value
+                channel = CHANNEL_TYPE_MAP.get(channel_type, channel_type)
+                if channel not in forecast_intervals:
+                    forecast_intervals[channel] = []
                 current_intervals[channel] = actual
             elif isinstance(actual, ForecastInterval):
+                channel_type = actual.channel_type.value
+                channel = CHANNEL_TYPE_MAP.get(channel_type, channel_type)
+                if channel not in forecast_intervals:
+                    forecast_intervals[channel] = []
                 forecast_intervals[channel].append(actual)
             # Note: ActualInterval is historical data and not used for current price
 
@@ -132,66 +126,45 @@ class IntervalProcessor:
     def _extract_interval_data(self, interval: CurrentInterval | ForecastInterval) -> ChannelData:
         """Extract data from an interval object."""
         # Get the price based on pricing mode (API returns cents, we convert to dollars)
-        if self._pricing_mode == PRICING_MODE_APP:
+        if self._pricing_mode == PRICING_MODE_APP and interval.advanced_price:
             # Use advanced_price.predicted if available
-            price_cents = None
-            if hasattr(interval, "advanced_price") and interval.advanced_price:
-                price_cents = getattr(interval.advanced_price, "predicted", None)
-            if price_cents is None:
-                price_cents = interval.per_kwh
+            price_cents = interval.advanced_price.predicted
         else:
             # Use per_kwh (AEMO-based)
             price_cents = interval.per_kwh
 
-        price = cents_to_dollars(price_cents)
-        spot_per_kwh = cents_to_dollars(getattr(interval, "spot_per_kwh", None))
-
-        # Extract descriptor
-        descriptor = None
-        if hasattr(interval, "descriptor"):
-            descriptor = (
-                interval.descriptor.value if hasattr(interval.descriptor, "value") else str(interval.descriptor)
-            )
-
-        # Extract spike status
-        spike_status = None
-        if hasattr(interval, "spike_status"):
-            spike_status = (
-                interval.spike_status.value if hasattr(interval.spike_status, "value") else str(interval.spike_status)
-            )
-
         # Determine estimate status based on interval type
         # ForecastInterval is always estimated, CurrentInterval has an estimate field
-        is_estimate = True if isinstance(interval, ForecastInterval) else getattr(interval, "estimate", True)
+        is_estimate = True if isinstance(interval, ForecastInterval) else interval.estimate
 
         data: ChannelData = {
-            ATTR_PER_KWH: price,
-            ATTR_SPOT_PER_KWH: spot_per_kwh,
-            ATTR_START_TIME: interval.start_time.isoformat() if interval.start_time else None,
-            ATTR_END_TIME: interval.end_time.isoformat() if interval.end_time else None,
-            ATTR_NEM_TIME: getattr(interval, "nem_time", None),
-            ATTR_RENEWABLES: getattr(interval, "renewables", None),
-            ATTR_DESCRIPTOR: descriptor,
-            ATTR_SPIKE_STATUS: spike_status,
+            ATTR_PER_KWH: cents_to_dollars(price_cents),
+            ATTR_SPOT_PER_KWH: cents_to_dollars(interval.spot_per_kwh),
+            ATTR_START_TIME: interval.start_time.isoformat(),
+            ATTR_END_TIME: interval.end_time.isoformat(),
+            ATTR_NEM_TIME: interval.nem_time.isoformat() if interval.nem_time else None,
+            ATTR_RENEWABLES: interval.renewables,
+            ATTR_DESCRIPTOR: interval.descriptor.value,
+            ATTR_SPIKE_STATUS: interval.spike_status.value,
             ATTR_ESTIMATE: is_estimate,
         }
 
-        # Add advanced price data if available
-        if hasattr(interval, "advanced_price") and interval.advanced_price:
+        # Add advanced price data if available (optional field)
+        if interval.advanced_price:
             advanced_price_data: AdvancedPriceData = {
-                "low": cents_to_dollars(getattr(interval.advanced_price, "low", None)),
-                "predicted": cents_to_dollars(getattr(interval.advanced_price, "predicted", None)),
-                "high": cents_to_dollars(getattr(interval.advanced_price, "high", None)),
+                "low": cents_to_dollars(interval.advanced_price.low),
+                "predicted": cents_to_dollars(interval.advanced_price.predicted),
+                "high": cents_to_dollars(interval.advanced_price.high),
             }
             data[ATTR_ADVANCED_PRICE] = advanced_price_data
 
-        # Add tariff information if available
-        if hasattr(interval, "tariff_information") and interval.tariff_information:
+        # Add tariff information if available (optional field)
+        if interval.tariff_information:
             tariff = interval.tariff_information
-            data[ATTR_DEMAND_WINDOW] = getattr(tariff, "demand_window", None)
-            data[ATTR_TARIFF_PERIOD] = getattr(tariff, "period", None)
-            data[ATTR_TARIFF_SEASON] = getattr(tariff, "season", None)
-            data[ATTR_TARIFF_BLOCK] = getattr(tariff, "block", None)
+            data[ATTR_DEMAND_WINDOW] = tariff.demand_window
+            data[ATTR_TARIFF_PERIOD] = tariff.period
+            data[ATTR_TARIFF_SEASON] = tariff.season
+            data[ATTR_TARIFF_BLOCK] = tariff.block
 
         return data
 

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from amberelectric.models import CurrentInterval, ForecastInterval
+from amberelectric.models import CurrentInterval, Interval
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 import pytest
@@ -34,7 +34,7 @@ from custom_components.amber_express.const import (
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
-from tests.conftest import wrap_api_response, wrap_interval
+from tests.conftest import make_forecast_interval, make_site, wrap_api_response, wrap_interval
 
 
 def create_mock_subentry_for_coordinator(
@@ -240,24 +240,12 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_site_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_site_info."""
-        mock_site = MagicMock()
-        mock_site.id = coordinator.site_id
-        mock_site.nmi = "1234567890"
-        mock_site.network = "Ausgrid"
-        mock_site.status = MagicMock(value="active")
-        mock_site.active_from = "2024-01-01"
-        mock_site.interval_length = 30
-
-        mock_channel = MagicMock()
-        mock_channel.type = MagicMock(value="general")
-        mock_channel.identifier = "E1"
-        mock_channel.tariff = "EA116"
-        mock_site.channels = [mock_channel]
+        site = make_site(site_id=coordinator.site_id)
 
         with patch.object(
             coordinator.hass,
             "async_add_executor_job",
-            new=AsyncMock(return_value=wrap_api_response([mock_site])),
+            new=AsyncMock(return_value=wrap_api_response([site])),
         ):
             await coordinator._fetch_site_info()
 
@@ -355,18 +343,8 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_forecasts_success(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_forecasts success."""
-        mock_interval = MagicMock(spec=ForecastInterval)
-        mock_interval.per_kwh = 26.0
-        mock_interval.start_time = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-        mock_interval.end_time = datetime(2024, 1, 1, 10, 10, 0, tzinfo=UTC)
-        mock_interval.channel_type = MagicMock(value="general")
-        mock_interval.descriptor = MagicMock(value="neutral")
-        mock_interval.spike_status = MagicMock(value="none")
-        mock_interval.advanced_price = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
-
-        wrapped = wrap_interval(mock_interval)
+        interval = make_forecast_interval(per_kwh=26.0)
+        wrapped = Interval(actual_instance=interval)
         mock_response = wrap_api_response([wrapped])
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=mock_response)):
             result = await coordinator._fetch_forecasts(30)

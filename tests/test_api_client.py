@@ -1,6 +1,6 @@
 """Tests for the Amber API client."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,9 +29,9 @@ def _make_interval(per_kwh: float = 25.0) -> Interval:
             spot_per_kwh=5.0,
             per_kwh=per_kwh,
             date=date(2024, 1, 1),
-            nem_time=datetime(2024, 1, 1, 10, 0, 0),
-            start_time=datetime(2024, 1, 1, 9, 30, 0),
-            end_time=datetime(2024, 1, 1, 10, 0, 0),
+            nem_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
+            start_time=datetime(2024, 1, 1, 9, 30, 0, tzinfo=UTC),
+            end_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
             renewables=45.0,
             channel_type=ChannelType.GENERAL,
             spike_status=SpikeStatus.NONE,
