@@ -53,7 +53,7 @@ class CDFPollingStrategy:
 
     # Uniform blending thresholds as fractions of quota: blend targeted CDF with
     # uniform distribution based on remaining poll budget (k) to spread polls when low
-    UNIFORM_BLEND_FRACTION_HIGH = 0.6  # Pure targeted CDF when k >= quota * this
+    UNIFORM_BLEND_FRACTION_HIGH = 0.3  # Pure targeted CDF when k >= quota * this
     UNIFORM_BLEND_FRACTION_LOW = 0.2  # Pure uniform distribution when k <= quota * this
 
     def __init__(
