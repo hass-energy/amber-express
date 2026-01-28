@@ -47,7 +47,7 @@ from .types import ChannelData, ChannelInfo, CoordinatorData, RateLimitInfo, Sit
 
 _LOGGER = logging.getLogger(__name__)
 
-# Interval detection - check every second to detect 5-minute interval boundaries
+# Interval detection - check every second to detect interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
 
@@ -106,15 +106,17 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         pricing_mode = self._get_subentry_option(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
         self._interval_processor = IntervalProcessor(pricing_mode)
 
-        # Smart polling manager with CDF strategy
-        self._polling_manager = SmartPollingManager(observations)
+        # Store observations for polling manager creation in start()
+        self._observations = observations
+
+        # Polling manager is created in start() after site info is fetched
+        self._polling_manager: SmartPollingManager
 
         # Data source merger for combining polling and websocket data
         self._data_sources = DataSourceMerger()
 
-        # Site info (from subentry or fetched at startup)
+        # Site info (from subentry, updated in start())
         self._site_info: SiteInfoData = self._build_site_info_from_subentry()
-        self._site_info_fetched = False
 
         # Merged data (exposed via data_sources)
         self.current_data: CoordinatorData = {}
@@ -135,12 +137,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def start(self) -> None:
         """Start the coordinator polling lifecycle.
 
-        Performs initial data fetch and sets up interval-aligned polling.
+        Fetches site info, creates the polling manager, then starts polling.
         """
+        # Fetch site info first to get interval_length
+        await self._fetch_site_info()
+
+        # Create polling manager with site's interval length
+        interval_length = self._site_info.get("interval_length")
+        self._polling_manager = SmartPollingManager(
+            int(interval_length) if interval_length is not None else 5,
+            self._observations,
+        )
+
         # Initial fetch
         await self.async_config_entry_first_refresh()
 
-        # Set up interval detection (checks every second for 5-minute boundaries)
+        # Set up interval detection (checks every second for interval boundaries)
         self._unsub_time_change = async_track_time_change(
             self.hass,
             self._on_interval_check,
@@ -283,14 +295,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from Amber API using smart polling."""
-        # Fetch site info on first run (for tariff codes etc.)
-        if not self._site_info_fetched:
-            try:
-                await self._fetch_site_info()
-            except Exception as err:
-                _LOGGER.warning("Failed to fetch site info: %s", err)
-            self._site_info_fetched = True
-
         await self._fetch_amber_data()
 
         # Merge data from polling and websocket

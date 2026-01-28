@@ -35,6 +35,7 @@ from custom_components.amber_express.const import (
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
+from custom_components.amber_express.smart_polling import SmartPollingManager
 from tests.conftest import make_forecast_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
 
 
@@ -69,7 +70,10 @@ class TestAmberDataCoordinator:
     ) -> AmberDataCoordinator:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
-        return AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        # Create polling manager for tests (normally done in start())
+        coord._polling_manager = SmartPollingManager(5)
+        return coord
 
     def test_coordinator_init(self, coordinator: AmberDataCoordinator) -> None:
         """Test coordinator initialization."""
@@ -213,31 +217,16 @@ class TestAmberDataCoordinator:
             assert coordinator._data_sources.websocket_timestamp is not None
             mock_update.assert_called_once()
 
-    async def test_async_update_data_first_run(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _async_update_data on first run."""
+    async def test_async_update_data(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _async_update_data fetches data and merges."""
         with (
-            patch.object(coordinator, "_fetch_site_info", new=AsyncMock()) as mock_fetch_site,
             patch.object(coordinator, "_fetch_amber_data", new=AsyncMock()) as mock_fetch_data,
             patch.object(coordinator, "_update_from_sources") as mock_merge,
         ):
             await coordinator._async_update_data()
 
-            mock_fetch_site.assert_called_once()
             mock_fetch_data.assert_called_once()
             mock_merge.assert_called_once()
-
-    async def test_async_update_data_site_info_error(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _async_update_data handles site info error."""
-        with (
-            patch.object(
-                coordinator, "_fetch_site_info", new=AsyncMock(side_effect=Exception("Site error"))
-            ) as mock_fetch_site,
-            patch.object(coordinator, "_fetch_amber_data", new=AsyncMock()),
-            patch.object(coordinator, "_update_from_sources"),
-        ):
-            await coordinator._async_update_data()
-            mock_fetch_site.assert_called_once()
-            assert coordinator._site_info_fetched is True
 
     async def test_fetch_site_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_site_info."""
@@ -431,6 +420,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+        coordinator._polling_manager = SmartPollingManager(5)
 
         # Create a confirmed interval (estimate=False)
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -478,6 +468,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+        coordinator._polling_manager = SmartPollingManager(5)
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -580,6 +571,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+        coordinator._polling_manager = SmartPollingManager(5)
 
         # Simulate that first poll already happened (estimate received)
         # This makes the next poll a "subsequent" poll that would need separate forecast fetch
@@ -641,6 +633,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+        coordinator._polling_manager = SmartPollingManager(5)
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -682,6 +675,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+        coordinator._polling_manager = SmartPollingManager(5)
 
         # Simulate first poll already happened with data
         coordinator._polling_manager._poll_count_this_interval = 1
@@ -731,6 +725,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
+        coordinator._polling_manager = SmartPollingManager(5)
 
         # Create a confirmed interval
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -775,7 +770,10 @@ class TestCoordinatorLifecycle:
     ) -> AmberDataCoordinator:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
-        return AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        # Create polling manager for tests (normally done in start())
+        coord._polling_manager = SmartPollingManager(5)
+        return coord
 
     async def test_start_calls_first_refresh(
         self,
@@ -784,6 +782,7 @@ class TestCoordinatorLifecycle:
     ) -> None:
         """Test that start() calls async_config_entry_first_refresh."""
         with (
+            patch.object(coordinator, "_fetch_site_info", new=AsyncMock()) as mock_fetch_site,
             patch.object(coordinator, "async_config_entry_first_refresh", new=AsyncMock()) as mock_refresh,
             patch("custom_components.amber_express.coordinator.async_track_time_change") as mock_track,
         ):
@@ -791,6 +790,7 @@ class TestCoordinatorLifecycle:
 
             await coordinator.start()
 
+            mock_fetch_site.assert_called_once()
             mock_refresh.assert_called_once()
             mock_track.assert_called_once()
 
@@ -803,6 +803,7 @@ class TestCoordinatorLifecycle:
         mock_unsub = MagicMock()
 
         with (
+            patch.object(coordinator, "_fetch_site_info", new=AsyncMock()),
             patch.object(coordinator, "async_config_entry_first_refresh", new=AsyncMock()),
             patch(
                 "custom_components.amber_express.coordinator.async_track_time_change",

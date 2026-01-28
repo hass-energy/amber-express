@@ -48,7 +48,7 @@ class CDFPollingStrategy:
 
     # Configuration constants
     WINDOW_SIZE = 100  # Rolling window of observations (N)
-    DEFAULT_POLLS_PER_INTERVAL = 4  # Default number of polls per 5-minute window (k)
+    DEFAULT_POLLS_PER_INTERVAL = 4  # Default number of polls per interval (k)
     MIN_POLLS_PER_INTERVAL = 1  # Minimum polls per interval
     MIN_CDF_POINTS = 2  # Minimum points required for a valid CDF
     COLD_START_INTERVAL: ClassVar[IntervalObservation] = {"start": 15.0, "end": 45.0}
@@ -70,7 +70,7 @@ class CDFPollingStrategy:
         self._compute_poll_schedule()
 
     def start_interval(self, polls_per_interval: int | None = None) -> None:
-        """Reset state for a new 5-minute interval.
+        """Reset state for a new interval.
 
         Args:
             polls_per_interval: Number of confirmatory polls to schedule.

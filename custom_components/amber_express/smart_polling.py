@@ -28,7 +28,7 @@ class SmartPollingManager:
     """Manages smart polling decisions based on interval timing and confirmation status.
 
     Responsibilities:
-    - Detecting 5-minute interval boundaries and resetting state
+    - Detecting interval boundaries and resetting state
     - Tracking whether confirmed price has been received this interval
     - Deciding IF we should poll (has_confirmed_price, forecasts_pending)
     - Delegating WHEN to poll to CDFPollingStrategy
@@ -40,13 +40,19 @@ class SmartPollingManager:
     interval-level state while the CDF strategy handles the statistical learning.
     """
 
-    def __init__(self, observations: list[IntervalObservation] | None = None) -> None:
+    def __init__(
+        self,
+        interval_length: int,
+        observations: list[IntervalObservation] | None = None,
+    ) -> None:
         """Initialize the polling manager.
 
         Args:
+            interval_length: Site interval length in minutes (5 or 30)
             observations: Optional pre-loaded observations from storage
 
         """
+        self._interval_length = interval_length
         self._current_interval_start: datetime | None = None
         self._has_confirmed_price = False
         self._poll_count_this_interval = 0
@@ -55,11 +61,10 @@ class SmartPollingManager:
         self._forecasts_pending = False
         self._cdf_strategy = CDFPollingStrategy(observations)
 
-    def _get_current_5min_interval(self) -> datetime:
-        """Get the start of the current 5-minute interval."""
+    def _get_current_interval_start(self) -> datetime:
+        """Get the start of the current interval."""
         now = datetime.now(UTC)
-        # Round down to nearest 5 minutes
-        minutes = (now.minute // 5) * 5
+        minutes = (now.minute // self._interval_length) * self._interval_length
         return now.replace(minute=minutes, second=0, microsecond=0)
 
     def _calculate_polls_per_interval(self, rate_limit_info: RateLimitInfo) -> int:
@@ -90,7 +95,7 @@ class SmartPollingManager:
             True if this is a new interval (should poll immediately), False otherwise
 
         """
-        current_interval = self._get_current_5min_interval()
+        current_interval = self._get_current_interval_start()
 
         # Not a new interval
         if self._current_interval_start == current_interval:
@@ -117,7 +122,8 @@ class SmartPollingManager:
             # Clear the first-interval flag now that we're in a real new interval
             self._first_interval_after_startup = False
             _LOGGER.debug(
-                "New 5-minute interval started: %s (k=%d, scheduled polls: %s)",
+                "New %d-minute interval started: %s (k=%d, scheduled polls: %s)",
+                self._interval_length,
                 current_interval,
                 len(self._cdf_strategy.scheduled_polls),
                 [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
