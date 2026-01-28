@@ -140,12 +140,9 @@ class AmberApiClient:
             self._last_api_status = status
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
-                # 429 responses always include rate limit headers
-                headers = err.headers or {}
-                self._rate_limit_info = self._extract_rate_limit_info(headers)
-                reset_seconds = self._rate_limit_info["reset_seconds"]
+                reset_seconds = self._extract_reset_seconds_from_429(err.headers)
                 self._rate_limiter.record_rate_limit(reset_seconds)
-                raise RateLimitedError(reset_seconds) from err
+                raise RateLimitedError(reset_seconds if reset_seconds > 0 else None) from err
 
             msg = f"Failed to fetch sites: {err}"
             raise AmberApiError(msg, status) from err
@@ -197,21 +194,49 @@ class AmberApiClient:
                 msg = "Unexpected response format from get_current_prices"
                 raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+            # DEBUG HACK: Force all intervals to be estimates to test polling behavior
+            # Set AMBER_DEBUG_FORCE_ESTIMATES=1 to enable
+            import os
+
+            if os.environ.get("AMBER_DEBUG_FORCE_ESTIMATES"):
+                from amberelectric.models import CurrentInterval
+
+                for interval in response.data:
+                    actual = interval.actual_instance
+                    if isinstance(actual, CurrentInterval):
+                        interval.actual_instance = actual.copy(update={"estimate": True})
+
             return response.data
         except ApiException as err:
             status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
             self._last_api_status = status
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
-                # 429 responses always include rate limit headers
-                headers = err.headers or {}
-                self._rate_limit_info = self._extract_rate_limit_info(headers)
-                reset_seconds = self._rate_limit_info["reset_seconds"]
+                reset_seconds = self._extract_reset_seconds_from_429(err.headers)
                 self._rate_limiter.record_rate_limit(reset_seconds)
-                raise RateLimitedError(reset_seconds) from err
+                raise RateLimitedError(reset_seconds if reset_seconds > 0 else None) from err
 
             msg = f"Amber API error ({status}): {err.reason}"
             raise AmberApiError(msg, status) from err
+
+    def _extract_reset_seconds_from_429(self, headers: dict[str, str] | None) -> int:
+        """Extract reset seconds from 429 response headers, with fallback.
+
+        Returns 0 if headers are missing or invalid, triggering exponential backoff.
+        """
+        if not headers:
+            _LOGGER.debug("429 response missing headers, using exponential backoff")
+            return 0
+
+        try:
+            self._rate_limit_info = self._extract_rate_limit_info(headers)
+            return self._rate_limit_info["reset_seconds"]
+        except (KeyError, ValueError) as err:
+            _LOGGER.debug(
+                "429 response missing rate limit headers (%s), using exponential backoff",
+                err,
+            )
+            return 0
 
     def _extract_rate_limit_info(self, headers: dict[str, str]) -> RateLimitInfo:
         """Extract rate limit info from IETF RateLimit headers.

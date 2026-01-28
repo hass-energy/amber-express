@@ -225,6 +225,31 @@ class TestAmberApiClient:
             assert exc_info.value.reset_seconds == 120
             assert rate_limiter.is_limited() is True
 
+    async def test_fetch_current_prices_rate_limit_without_headers(
+        self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
+    ) -> None:
+        """Test 429 response without rate limit headers uses exponential backoff."""
+        err = ApiException(status=429)
+        # CloudFront 429 responses don't include rate limit headers
+        err.headers = {
+            "Content-Type": "application/json",
+            "x-amzn-ErrorType": "TooManyRequestsException",
+        }
+
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=err),
+        ):
+            with pytest.raises(RateLimitedError) as exc_info:
+                await api_client.fetch_current_prices("test_site")
+
+            # No reset_seconds when headers are missing
+            assert exc_info.value.reset_seconds is None
+            # Still triggers backoff (initial backoff of 10s)
+            assert rate_limiter.is_limited() is True
+            assert rate_limiter.current_backoff == 10
+
     async def test_fetch_current_prices_resets_backoff_on_success(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:

@@ -67,6 +67,9 @@ class SmartPollingManager:
         minutes = (now.minute // self._interval_length) * self._interval_length
         return now.replace(minute=minutes, second=0, microsecond=0)
 
+    # Reserve some polls as a buffer to avoid exhausting the rate limit
+    RATE_LIMIT_BUFFER = 5
+
     def _calculate_polls_per_interval(self, rate_limit_info: RateLimitInfo) -> int:
         """Calculate polls per interval based on rate limit quota.
 
@@ -74,10 +77,10 @@ class SmartPollingManager:
             rate_limit_info: Current rate limit information from API
 
         Returns:
-            Number of confirmatory polls (equals remaining quota)
+            Number of confirmatory polls (remaining quota minus buffer)
 
         """
-        return rate_limit_info["remaining"]
+        return max(0, rate_limit_info["remaining"] - self.RATE_LIMIT_BUFFER)
 
     def check_new_interval(
         self,
@@ -268,8 +271,9 @@ class SmartPollingManager:
 
         if self._cdf_strategy.scheduled_polls != old_schedule:
             _LOGGER.debug(
-                "Budget updated: k=%d, schedule: %s",
+                "Budget updated: k=%d, reset=%ds, schedule: %s",
                 polls_per_interval,
+                rate_limit_info["reset_seconds"],
                 [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
             )
 

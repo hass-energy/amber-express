@@ -797,7 +797,8 @@ class TestCoordinatorLifecycle:
 
     def test_get_cdf_polling_stats(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_cdf_polling_stats returns correct stats."""
-        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset_seconds": 300, "window_seconds": 300, "policy": "10;w=300"}
+        # remaining=9 gives 4 polls after buffer of 5
+        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 9, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -879,7 +880,8 @@ class TestCoordinatorLifecycle:
 
     def test_schedule_next_poll_schedules_next(self, coordinator: AmberDataCoordinator) -> None:
         """Test _schedule_next_poll schedules when polls remain."""
-        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset_seconds": 300, "window_seconds": 300, "policy": "10;w=300"}
+        # remaining=10 gives 5 polls after buffer of 5
+        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
 
         # Set up interval so we have a next poll delay
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
