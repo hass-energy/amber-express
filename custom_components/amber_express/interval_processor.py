@@ -43,7 +43,21 @@ CHANNEL_TYPE_MAP = {
 
 
 class IntervalProcessor:
-    """Transforms Amber API interval responses into internal data structures."""
+    """Transforms Amber API interval responses into internal ChannelData structures.
+
+    Responsibilities:
+    - Converting Amber SDK Interval objects to internal ChannelData TypedDicts
+    - Separating current intervals from forecast intervals by type
+    - Applying pricing mode logic (AEMO per_kwh vs App advanced_price.predicted)
+    - Converting prices from cents to dollars
+    - Extracting tariff information, spike status, renewables, and other metadata
+    - Building forecast lists with current interval prepended
+
+    This class handles the impedance mismatch between the Amber SDK's object model
+    and our internal snake_case TypedDict format. It's used by the coordinator for
+    polling data. WebSocket data uses a separate extraction path due to different
+    wire format (camelCase JSON vs SDK objects).
+    """
 
     def __init__(self, pricing_mode: str) -> None:
         """Initialize the processor with pricing mode."""

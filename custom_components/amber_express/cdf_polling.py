@@ -26,12 +26,24 @@ class CDFPollingStats:
 
 
 class CDFPollingStrategy:
-    """Cumulative Distribution Function strategy that learns optimal poll times from observations.
+    """Statistical algorithm that learns optimal poll times from historical observations.
 
-    Maintains a rolling window of interval observations [a, b] where the confirmed
-    price became available somewhere in that interval. Builds an empirical CDF from
-    these intervals and uses inverse CDF sampling to schedule polls that minimize
-    expected detection delay.
+    Responsibilities:
+    - Maintaining a rolling window of interval observations [start, end]
+    - Building an empirical Cumulative Distribution Function (CDF) from observations
+    - Computing optimal poll times via inverse CDF sampling
+    - Tracking scheduled polls and which have been executed
+    - Supporting mid-interval budget updates with conditional probability
+
+    The CDF represents "probability that confirmed price arrived by time t". Given
+    k polls to schedule, we place them at times where F(t) = 1/(k+1), 2/(k+1), etc.
+    This minimizes expected detection delay under the learned distribution.
+
+    This class is a pure algorithm with no dependencies on Home Assistant or the
+    Amber API. It only knows about time intervals and probability distributions.
+
+    Cold start: Uses synthetic observations centered around [15s, 45s] until real
+    data is collected.
     """
 
     # Configuration constants

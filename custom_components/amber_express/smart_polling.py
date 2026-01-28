@@ -27,8 +27,17 @@ class PollingState:
 class SmartPollingManager:
     """Manages smart polling decisions based on interval timing and confirmation status.
 
-    This class encapsulates the logic for determining when to poll the Amber API,
-    optimizing for minimal API calls while ensuring timely price updates.
+    Responsibilities:
+    - Detecting 5-minute interval boundaries and resetting state
+    - Tracking whether confirmed price has been received this interval
+    - Deciding IF we should poll (has_confirmed_price, forecasts_pending)
+    - Delegating WHEN to poll to CDFPollingStrategy
+    - Recording observations when confirmed prices are received
+    - Dynamically updating poll budget based on rate limit quota
+
+    This class is the bridge between the coordinator (which asks "should I poll?")
+    and the CDF strategy (which calculates optimal poll times). It maintains
+    interval-level state while the CDF strategy handles the statistical learning.
     """
 
     def __init__(self, observations: list[IntervalObservation] | None = None) -> None:

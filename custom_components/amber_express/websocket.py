@@ -50,7 +50,26 @@ WS_CHANNEL_TYPE_MAP = {
 
 
 class AmberWebSocketClient:
-    """WebSocket client for Amber Express prices."""
+    """WebSocket client for real-time Amber Electric price updates.
+
+    Responsibilities:
+    - Establishing and maintaining WebSocket connection to Amber's live-prices API
+    - Handling authentication via Bearer token in headers
+    - Subscribing to price updates for a specific site
+    - Reconnecting with exponential backoff on connection failures
+    - Detecting stale connections (no updates for 5+ minutes) and reconnecting
+    - Parsing incoming JSON messages and validating structure
+    - Extracting price data from camelCase wire format to internal ChannelData
+    - Invoking callback with processed data for coordinator integration
+
+    The WebSocket provides real-time current interval prices but NOT forecasts.
+    Forecasts still come from the polling API. The coordinator merges both sources
+    via DataSourceMerger, using whichever has fresher current interval data.
+
+    Note: The Amber WebSocket API is in alpha and may not be available for all
+    accounts. On 403 auth failure, this client stops reconnecting and the
+    integration falls back to polling-only mode.
+    """
 
     def __init__(
         self,

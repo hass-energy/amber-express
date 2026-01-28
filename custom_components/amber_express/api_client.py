@@ -36,10 +36,18 @@ class FetchResult:
 
 
 class AmberApiClient:
-    """Client for communicating with the Amber Electric API.
+    """Handles all HTTP communication with the Amber Electric API.
 
-    Handles all HTTP communication, rate limit header parsing,
-    and error handling. Returns raw API data for processing elsewhere.
+    Responsibilities:
+    - Making HTTP requests to the Amber API (fetch_sites, fetch_current_prices)
+    - Parsing IETF RateLimit headers from API responses
+    - Recording rate limit events and triggering backoff via the rate limiter
+    - Tracking last API status code for error reporting
+    - Returning raw API data (Site objects, Interval lists) for processing elsewhere
+
+    This class is intentionally "dumb" about business logic - it doesn't know about
+    polling strategies, data processing, or Home Assistant entities. It only knows
+    how to talk to the API and handle HTTP-level concerns.
     """
 
     def __init__(

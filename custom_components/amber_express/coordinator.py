@@ -52,9 +52,17 @@ _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
-    """Coordinator for Amber Express data.
+    """Orchestrates data fetching and polling lifecycle for a single Amber site.
 
-    Each coordinator is responsible for a single site (subentry).
+    Responsibilities:
+    - Polling lifecycle management (start/stop, interval detection, scheduling)
+    - Deciding WHEN to fetch (first poll vs subsequent, confirmed vs estimate logic)
+    - Processing fetched data through IntervalProcessor
+    - Merging data from polling and websocket sources via DataSourceMerger
+    - Providing data accessor methods for sensors (get_price, get_forecasts, etc.)
+    - Handling WebSocket update callbacks
+
+    Each coordinator instance manages a single site (subentry).
     """
 
     def __init__(

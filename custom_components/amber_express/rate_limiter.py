@@ -11,8 +11,21 @@ _LOGGER = logging.getLogger(__name__)
 class ExponentialBackoffRateLimiter:
     """Manages exponential backoff for rate-limited API calls.
 
-    This class tracks rate limit events and applies exponential backoff
-    to prevent overwhelming the API.
+    Responsibilities:
+    - Tracking whether we're currently in a rate-limit backoff period
+    - Recording rate limit events (429 responses) and calculating backoff duration
+    - Using API-provided reset time when available, falling back to exponential backoff
+    - Resetting backoff on successful API calls
+    - Providing remaining seconds until rate limit expires
+
+    The backoff strategy:
+    1. If API provides ratelimit-reset header, use that duration + 2s buffer
+    2. Otherwise, start at initial_backoff (10s) and double on each consecutive 429
+    3. Cap at max_backoff (300s / 5 minutes)
+    4. Reset to 0 on any successful API call
+
+    This class is shared between AmberApiClient (which records events) and the
+    coordinator (which checks before scheduling polls).
     """
 
     def __init__(

@@ -19,11 +19,20 @@ class MergedResult:
 
 
 class DataSourceMerger:
-    """Manages merging of polling and websocket data sources.
+    """Merges price data from polling and websocket sources with timestamp-based priority.
 
-    Stores current interval data and forecasts separately:
-    - Current interval: updated by both polling and websocket, fresher wins
-    - Forecasts: only from polling, preserved across websocket updates
+    Responsibilities:
+    - Storing current interval data from polling and websocket separately
+    - Storing forecasts (only available from polling API, not websocket)
+    - Determining which source has fresher data based on timestamps
+    - Merging current interval with forecasts into a unified result
+    - Tracking metadata about data freshness and source
+
+    Merge strategy:
+    - Current interval: whichever source (polling or websocket) is more recent wins
+    - Forecasts: always from polling, preserved even when websocket updates current
+    - This ensures websocket provides real-time current prices while polling
+      provides forecast data that websocket doesn't have
     """
 
     def __init__(self) -> None:
