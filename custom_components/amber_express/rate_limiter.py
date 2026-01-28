@@ -74,20 +74,20 @@ class ExponentialBackoffRateLimiter:
         self._backoff_seconds = 0
         self._rate_limit_until = None
 
-    def record_rate_limit(self, reset_seconds: int | None = None) -> datetime:
+    def record_rate_limit(self, reset_seconds: int) -> datetime:
         """Record a rate limit event and set backoff.
 
-        If reset_seconds is provided (from API ratelimit-reset header), use that.
-        Otherwise, fall back to exponential backoff.
+        Uses reset_seconds from API header if positive, otherwise falls back
+        to exponential backoff.
 
         Args:
-            reset_seconds: Seconds until quota resets (from API header)
+            reset_seconds: Seconds until quota resets (from API header), or 0 to use backoff
 
         Returns:
             When the rate limit expires
 
         """
-        if reset_seconds is not None and reset_seconds > 0:
+        if reset_seconds > 0:
             # Use the API-provided reset time (add small buffer)
             self._backoff_seconds = reset_seconds + 2
             _LOGGER.warning(

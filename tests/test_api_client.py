@@ -362,29 +362,29 @@ class TestRateLimitHeaderParsing:
 class TestApiClientErrorExtraction:
     """Tests for error header extraction."""
 
-    async def test_get_reset_from_error_no_headers(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error with no headers."""
+    async def test_get_reset_from_error_no_headers_raises(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error raises when headers missing."""
         err = ApiException(status=429)
         err.headers = None
 
-        result = api_client._get_reset_from_error(err)
-        assert result is None
+        with pytest.raises(ValueError, match="missing headers"):
+            api_client._get_reset_from_error(err)
 
-    async def test_get_reset_from_error_no_reset_header(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error with headers but no reset."""
+    async def test_get_reset_from_error_no_reset_header_raises(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error raises when reset header missing."""
         err = ApiException(status=429)
         err.headers = {"other-header": "value"}
 
-        result = api_client._get_reset_from_error(err)
-        assert result is None
+        with pytest.raises(KeyError):
+            api_client._get_reset_from_error(err)
 
-    async def test_get_reset_from_error_invalid_reset(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error with invalid reset value."""
+    async def test_get_reset_from_error_invalid_reset_raises(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error raises when reset value invalid."""
         err = ApiException(status=429)
         err.headers = {"ratelimit-reset": "not-a-number"}
 
-        result = api_client._get_reset_from_error(err)
-        assert result is None
+        with pytest.raises(ValueError, match="invalid literal"):
+            api_client._get_reset_from_error(err)
 
     async def test_get_reset_from_error_valid_reset(self, api_client: AmberApiClient) -> None:
         """Test _get_reset_from_error with valid reset value."""

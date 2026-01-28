@@ -300,7 +300,7 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_amber_data_rate_limit_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data respects rate limit backoff."""
-        coordinator._rate_limiter.record_rate_limit()  # Sets rate limit
+        coordinator._rate_limiter.record_rate_limit(60)  # Sets rate limit
 
         with patch.object(coordinator.hass, "async_add_executor_job") as mock_job:
             await coordinator._fetch_amber_data()
@@ -308,27 +308,22 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_amber_data_429_error(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data handles 429 error with backoff."""
-        with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=ApiException(status=429))
-        ):
+        err = ApiException(status=429)
+        err.headers = {"ratelimit-reset": "60"}
+        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_amber_data()
-            assert coordinator._rate_limiter.current_backoff == 10
+            # 60 + 2 buffer = 62
+            assert coordinator._rate_limiter.current_backoff == 62
             assert coordinator._rate_limiter.is_limited() is True
 
-    async def test_fetch_amber_data_429_exponential_backoff(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data uses exponential backoff."""
-        # First 429 sets backoff to 10
-        coordinator._rate_limiter.record_rate_limit()
-        assert coordinator._rate_limiter.current_backoff == 10
-
-        # Wait for rate limit to expire by resetting state
-        coordinator._rate_limiter._rate_limit_until = None
-
-        with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=ApiException(status=429))
-        ):
+    async def test_fetch_amber_data_429_uses_reset_header(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _fetch_amber_data uses reset header from 429 response."""
+        err = ApiException(status=429)
+        err.headers = {"ratelimit-reset": "120"}
+        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_amber_data()
-            assert coordinator._rate_limiter.current_backoff == 20
+            # 120 + 2 buffer = 122
+            assert coordinator._rate_limiter.current_backoff == 122
 
     async def test_fetch_amber_data_other_api_error(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data handles other API errors."""
@@ -359,14 +354,14 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_forecasts_429(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_forecasts handles 429 with rate limit and API status tracking."""
-        with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=ApiException(status=429))
-        ):
+        err = ApiException(status=429)
+        err.headers = {"ratelimit-reset": "60"}
+        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             result = await coordinator._fetch_forecasts(30)
             assert result is None
-            # Should trigger rate limiter
+            # Should trigger rate limiter (60 + 2 buffer = 62)
             assert coordinator._rate_limiter.is_limited() is True
-            assert coordinator._rate_limiter.current_backoff == 10
+            assert coordinator._rate_limiter.current_backoff == 62
             # Should record API status
             assert coordinator.get_api_status() == 429
 
@@ -542,7 +537,7 @@ class TestAmberDataCoordinator:
     async def test_fetch_amber_data_success_resets_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data resets rate limit backoff on success."""
         # Set up a previous rate limit that has now expired
-        coordinator._rate_limiter.record_rate_limit()
+        coordinator._rate_limiter.record_rate_limit(60)
         coordinator._rate_limiter._rate_limit_until = datetime.now(UTC) - timedelta(seconds=1)
 
         mock_interval = MagicMock(spec=CurrentInterval)

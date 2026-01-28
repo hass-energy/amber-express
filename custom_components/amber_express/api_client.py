@@ -257,12 +257,10 @@ class AmberApiClient:
             "policy": policy,
         }
 
-    def _get_reset_from_error(self, err: ApiException) -> int | None:
+    def _get_reset_from_error(self, err: ApiException) -> int:
         """Extract reset_seconds from ApiException headers."""
-        if not err.headers:
-            return None
-        reset_str = err.headers.get("ratelimit-reset")
-        if reset_str:
-            with contextlib.suppress(ValueError):
-                return int(reset_str)
-        return None
+        headers = err.headers
+        if headers is None:
+            msg = "Rate limit response missing headers"
+            raise ValueError(msg)
+        return int(headers["ratelimit-reset"])

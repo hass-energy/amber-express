@@ -2,7 +2,7 @@
 applyTo: '**/*.py'
 description: Python coding standards
 globs: ['**/*.py']
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Python coding standards
