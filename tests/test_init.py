@@ -103,6 +103,7 @@ class TestAsyncSetupEntry:
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
             mock_coordinator.check_new_interval = MagicMock(return_value=True)
             mock_coordinator.has_confirmed_price = False
+            mock_coordinator.is_rate_limited = False
             mock_coordinator.get_next_poll_delay = MagicMock(return_value=None)
             mock_coordinator.async_refresh = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()
@@ -145,6 +146,7 @@ class TestAsyncSetupEntry:
             mock_coordinator = AsyncMock()
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
             mock_coordinator.has_confirmed_price = False
+            mock_coordinator.is_rate_limited = False
             mock_coordinator.get_next_poll_delay = MagicMock(return_value=None)
             mock_coordinator_class.return_value = mock_coordinator
 
@@ -188,6 +190,7 @@ class TestAsyncSetupEntry:
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
             mock_coordinator.check_new_interval = MagicMock(return_value=True)
             mock_coordinator.has_confirmed_price = False
+            mock_coordinator.is_rate_limited = False
             mock_coordinator.get_next_poll_delay = MagicMock(return_value=5.5)
             mock_coordinator.async_refresh = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()
@@ -244,6 +247,7 @@ class TestAsyncSetupEntry:
             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
             mock_coordinator.check_new_interval = MagicMock(return_value=False)
             mock_coordinator.has_confirmed_price = False
+            mock_coordinator.is_rate_limited = False
             mock_coordinator.get_next_poll_delay = MagicMock(return_value=None)
             mock_coordinator.async_refresh = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()

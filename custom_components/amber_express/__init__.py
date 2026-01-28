@@ -104,9 +104,7 @@ async def _setup_site(
     observations = await cdf_store.async_load()
 
     # Create the data coordinator for this site
-    coordinator = AmberDataCoordinator(
-        hass, entry, subentry, cdf_store=cdf_store, observations=observations
-    )
+    coordinator = AmberDataCoordinator(hass, entry, subentry, cdf_store=cdf_store, observations=observations)
 
     # Create WebSocket client if enabled
     websocket_enabled = subentry.data.get(CONF_ENABLE_WEBSOCKET, DEFAULT_ENABLE_WEBSOCKET)
@@ -160,6 +158,19 @@ async def _setup_site(
         # Don't schedule if we have confirmed price
         if coordinator.has_confirmed_price:
             _LOGGER.debug("Not scheduling poll: already have confirmed price")
+            return
+
+        # If rate limited, schedule a resume when rate limit expires
+        if coordinator.is_rate_limited:
+            remaining = coordinator.rate_limit_remaining_seconds()
+            if remaining > 0:
+                _LOGGER.debug("Rate limit active, scheduling resume in %.0fs", remaining + 1)
+                # Schedule resume 1 second after rate limit expires
+                site_data.cancel_next_poll = async_call_later(
+                    hass,
+                    remaining + 1,
+                    _on_scheduled_poll,
+                )
             return
 
         delay = coordinator.get_next_poll_delay()

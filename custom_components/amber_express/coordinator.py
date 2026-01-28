@@ -187,6 +187,15 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Check if we have a confirmed price for this interval."""
         return self._polling_manager.has_confirmed_price
 
+    @property
+    def is_rate_limited(self) -> bool:
+        """Check if we're currently in rate limit backoff."""
+        return self._rate_limiter.is_limited()
+
+    def rate_limit_remaining_seconds(self) -> float:
+        """Get remaining seconds until rate limit expires."""
+        return self._rate_limiter.remaining_seconds()
+
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from Amber API using smart polling."""
         # Fetch site info on first run (for tariff codes etc.)
