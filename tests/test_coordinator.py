@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from amberelectric.models import CurrentInterval, ForecastInterval
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import UpdateFailed
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -237,16 +236,6 @@ class TestAmberDataCoordinator:
             mock_fetch_site.assert_called_once()
             assert coordinator._site_info_fetched is True
 
-    async def test_async_update_data_api_exception(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _async_update_data raises UpdateFailed on API exception."""
-        coordinator._site_info_fetched = True
-
-        with (
-            patch.object(coordinator, "_fetch_amber_data", new=AsyncMock(side_effect=ApiException(status=500))),
-            pytest.raises(UpdateFailed),
-        ):
-            await coordinator._async_update_data()
-
     async def test_fetch_site_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_site_info."""
         mock_site = MagicMock()
@@ -424,16 +413,6 @@ class TestAmberDataCoordinator:
         """Test is_price_spike returns False with null spike status."""
         coordinator.current_data = {CHANNEL_GENERAL: {ATTR_SPIKE_STATUS: None}}
         assert coordinator.is_price_spike() is False
-
-    async def test_async_update_data_generic_exception(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _async_update_data raises UpdateFailed on generic exception."""
-        coordinator._site_info_fetched = True
-
-        with (
-            patch.object(coordinator, "_fetch_amber_data", new=AsyncMock(side_effect=Exception("Generic error"))),
-            pytest.raises(UpdateFailed),
-        ):
-            await coordinator._async_update_data()
 
     async def test_fetch_amber_data_retry_forecasts_success(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data retries forecasts and succeeds."""
@@ -661,83 +640,6 @@ class TestAmberDataCoordinator:
             assert coordinator.get_api_status() == 500
             # Should NOT trigger rate limiter for non-429
             assert coordinator._rate_limiter.is_limited() is False
-
-    async def test_fetch_forecasts_success_sets_status_200(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts sets status to 200 on success."""
-        # Set up a previous error status
-        coordinator._set_api_status(429)
-        assert coordinator.get_api_status() == 429
-
-        mock_interval = MagicMock(spec=ForecastInterval)
-        mock_interval.per_kwh = 26.0
-        mock_interval.start_time = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-        mock_interval.end_time = datetime(2024, 1, 1, 10, 10, 0, tzinfo=UTC)
-        mock_interval.channel_type = MagicMock(value="general")
-        mock_interval.descriptor = MagicMock(value="neutral")
-        mock_interval.spike_status = MagicMock(value="none")
-        mock_interval.advanced_price = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
-
-        wrapped = wrap_interval(mock_interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=mock_response)):
-            result = await coordinator._fetch_forecasts(30)
-            assert result is not None
-            # API status should be 200
-            assert coordinator.get_api_status() == 200
-
-    async def test_fetch_amber_data_records_api_status(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data records API status on failure."""
-        with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=ApiException(status=503))
-        ):
-            await coordinator._fetch_amber_data()
-            assert coordinator.get_api_status() == 503
-
-    async def test_fetch_amber_data_sets_status_200_on_success(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data sets status to 200 on success."""
-        # Set up a previous error status
-        coordinator._set_api_status(500)
-        assert coordinator.get_api_status() == 500
-
-        mock_interval = MagicMock(spec=CurrentInterval)
-        mock_interval.per_kwh = 25.0
-        mock_interval.spot_per_kwh = 20.0
-        mock_interval.start_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-        mock_interval.end_time = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-        mock_interval.estimate = True
-        mock_interval.descriptor = MagicMock(value="neutral")
-        mock_interval.spike_status = MagicMock(value="none")
-        mock_interval.channel_type = MagicMock(value="general")
-        mock_interval.advanced_price = None
-        mock_interval.tariff_information = None
-        mock_interval.nem_time = None
-        mock_interval.renewables = None
-
-        wrapped = wrap_interval(mock_interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator.hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-            # API status should be 200
-            assert coordinator.get_api_status() == 200
-
-    def test_api_status_tracking(self, coordinator: AmberDataCoordinator) -> None:
-        """Test API status tracking."""
-        # Initially 200 (OK)
-        assert coordinator.get_api_status() == 200
-
-        # Set error status
-        coordinator._set_api_status(429)
-        assert coordinator.get_api_status() == 429
-
-        # Set back to 200
-        coordinator._set_api_status(200)
-        assert coordinator.get_api_status() == 200
 
     async def test_fetch_amber_data_first_poll_fetches_with_forecasts(
         self,

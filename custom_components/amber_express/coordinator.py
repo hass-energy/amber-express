@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-import contextlib
 from datetime import datetime
-from http import HTTPStatus
 import logging
 from typing import TYPE_CHECKING, Any
 
-import amberelectric
-from amberelectric.api import amber_api
-from amberelectric.configuration import Configuration
-from amberelectric.rest import ApiException
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_change
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-import http_sf
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from .api_client import AmberApiClient
 from .cdf_polling import CDFPollingStats, IntervalObservation
 from .const import (
     ATTR_DEMAND_WINDOW,
@@ -52,9 +46,6 @@ from .smart_polling import SmartPollingManager
 from .types import ChannelData, ChannelInfo, CoordinatorData, RateLimitInfo, SiteInfoData, TariffInfoData
 
 _LOGGER = logging.getLogger(__name__)
-
-# HTTP status codes
-HTTP_TOO_MANY_REQUESTS = 429
 
 # Interval detection - check every second to detect 5-minute interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
@@ -97,9 +88,11 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self.api_token = entry.data[CONF_API_TOKEN]
         self.site_id = subentry.data[CONF_SITE_ID]
 
-        # API client
-        configuration = Configuration(access_token=self.api_token)
-        self._api = amber_api.AmberApi(amberelectric.ApiClient(configuration))
+        # Exponential backoff for 429 errors
+        self._rate_limiter = ExponentialBackoffRateLimiter()
+
+        # API client (uses rate limiter for backoff)
+        self._api_client = AmberApiClient(hass, self.api_token, self._rate_limiter)
 
         # Interval processor for transforming API responses
         pricing_mode = self._get_subentry_option(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
@@ -107,9 +100,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Smart polling manager with CDF strategy
         self._polling_manager = SmartPollingManager(observations)
-
-        # Exponential backoff for 429 errors
-        self._rate_limiter = ExponentialBackoffRateLimiter()
 
         # Data source merger for combining polling and websocket data
         self._data_sources = DataSourceMerger()
@@ -121,12 +111,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Merged data (exposed via data_sources)
         self.current_data: CoordinatorData = {}
         self.data_source: str = DATA_SOURCE_POLLING
-
-        # API status tracking (OK = 200, error codes otherwise)
-        self._last_api_status: int = HTTPStatus.OK
-
-        # Rate limit info from API response headers
-        self._rate_limit_info: RateLimitInfo = {}
 
         # Poll scheduling state (managed by start/stop)
         self._unsub_time_change: Callable[[], None] | None = None
@@ -299,14 +283,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 _LOGGER.warning("Failed to fetch site info: %s", err)
             self._site_info_fetched = True
 
-        try:
-            await self._fetch_amber_data()
-        except amberelectric.ApiException as err:
-            msg = f"Error communicating with Amber API: {err}"
-            raise UpdateFailed(msg) from err
-        except Exception as err:
-            msg = f"Unexpected error: {err}"
-            raise UpdateFailed(msg) from err
+        await self._fetch_amber_data()
 
         # Merge data from polling and websocket
         self._update_from_sources()
@@ -317,20 +294,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Fetch site information including channels and tariff codes."""
         _LOGGER.debug("Fetching site info for site %s", self.site_id)
 
-        try:
-            response = await self.hass.async_add_executor_job(self._api.get_sites_with_http_info)
-            # Parse rate limit headers from successful response
-            self._parse_rate_limit_headers(response.headers)
-            sites = response.data if response.data else []
-        except ApiException as err:
-            if err.status == HTTP_TOO_MANY_REQUESTS:
-                reset_seconds = self._get_reset_from_error(err)
-                self._rate_limiter.record_rate_limit(reset_seconds)
-            else:
-                _LOGGER.warning("Failed to fetch sites: %s", err)
-            return
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch sites: %s", err)
+        sites = await self._api_client.fetch_sites()
+        if sites is None:
             return
 
         # Find our site
@@ -363,12 +328,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def _fetch_amber_data(self) -> None:
         """Fetch current prices and forecasts from Amber API."""
-        # Check if we're in a rate limit backoff period
-        if self._rate_limiter.is_limited():
-            remaining = self._rate_limiter.remaining_seconds()
-            _LOGGER.debug("Rate limit backoff: %.0f seconds remaining", remaining)
-            return
-
         # Use site's interval_length for resolution (default to 30 if not available)
         interval_length = self._site_info.get("interval_length")
         resolution = int(interval_length) if interval_length is not None else 30
@@ -402,43 +361,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Subsequent polls: fetch without forecasts (just checking for confirmed)
         next_intervals = FORECAST_INTERVALS if is_first_poll else 0
 
-        try:
-            response = await self.hass.async_add_executor_job(
-                lambda: self._api.get_current_prices_with_http_info(
-                    self.site_id,
-                    next=next_intervals,
-                    previous=0,
-                    resolution=resolution,
-                )
-            )
-            # Parse rate limit headers from successful response
-            self._parse_rate_limit_headers(response.headers)
-            # Reset backoff and record success
-            self._rate_limiter.record_success()
-            self._set_api_status(HTTPStatus.OK)
+        result = await self._api_client.fetch_current_prices(
+            self.site_id,
+            next_intervals=next_intervals,
+            resolution=resolution,
+        )
 
-            if response.data is None:
+        # Update polling manager with rate limit info
+        self._polling_manager.update_budget(self._api_client.rate_limit_info)
+
+        if result.intervals is None:
+            if not result.rate_limited:
                 _LOGGER.debug("API returned no data")
-                return
-            intervals = response.data
-        except ApiException as err:
-            if err.status is not None:
-                self._set_api_status(err.status)
-                if err.status == HTTP_TOO_MANY_REQUESTS:
-                    # Parse reset_seconds from error response headers
-                    reset_seconds = self._get_reset_from_error(err)
-                    self._rate_limiter.record_rate_limit(reset_seconds)
-                else:
-                    _LOGGER.warning("Amber API error (%d): %s", err.status, err.reason)
-            else:
-                _LOGGER.warning("Amber API error: %s", err.reason)
-            return
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch Amber data: %s", err)
             return
 
         # Process the intervals
-        data = self._interval_processor.process_intervals(intervals)
+        data = self._interval_processor.process_intervals(result.intervals)
         general_data = data.get(CHANNEL_GENERAL, {})
 
         if not general_data:
@@ -486,39 +424,20 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def _fetch_forecasts(self, resolution: int) -> dict[str, ChannelData] | None:
         """Fetch forecasts. Returns data with forecasts or None on failure."""
-        try:
-            response = await self.hass.async_add_executor_job(
-                lambda: self._api.get_current_prices_with_http_info(
-                    self.site_id,
-                    next=FORECAST_INTERVALS,
-                    previous=0,
-                    resolution=resolution,
-                )
-            )
-            # Parse rate limit headers from successful response
-            self._parse_rate_limit_headers(response.headers)
-            self._set_api_status(HTTPStatus.OK)
+        result = await self._api_client.fetch_current_prices(
+            self.site_id,
+            next_intervals=FORECAST_INTERVALS,
+            resolution=resolution,
+        )
 
-            if response.data is None:
+        if result.intervals is None:
+            if not result.rate_limited:
                 _LOGGER.debug("API returned no forecast data")
-                return None
-            data = self._interval_processor.process_intervals(response.data)
-            _LOGGER.debug("Fetched %d forecast intervals", FORECAST_INTERVALS)
-            return data
-        except ApiException as err:
-            if err.status is not None:
-                self._set_api_status(err.status)
-                if err.status == HTTP_TOO_MANY_REQUESTS:
-                    reset_seconds = self._get_reset_from_error(err)
-                    self._rate_limiter.record_rate_limit(reset_seconds)
-                else:
-                    _LOGGER.warning("Failed to fetch forecasts: API error %d", err.status)
-            else:
-                _LOGGER.warning("Failed to fetch forecasts: %s", err.reason)
             return None
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch forecasts: %s", err)
-            return None
+
+        data = self._interval_processor.process_intervals(result.intervals)
+        _LOGGER.debug("Fetched %d forecast intervals", FORECAST_INTERVALS)
+        return data
 
     def _update_from_sources(self) -> None:
         """Update current_data from the merged data sources."""
@@ -636,80 +555,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get CDF polling statistics for diagnostics."""
         return self._polling_manager.get_cdf_stats()
 
-    def _set_api_status(self, status: int) -> None:
-        """Set the last API status code."""
-        self._last_api_status = status
-
     def get_api_status(self) -> int:
         """Get last API status code (200 = OK)."""
-        return self._last_api_status
-
-    def _parse_rate_limit_headers(self, headers: dict[str, str] | None) -> None:
-        """Parse IETF RateLimit headers from API response.
-
-        See: https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/
-        """
-        if not headers:
-            return
-
-        headers_lower = {k.lower(): v for k, v in headers.items()}
-
-        # Parse ratelimit-policy using RFC 8941 structured fields (e.g., "50;w=300")
-        policy = headers_lower.get("ratelimit-policy")
-        limit: int | None = None
-        window: int | None = None
-
-        if policy:
-            try:
-                result = http_sf.parse(policy.encode(), tltype="item")
-                if isinstance(result, tuple) and len(result) == 2:  # noqa: PLR2004
-                    value, params = result
-                    if isinstance(value, int):
-                        limit = value
-                    w = params.get("w")
-                    if isinstance(w, int):
-                        window = w
-            except http_sf.StructuredFieldError:
-                _LOGGER.debug("Failed to parse RateLimit-Policy header: %s", policy)
-
-        # Parse individual headers
-        remaining: int | None = None
-        reset: int | None = None
-
-        if "ratelimit-remaining" in headers_lower:
-            with contextlib.suppress(ValueError):
-                remaining = int(headers_lower["ratelimit-remaining"])
-
-        if "ratelimit-reset" in headers_lower:
-            with contextlib.suppress(ValueError):
-                reset = int(headers_lower["ratelimit-reset"])
-
-        # Also check ratelimit-limit header (may override policy)
-        if "ratelimit-limit" in headers_lower:
-            with contextlib.suppress(ValueError):
-                limit = int(headers_lower["ratelimit-limit"])
-
-        self._rate_limit_info = {
-            "limit": limit,
-            "remaining": remaining,
-            "reset_seconds": reset,
-            "window_seconds": window,
-            "policy": policy,
-        }
-
-        # Dynamically update poll budget based on new remaining quota
-        self._polling_manager.update_budget(self._rate_limit_info)
+        return self._api_client.last_status
 
     def get_rate_limit_info(self) -> RateLimitInfo:
         """Get rate limit information from last API response."""
-        return self._rate_limit_info
-
-    def _get_reset_from_error(self, err: ApiException) -> int | None:
-        """Extract reset_seconds from ApiException headers."""
-        if not err.headers:
-            return None
-        reset_str = err.headers.get("ratelimit-reset")
-        if reset_str:
-            with contextlib.suppress(ValueError):
-                return int(reset_str)
-        return None
+        return self._api_client.rate_limit_info
