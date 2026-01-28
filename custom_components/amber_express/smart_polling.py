@@ -43,12 +43,14 @@ class SmartPollingManager:
     def __init__(
         self,
         interval_length: int,
+        polls_per_interval: int,
         observations: list[IntervalObservation] | None = None,
     ) -> None:
         """Initialize the polling manager.
 
         Args:
             interval_length: Site interval length in minutes (5 or 30)
+            polls_per_interval: Initial number of confirmatory polls per interval
             observations: Optional pre-loaded observations from storage
 
         """
@@ -59,7 +61,7 @@ class SmartPollingManager:
         self._first_interval_after_startup = True
         self._last_estimate_elapsed: float | None = None
         self._forecasts_pending = False
-        self._cdf_strategy = CDFPollingStrategy(observations)
+        self._cdf_strategy = CDFPollingStrategy(polls_per_interval, observations)
 
     def _get_current_interval_start(self) -> datetime:
         """Get the start of the current interval."""

@@ -9,7 +9,7 @@ from custom_components.amber_express.cdf_polling import CDFPollingStats, CDFPoll
 
 def test_cold_start_initializes_with_synthetic_intervals() -> None:
     """Test that cold start fills with 100 synthetic [15, 45] intervals."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     assert len(strategy.observations) == 100
     for obs in strategy.observations:
@@ -19,7 +19,7 @@ def test_cold_start_initializes_with_synthetic_intervals() -> None:
 
 def test_cold_start_schedule_is_evenly_spaced() -> None:
     """Test cold start produces evenly spaced polls within [15, 45]."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # With k=4 polls and uniform [15, 45], should get polls at quantiles
     # p = [0.2, 0.4, 0.6, 0.8] of uniform [15, 45]
@@ -34,7 +34,7 @@ def test_preloaded_observations_override_cold_start() -> None:
         {"start": 10.0, "end": 20.0},
         {"start": 30.0, "end": 40.0},
     ]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     assert len(strategy.observations) == 2
     assert strategy.observations[0]["start"] == 10.0
@@ -42,7 +42,7 @@ def test_preloaded_observations_override_cold_start() -> None:
 
 def test_record_observation_adds_to_rolling_window() -> None:
     """Test that recording observations maintains rolling window."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     initial_count = len(strategy.observations)
 
     # Add a new observation
@@ -59,7 +59,7 @@ def test_record_observation_adds_to_rolling_window() -> None:
 def test_record_observation_ignores_invalid_interval() -> None:
     """Test that invalid intervals (start >= end) are ignored."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # Try to record invalid interval
     strategy.record_observation(start=30.0, end=20.0)
@@ -70,7 +70,7 @@ def test_record_observation_ignores_invalid_interval() -> None:
 
 def test_should_poll_returns_true_at_scheduled_time() -> None:
     """Test that should_poll returns True when poll time is reached."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval()
 
     # First scheduled poll is at 21 seconds
@@ -81,7 +81,7 @@ def test_should_poll_returns_true_at_scheduled_time() -> None:
 
 def test_should_poll_advances_after_increment() -> None:
     """Test that incrementing poll count advances to next scheduled poll."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval()
 
     # First poll at 21s
@@ -96,7 +96,7 @@ def test_should_poll_advances_after_increment() -> None:
 
 def test_should_poll_returns_false_after_all_polls_used() -> None:
     """Test that should_poll returns False after all scheduled polls are used."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval()
 
     # Use all 4 polls
@@ -110,7 +110,7 @@ def test_should_poll_returns_false_after_all_polls_used() -> None:
 def test_get_next_poll_delay_returns_time_until_next_poll() -> None:
     """Test that get_next_poll_delay returns correct delay."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 30.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
     strategy.start_interval()
 
     # With single interval [10, 30] and k=4, polls at [14, 18, 22, 26]
@@ -129,7 +129,7 @@ def test_get_next_poll_delay_returns_time_until_next_poll() -> None:
 
 def test_get_next_poll_delay_returns_none_after_all_polls() -> None:
     """Test that get_next_poll_delay returns None when no polls remain."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval()
 
     # Use all 4 polls
@@ -143,7 +143,7 @@ def test_get_next_poll_delay_returns_none_after_all_polls() -> None:
 def test_get_next_poll_delay_sub_second_precision() -> None:
     """Test that get_next_poll_delay handles sub-second precision."""
     observations: list[IntervalObservation] = [{"start": 25.0, "end": 26.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
     strategy.start_interval(polls_per_interval=4)
 
     # With narrow interval [25, 26], polls should be tightly spaced
@@ -156,7 +156,7 @@ def test_get_next_poll_delay_sub_second_precision() -> None:
 
 def test_start_interval_resets_poll_state() -> None:
     """Test that start_interval resets the poll index."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Advance past first poll
     strategy.increment_confirmatory_poll()
@@ -173,7 +173,7 @@ def test_start_interval_resets_poll_state() -> None:
 def test_get_stats_returns_correct_values() -> None:
     """Test that get_stats returns correct diagnostic values."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     stats = strategy.get_stats()
 
@@ -188,7 +188,7 @@ def test_get_stats_returns_correct_values() -> None:
 def test_cdf_with_single_interval() -> None:
     """Test CDF construction with a single interval."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 30.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # With single interval [10, 30] and k=4:
     # Quantiles at [0.2, 0.4, 0.6, 0.8] map to [14, 18, 22, 26]
@@ -202,7 +202,7 @@ def test_cdf_with_two_non_overlapping_intervals() -> None:
         {"start": 10.0, "end": 20.0},
         {"start": 30.0, "end": 40.0},
     ]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # Two equal-weight intervals of length 10
     # Each contributes 0.5 to total probability
@@ -219,7 +219,7 @@ def test_cdf_with_overlapping_intervals() -> None:
         {"start": 10.0, "end": 30.0},
         {"start": 20.0, "end": 40.0},
     ]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # Intervals overlap from 20-30
     # [10, 20) has density from first only: 1/(2*20) = 0.025
@@ -239,7 +239,7 @@ def test_cdf_with_overlapping_intervals() -> None:
 
 def test_observations_are_copied_not_referenced() -> None:
     """Test that observations property returns a copy."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     obs1 = strategy.observations
     obs2 = strategy.observations
 
@@ -264,17 +264,17 @@ def test_observation_window_size(
     """Test that observation window is properly sized."""
     # Empty list case needs special handling - CDFPollingStrategy treats [] as cold start
     if observations == []:
-        strategy = CDFPollingStrategy([])
+        strategy = CDFPollingStrategy(4, [])
         # Empty list means no observations, falls back to cold start
         assert len(strategy.observations) == 0
     else:
-        strategy = CDFPollingStrategy(observations)
+        strategy = CDFPollingStrategy(4, observations)
         assert len(strategy.observations) == expected_count
 
 
 def test_start_interval_with_custom_polls_per_interval() -> None:
     """Test that start_interval accepts custom polls_per_interval."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Default is 4 polls
     assert len(strategy.scheduled_polls) == 4
@@ -291,7 +291,7 @@ def test_start_interval_with_custom_polls_per_interval() -> None:
 
 def test_start_interval_clamps_polls_per_interval_to_min() -> None:
     """Test that polls_per_interval is clamped to minimum."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Too low - should clamp to MIN (1)
     strategy.start_interval(polls_per_interval=0)
@@ -304,7 +304,7 @@ def test_start_interval_clamps_polls_per_interval_to_min() -> None:
 
 def test_start_interval_none_preserves_previous() -> None:
     """Test that passing None preserves the previous polls_per_interval."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Set to 2 polls
     strategy.start_interval(polls_per_interval=2)
@@ -317,7 +317,7 @@ def test_start_interval_none_preserves_previous() -> None:
 
 def test_update_budget_recomputes_schedule() -> None:
     """Test that update_budget recomputes the schedule mid-interval."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Start with default 4 polls
     assert len(strategy.scheduled_polls) == 4
@@ -335,7 +335,7 @@ def test_update_budget_uses_conditional_cdf() -> None:
     When we update at time t, we know the event hasn't occurred yet, so we sample
     from the remaining probability mass. All new polls should be after elapsed time.
     """
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Cold start schedule: [21, 27, 33, 39] (evenly spaced in [15, 45])
     strategy.start_interval(polls_per_interval=4)
@@ -355,7 +355,7 @@ def test_update_budget_uses_conditional_cdf() -> None:
 
 def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
     """Test that conditional sampling concentrates polls in remaining probability mass."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval(polls_per_interval=4)
 
     # Original schedule spans [21, 39] within [15, 45] interval
@@ -374,7 +374,7 @@ def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
 
 def test_update_budget_all_mass_in_past() -> None:
     """Test update_budget when all probability mass is before elapsed time."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval(polls_per_interval=4)
 
     # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
@@ -388,7 +388,7 @@ def test_update_budget_all_mass_in_past() -> None:
 
 def test_empty_observations_list() -> None:
     """Test behavior with an explicitly empty observations list."""
-    strategy = CDFPollingStrategy([])
+    strategy = CDFPollingStrategy(4, [])
 
     # Empty list means no observations
     assert len(strategy.observations) == 0
@@ -398,7 +398,7 @@ def test_empty_observations_list() -> None:
 
 def test_increment_poll_beyond_scheduled() -> None:
     """Test incrementing poll when all polls are already used."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     strategy.start_interval(polls_per_interval=2)
 
     assert len(strategy.scheduled_polls) == 2
@@ -416,7 +416,7 @@ def test_increment_poll_beyond_scheduled() -> None:
 
 def test_get_stats_with_empty_observations() -> None:
     """Test get_stats when observations list is empty."""
-    strategy = CDFPollingStrategy([])
+    strategy = CDFPollingStrategy(4, [])
 
     stats = strategy.get_stats()
 
@@ -428,7 +428,7 @@ def test_get_stats_with_empty_observations() -> None:
 def test_cdf_at_edge_cases() -> None:
     """Test CDF evaluation at boundary conditions."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # Access internal method for edge case testing
     cdf_points = strategy._build_cdf()
@@ -448,7 +448,7 @@ def test_cdf_at_edge_cases() -> None:
 def test_inverse_cdf_edge_cases() -> None:
     """Test inverse CDF at boundary conditions."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     cdf_points = strategy._build_cdf()
 
@@ -471,7 +471,7 @@ def test_cdf_segment_with_zero_width() -> None:
     observations: list[IntervalObservation] = [
         {"start": 10.0, "end": 10.001},  # Very narrow interval
     ]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     cdf_points = strategy._build_cdf()
 
@@ -486,7 +486,7 @@ def test_inverse_cdf_flat_segment() -> None:
         {"start": 10.0, "end": 20.0},
         {"start": 30.0, "end": 40.0},
     ]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     cdf_points = strategy._build_cdf()
 
@@ -503,7 +503,7 @@ def test_compute_poll_schedule_insufficient_cdf_points() -> None:
     # but with a single observation, CDF is still valid
     # We need an edge case where time_grid ends up < 2
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 10.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # This observation has start == end, so it's invalid and won't produce valid CDF
     # Wait - record_observation skips start >= end, so let's try another approach
@@ -516,7 +516,7 @@ def test_compute_poll_schedule_insufficient_cdf_points() -> None:
 
 def test_build_cdf_empty_observations() -> None:
     """Test _build_cdf returns empty list with no observations."""
-    strategy = CDFPollingStrategy([])
+    strategy = CDFPollingStrategy(4, [])
 
     cdf_points = strategy._build_cdf()
 
@@ -526,7 +526,7 @@ def test_build_cdf_empty_observations() -> None:
 def test_build_cdf_single_point_time_grid() -> None:
     """Test _build_cdf handles case where time_grid has only one point."""
     # Create an observation where start and end collapse to same point
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
     # Manually set a degenerate observation that passed validation
     strategy._observations = [{"start": 10.0, "end": 10.0001}]
 
@@ -538,7 +538,7 @@ def test_build_cdf_single_point_time_grid() -> None:
 
 def test_cdf_at_interpolation_same_point() -> None:
     """Test _cdf_at when t falls exactly at a point where t0 == t1."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF points with a zero-width segment
     cdf_points = [(10.0, 0.0), (10.0, 0.5), (20.0, 1.0)]
@@ -551,7 +551,7 @@ def test_cdf_at_interpolation_same_point() -> None:
 
 def test_cdf_at_falls_through_all_segments() -> None:
     """Test _cdf_at fallback when t doesn't match any segment."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF points
     cdf_points = [(10.0, 0.0), (20.0, 0.5), (30.0, 1.0)]
@@ -563,7 +563,7 @@ def test_cdf_at_falls_through_all_segments() -> None:
 
 def test_inverse_cdf_falls_through_all_segments() -> None:
     """Test _inverse_cdf fallback when target_p doesn't match any segment."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF points with gaps
     cdf_points = [(10.0, 0.0), (20.0, 0.5), (30.0, 1.0)]
@@ -576,7 +576,7 @@ def test_inverse_cdf_falls_through_all_segments() -> None:
 def test_record_observation_same_start_end() -> None:
     """Test that recording observation with start == end is ignored."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
+    strategy = CDFPollingStrategy(4, observations)
 
     # Try to record invalid observation (start == end)
     strategy.record_observation(start=15.0, end=15.0)
@@ -587,7 +587,7 @@ def test_record_observation_same_start_end() -> None:
 
 def test_cdf_at_zero_width_segment() -> None:
     """Test _cdf_at with a zero-width segment in CDF (t1 == t0)."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Manually create CDF with a zero-width segment
     # Query at t=15 which is between the first zero-width segment and the next
@@ -602,7 +602,7 @@ def test_cdf_at_zero_width_segment() -> None:
 
 def test_cdf_at_zero_width_segment_hit_branch() -> None:
     """Test _cdf_at hits the t1 == t0 branch directly."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create a CDF with a zero-width segment in the middle
     # First we need t0 <= t <= t1 where t0 == t1
@@ -617,7 +617,7 @@ def test_cdf_at_zero_width_segment_hit_branch() -> None:
 
 def test_cdf_at_fallback_when_loop_exhausted() -> None:
     """Test _cdf_at fallback when for loop doesn't find a matching segment."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF where t is in a gap that the loop doesn't catch
     # This is a degenerate case - normally shouldn't happen
@@ -630,7 +630,7 @@ def test_cdf_at_fallback_when_loop_exhausted() -> None:
 
 def test_inverse_cdf_flat_probability_segment() -> None:
     """Test _inverse_cdf with a flat probability segment (p1 == p0)."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF with a flat segment (same probability at different times)
     # This represents a gap in the distribution
@@ -644,7 +644,7 @@ def test_inverse_cdf_flat_probability_segment() -> None:
 
 def test_inverse_cdf_hit_flat_segment_branch() -> None:
     """Test _inverse_cdf hits the p1 == p0 branch directly."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF where we query a probability in a flat segment (p0 == p1)
     # At p=0.5, segment (15.0, 0.5) to (20.0, 0.5): p0 <= 0.5 <= p1 = 0.5 <= 0.5 <= 0.5 = True
@@ -658,7 +658,7 @@ def test_inverse_cdf_hit_flat_segment_branch() -> None:
 
 def test_inverse_cdf_fallback_when_loop_exhausted() -> None:
     """Test _inverse_cdf fallback when for loop doesn't find a matching segment."""
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create a simple CDF
     cdf_points = [(10.0, 0.0), (20.0, 1.0)]
@@ -674,7 +674,7 @@ def test_cdf_at_loop_fallback_with_non_contiguous_cdf() -> None:
     This is a synthetic edge case - real CDFs are contiguous.
     Creates a CDF with gaps where t doesn't fall in any segment.
     """
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create non-contiguous CDF: [10, 12] then gap then [15, 20]
     # t=13 falls in the gap
@@ -695,7 +695,7 @@ def test_inverse_cdf_loop_fallback_with_gaps() -> None:
 
     Creates a CDF where target_p falls between segment probabilities.
     """
-    strategy = CDFPollingStrategy()
+    strategy = CDFPollingStrategy(4)
 
     # Create CDF: (10, 0.0) -> (15, 0.3) -> (20, 0.8) -> (25, 1.0)
     # Segments have p ranges: [0, 0.3], [0.3, 0.8], [0.8, 1.0]

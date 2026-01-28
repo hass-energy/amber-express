@@ -72,7 +72,7 @@ class TestAmberDataCoordinator:
         mock_config_entry.add_to_hass(hass)
         coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
         # Create polling manager for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5)
+        coord._polling_manager = SmartPollingManager(5, 4)
         return coord
 
     def test_coordinator_init(self, coordinator: AmberDataCoordinator) -> None:
@@ -420,7 +420,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        coordinator._polling_manager = SmartPollingManager(5, 4)
 
         # Create a confirmed interval (estimate=False)
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -468,7 +468,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        coordinator._polling_manager = SmartPollingManager(5, 4)
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -571,7 +571,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        coordinator._polling_manager = SmartPollingManager(5, 4)
 
         # Simulate that first poll already happened (estimate received)
         # This makes the next poll a "subsequent" poll that would need separate forecast fetch
@@ -633,7 +633,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        coordinator._polling_manager = SmartPollingManager(5, 4)
 
         mock_interval = MagicMock(spec=CurrentInterval)
         mock_interval.per_kwh = 25.0
@@ -675,7 +675,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        coordinator._polling_manager = SmartPollingManager(5, 4)
 
         # Simulate first poll already happened with data
         coordinator._polling_manager._poll_count_this_interval = 1
@@ -725,7 +725,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        coordinator._polling_manager = SmartPollingManager(5, 4)
 
         # Create a confirmed interval
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -772,7 +772,7 @@ class TestCoordinatorLifecycle:
         mock_config_entry.add_to_hass(hass)
         coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
         # Create polling manager for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5)
+        coord._polling_manager = SmartPollingManager(5, 4)
         return coord
 
     async def test_start_calls_first_refresh(
@@ -781,6 +781,10 @@ class TestCoordinatorLifecycle:
         hass: HomeAssistant,  # noqa: ARG002
     ) -> None:
         """Test that start() calls async_config_entry_first_refresh."""
+        # Set up data that _fetch_site_info populates in real code
+        coordinator._site_info["interval_length"] = 5
+        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50}
+
         with (
             patch.object(coordinator, "_fetch_site_info", new=AsyncMock()) as mock_fetch_site,
             patch.object(coordinator, "async_config_entry_first_refresh", new=AsyncMock()) as mock_refresh,
@@ -801,6 +805,9 @@ class TestCoordinatorLifecycle:
     ) -> None:
         """Test that start() sets up interval detection."""
         mock_unsub = MagicMock()
+        # Set up data that _fetch_site_info populates in real code
+        coordinator._site_info["interval_length"] = 5
+        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50}
 
         with (
             patch.object(coordinator, "_fetch_site_info", new=AsyncMock()),

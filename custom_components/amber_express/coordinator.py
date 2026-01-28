@@ -139,13 +139,14 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         Fetches site info, creates the polling manager, then starts polling.
         """
-        # Fetch site info first to get interval_length
+        # Fetch site info first to get interval_length and rate limit info
         await self._fetch_site_info()
 
-        # Create polling manager with site's interval length
-        interval_length = self._site_info.get("interval_length")
+        # Create polling manager with site's interval length and initial poll budget
+        rate_limit_info = self._api_client.rate_limit_info
         self._polling_manager = SmartPollingManager(
-            int(interval_length) if interval_length is not None else 5,
+            int(self._site_info["interval_length"]),
+            rate_limit_info["remaining"],
             self._observations,
         )
 
