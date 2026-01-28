@@ -62,20 +62,17 @@ class SmartPollingManager:
         minutes = (now.minute // 5) * 5
         return now.replace(minute=minutes, second=0, microsecond=0)
 
-    def _calculate_polls_per_interval(self, rate_limit_info: RateLimitInfo) -> int | None:
+    def _calculate_polls_per_interval(self, rate_limit_info: RateLimitInfo) -> int:
         """Calculate polls per interval based on rate limit quota.
 
         Args:
             rate_limit_info: Current rate limit information from API
 
         Returns:
-            Number of confirmatory polls (equals remaining quota), or None if unavailable
+            Number of confirmatory polls (equals remaining quota)
 
         """
-        remaining = rate_limit_info.get("remaining")
-        if remaining is None:
-            return None
-        return remaining
+        return rate_limit_info["remaining"]
 
     def check_new_interval(
         self,
@@ -253,9 +250,6 @@ class SmartPollingManager:
             return
 
         polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
-        if polls_per_interval is None:
-            return
-
         now = datetime.now(UTC)
         elapsed = (now - self._current_interval_start).total_seconds()
 

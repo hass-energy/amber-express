@@ -47,6 +47,22 @@ from custom_components.amber_express.const import (
 pytest_plugins = "pytest_homeassistant_custom_component"
 
 
+def make_rate_limit_headers(
+    *,
+    limit: int = 50,
+    remaining: int = 45,
+    reset: int = 180,
+    window: int = 300,
+) -> dict[str, str]:
+    """Create valid rate limit headers for testing."""
+    return {
+        "ratelimit-limit": str(limit),
+        "ratelimit-remaining": str(remaining),
+        "ratelimit-reset": str(reset),
+        "ratelimit-policy": f"{limit};w={window}",
+    }
+
+
 @pytest.fixture
 def mock_api_token() -> str:
     """Return a mock API token."""

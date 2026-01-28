@@ -120,17 +120,17 @@ class TariffInfoData(TypedDict, total=False):
     demand_window: bool | None
 
 
-class RateLimitInfo(TypedDict, total=False):
+class RateLimitInfo(TypedDict):
     """Rate limit information from API response headers (IETF RateLimit headers).
 
     See: https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/
     """
 
-    limit: int | None  # Maximum requests in window (from ratelimit-limit)
-    remaining: int | None  # Requests remaining in current window
-    reset_seconds: int | None  # Seconds until quota resets
-    window_seconds: int | None  # Window size in seconds (from policy)
-    policy: str | None  # Raw policy string (e.g., "50;w=300")
+    limit: int  # Maximum requests in window (from ratelimit-limit)
+    remaining: int  # Requests remaining in current window
+    reset_seconds: int  # Seconds until quota resets
+    window_seconds: int  # Window size in seconds (from policy)
+    policy: str  # Raw policy string (e.g., "50;w=300")
 
 
 class CoordinatorData(TypedDict, total=False):

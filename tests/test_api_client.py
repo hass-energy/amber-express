@@ -20,6 +20,22 @@ from custom_components.amber_express.api_client import AmberApiClient, AmberApiE
 from custom_components.amber_express.rate_limiter import ExponentialBackoffRateLimiter
 
 
+def _make_rate_limit_headers(
+    *,
+    limit: int = 50,
+    remaining: int = 45,
+    reset: int = 180,
+    window: int = 300,
+) -> dict[str, str]:
+    """Create valid rate limit headers for testing."""
+    return {
+        "ratelimit-limit": str(limit),
+        "ratelimit-remaining": str(remaining),
+        "ratelimit-reset": str(reset),
+        "ratelimit-policy": f"{limit};w={window}",
+    }
+
+
 def _make_interval(per_kwh: float = 25.0) -> Interval:
     """Create a test Interval object."""
     return Interval(
@@ -73,7 +89,7 @@ class TestAmberApiClient:
         )
         mock_response = MagicMock()
         mock_response.data = [site]
-        mock_response.headers = {}
+        mock_response.headers = _make_rate_limit_headers()
 
         with patch.object(
             api_client._hass,
@@ -91,7 +107,7 @@ class TestAmberApiClient:
         """Test site fetch with no sites."""
         mock_response = MagicMock()
         mock_response.data = []
-        mock_response.headers = {}
+        mock_response.headers = _make_rate_limit_headers()
 
         with patch.object(
             api_client._hass,
@@ -120,7 +136,7 @@ class TestAmberApiClient:
     ) -> None:
         """Test site fetch with rate limiting raises RateLimitedError."""
         err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "60"}
+        err.headers = _make_rate_limit_headers(reset=60)
 
         with patch.object(
             api_client._hass,
@@ -139,7 +155,7 @@ class TestAmberApiClient:
         interval = _make_interval()
         mock_response = MagicMock()
         mock_response.data = [interval]
-        mock_response.headers = {"ratelimit-remaining": "45"}
+        mock_response.headers = _make_rate_limit_headers(remaining=45)
 
         with patch.object(
             api_client._hass,
@@ -150,14 +166,14 @@ class TestAmberApiClient:
 
             assert len(result) == 1
             assert api_client.last_status == HTTPStatus.OK
-            assert api_client.rate_limit_info.get("remaining") == 45
+            assert api_client.rate_limit_info["remaining"] == 45
 
     async def test_fetch_current_prices_with_forecasts(self, api_client: AmberApiClient) -> None:
         """Test price fetch with forecast intervals."""
         intervals = [_make_interval(per_kwh=20.0 + i) for i in range(10)]
         mock_response = MagicMock()
         mock_response.data = intervals
-        mock_response.headers = {}
+        mock_response.headers = _make_rate_limit_headers()
 
         with patch.object(
             api_client._hass,
@@ -196,7 +212,7 @@ class TestAmberApiClient:
     ) -> None:
         """Test price fetch triggers backoff on 429."""
         err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "120"}
+        err.headers = _make_rate_limit_headers(reset=120)
 
         with patch.object(
             api_client._hass,
@@ -221,7 +237,7 @@ class TestAmberApiClient:
         interval = _make_interval()
         mock_response = MagicMock()
         mock_response.data = [interval]
-        mock_response.headers = {}
+        mock_response.headers = _make_rate_limit_headers()
 
         with patch.object(
             api_client._hass,
@@ -237,16 +253,11 @@ class TestAmberApiClient:
 class TestRateLimitHeaderParsing:
     """Tests for rate limit header parsing."""
 
-    async def test_parse_ratelimit_headers(self, api_client: AmberApiClient) -> None:
+    async def test_extract_rate_limit_info(self, api_client: AmberApiClient) -> None:
         """Test parsing of rate limit headers."""
         mock_response = MagicMock()
         mock_response.data = []
-        mock_response.headers = {
-            "ratelimit-limit": "50",
-            "ratelimit-remaining": "42",
-            "ratelimit-reset": "180",
-            "ratelimit-policy": "50;w=300",
-        }
+        mock_response.headers = _make_rate_limit_headers(limit=50, remaining=42, reset=180, window=300)
 
         with patch.object(
             api_client._hass,
@@ -256,19 +267,21 @@ class TestRateLimitHeaderParsing:
             await api_client.fetch_current_prices("test_site")
 
             info = api_client.rate_limit_info
-            assert info.get("limit") == 50
-            assert info.get("remaining") == 42
-            assert info.get("reset_seconds") == 180
-            assert info.get("window_seconds") == 300
-            assert info.get("policy") == "50;w=300"
+            assert info["limit"] == 50
+            assert info["remaining"] == 42
+            assert info["reset_seconds"] == 180
+            assert info["window_seconds"] == 300
+            assert info["policy"] == "50;w=300"
 
-    async def test_parse_ratelimit_headers_case_insensitive(self, api_client: AmberApiClient) -> None:
+    async def test_extract_rate_limit_info_case_insensitive(self, api_client: AmberApiClient) -> None:
         """Test rate limit header parsing is case insensitive."""
         mock_response = MagicMock()
         mock_response.data = []
         mock_response.headers = {
             "RateLimit-Limit": "50",
             "RATELIMIT-REMAINING": "42",
+            "RateLimit-Reset": "180",
+            "RATELIMIT-POLICY": "50;w=300",
         }
 
         with patch.object(
@@ -279,53 +292,18 @@ class TestRateLimitHeaderParsing:
             await api_client.fetch_current_prices("test_site")
 
             info = api_client.rate_limit_info
-            assert info.get("limit") == 50
-            assert info.get("remaining") == 42
+            assert info["limit"] == 50
+            assert info["remaining"] == 42
 
-    async def test_parse_empty_headers(self, api_client: AmberApiClient) -> None:
-        """Test handling of empty headers."""
-        mock_response = MagicMock()
-        mock_response.data = []
-        mock_response.headers = None
-
-        with patch.object(
-            api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await api_client.fetch_current_prices("test_site")
-
-            # Should not crash, info should be empty
-            assert api_client.rate_limit_info == {}
-
-    async def test_parse_invalid_policy_header(self, api_client: AmberApiClient) -> None:
-        """Test handling of malformed ratelimit-policy header."""
+    async def test_limit_header_overrides_policy(self, api_client: AmberApiClient) -> None:
+        """Test ratelimit-limit header overrides policy value."""
         mock_response = MagicMock()
         mock_response.data = []
         mock_response.headers = {
-            "ratelimit-policy": "invalid{{malformed",  # Invalid structured field
+            "ratelimit-limit": "100",  # Override
             "ratelimit-remaining": "42",
-        }
-
-        with patch.object(
-            api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await api_client.fetch_current_prices("test_site")
-
-            # Should parse remaining but skip invalid policy
-            info = api_client.rate_limit_info
-            assert info.get("remaining") == 42
-            assert info.get("limit") is None
-            assert info.get("window_seconds") is None
-
-    async def test_parse_policy_without_window(self, api_client: AmberApiClient) -> None:
-        """Test policy header with value but no window parameter."""
-        mock_response = MagicMock()
-        mock_response.data = []
-        mock_response.headers = {
-            "ratelimit-policy": "50",  # No ;w=N parameter
+            "ratelimit-reset": "180",
+            "ratelimit-policy": "50;w=300",  # Policy says 50
         }
 
         with patch.object(
@@ -336,63 +314,7 @@ class TestRateLimitHeaderParsing:
             await api_client.fetch_current_prices("test_site")
 
             info = api_client.rate_limit_info
-            assert info.get("limit") == 50
-            assert info.get("window_seconds") is None
-
-    async def test_parse_policy_non_int_value(self, api_client: AmberApiClient) -> None:
-        """Test policy header with non-integer value."""
-        mock_response = MagicMock()
-        mock_response.data = []
-        mock_response.headers = {
-            "ratelimit-policy": '"string_value";w=300',  # String instead of int
-        }
-
-        with patch.object(
-            api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await api_client.fetch_current_prices("test_site")
-
-            info = api_client.rate_limit_info
-            # limit should be None since value isn't int
-            assert info.get("limit") is None
-
-
-class TestApiClientErrorExtraction:
-    """Tests for error header extraction."""
-
-    async def test_get_reset_from_error_no_headers_raises(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error raises when headers missing."""
-        err = ApiException(status=429)
-        err.headers = None
-
-        with pytest.raises(ValueError, match="missing headers"):
-            api_client._get_reset_from_error(err)
-
-    async def test_get_reset_from_error_no_reset_header_raises(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error raises when reset header missing."""
-        err = ApiException(status=429)
-        err.headers = {"other-header": "value"}
-
-        with pytest.raises(KeyError):
-            api_client._get_reset_from_error(err)
-
-    async def test_get_reset_from_error_invalid_reset_raises(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error raises when reset value invalid."""
-        err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "not-a-number"}
-
-        with pytest.raises(ValueError, match="invalid literal"):
-            api_client._get_reset_from_error(err)
-
-    async def test_get_reset_from_error_valid_reset(self, api_client: AmberApiClient) -> None:
-        """Test _get_reset_from_error with valid reset value."""
-        err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "120"}
-
-        result = api_client._get_reset_from_error(err)
-        assert result == 120
+            assert info["limit"] == 100  # Header wins
 
     async def test_fetch_sites_generic_exception(self, api_client: AmberApiClient) -> None:
         """Test fetch_sites with generic exception propagates."""

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from http import HTTPStatus
 import logging
 from typing import TYPE_CHECKING, TypeGuard
@@ -128,7 +127,9 @@ class AmberApiClient:
         """
         try:
             response = await self._hass.async_add_executor_job(self._api.get_sites_with_http_info)
-            self._parse_rate_limit_headers(response.headers)
+            # API always returns rate limit headers
+            headers = response.headers or {}
+            self._rate_limit_info = self._extract_rate_limit_info(headers)
             self._last_api_status = HTTPStatus.OK
             if not _is_site_list(response.data):
                 msg = "Unexpected response format from get_sites"
@@ -139,7 +140,10 @@ class AmberApiClient:
             self._last_api_status = status
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
-                reset_seconds = self._get_reset_from_error(err)
+                # 429 responses always include rate limit headers
+                headers = err.headers or {}
+                self._rate_limit_info = self._extract_rate_limit_info(headers)
+                reset_seconds = self._rate_limit_info["reset_seconds"]
                 self._rate_limiter.record_rate_limit(reset_seconds)
                 raise RateLimitedError(reset_seconds) from err
 
@@ -183,7 +187,9 @@ class AmberApiClient:
                     resolution=resolution,
                 )
             )
-            self._parse_rate_limit_headers(response.headers)
+            # API always returns rate limit headers
+            headers = response.headers or {}
+            self._rate_limit_info = self._extract_rate_limit_info(headers)
             self._rate_limiter.record_success()
             self._last_api_status = HTTPStatus.OK
 
@@ -197,70 +203,45 @@ class AmberApiClient:
             self._last_api_status = status
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
-                reset_seconds = self._get_reset_from_error(err)
+                # 429 responses always include rate limit headers
+                headers = err.headers or {}
+                self._rate_limit_info = self._extract_rate_limit_info(headers)
+                reset_seconds = self._rate_limit_info["reset_seconds"]
                 self._rate_limiter.record_rate_limit(reset_seconds)
                 raise RateLimitedError(reset_seconds) from err
 
             msg = f"Amber API error ({status}): {err.reason}"
             raise AmberApiError(msg, status) from err
 
-    def _parse_rate_limit_headers(self, headers: dict[str, str] | None) -> None:
-        """Parse IETF RateLimit headers from API response.
+    def _extract_rate_limit_info(self, headers: dict[str, str]) -> RateLimitInfo:
+        """Extract rate limit info from IETF RateLimit headers.
 
         See: https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/
-        """
-        if not headers:
-            return
 
+        Raises:
+            KeyError: If required headers are missing.
+            ValueError: If header values are invalid.
+
+        """
         headers_lower = {k.lower(): v for k, v in headers.items()}
 
         # Parse ratelimit-policy using RFC 8941 structured fields (e.g., "50;w=300")
-        policy = headers_lower.get("ratelimit-policy")
-        limit: int | None = None
-        window: int | None = None
+        policy = headers_lower["ratelimit-policy"]
+        parsed = http_sf.parse(policy.encode(), tltype="item")
+        # Result is (value, params) tuple where value is int and params is dict
+        value: int = parsed[0]  # type: ignore[assignment,index]
+        params: dict[str, int] = parsed[1]  # type: ignore[assignment,index]
+        limit = value
+        window = params["w"]
 
-        if policy:
-            try:
-                result = http_sf.parse(policy.encode(), tltype="item")
-                if isinstance(result, tuple) and len(result) == 2:  # noqa: PLR2004
-                    value, params = result
-                    if isinstance(value, int):
-                        limit = value
-                    w = params.get("w")
-                    if isinstance(w, int):
-                        window = w
-            except http_sf.StructuredFieldError:
-                _LOGGER.debug("Failed to parse RateLimit-Policy header: %s", policy)
-
-        # Parse individual headers
-        remaining: int | None = None
-        reset: int | None = None
-
-        if "ratelimit-remaining" in headers_lower:
-            with contextlib.suppress(ValueError):
-                remaining = int(headers_lower["ratelimit-remaining"])
-
-        if "ratelimit-reset" in headers_lower:
-            with contextlib.suppress(ValueError):
-                reset = int(headers_lower["ratelimit-reset"])
-
-        # Also check ratelimit-limit header (may override policy)
+        # ratelimit-limit header may override policy limit
         if "ratelimit-limit" in headers_lower:
-            with contextlib.suppress(ValueError):
-                limit = int(headers_lower["ratelimit-limit"])
+            limit = int(headers_lower["ratelimit-limit"])
 
-        self._rate_limit_info = {
+        return {
             "limit": limit,
-            "remaining": remaining,
-            "reset_seconds": reset,
+            "remaining": int(headers_lower["ratelimit-remaining"]),
+            "reset_seconds": int(headers_lower["ratelimit-reset"]),
             "window_seconds": window,
             "policy": policy,
         }
-
-    def _get_reset_from_error(self, err: ApiException) -> int:
-        """Extract reset_seconds from ApiException headers."""
-        headers = err.headers
-        if headers is None:
-            msg = "Rate limit response missing headers"
-            raise ValueError(msg)
-        return int(headers["ratelimit-reset"])

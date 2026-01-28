@@ -310,12 +310,6 @@ class TestRateLimitBasedPolling:
         result = manager._calculate_polls_per_interval({"remaining": 1})
         assert result == 1
 
-    def test_calculate_polls_missing_remaining_returns_none(self) -> None:
-        """Test that missing remaining returns None."""
-        manager = SmartPollingManager()
-
-        assert manager._calculate_polls_per_interval({}) is None
-
     def test_should_poll_uses_rate_limit_info(self) -> None:
         """Test that should_poll uses rate limit info for k calculation."""
         manager = SmartPollingManager()
@@ -473,17 +467,6 @@ class TestUpdateBudgetEdgeCases:
 
         # Should not crash
         manager.update_budget({"remaining": 10})
-
-    def test_update_budget_no_remaining(self) -> None:
-        """Test update_budget with no remaining in rate limit info."""
-        manager = SmartPollingManager()
-
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
-
-            # Update with empty info - should not crash
-            manager.update_budget({})
 
 
 class TestCheckNewInterval:

@@ -35,7 +35,7 @@ from custom_components.amber_express.const import (
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
-from tests.conftest import make_forecast_interval, make_site, wrap_api_response, wrap_interval
+from tests.conftest import make_forecast_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
 
 
 def create_mock_subentry_for_coordinator(
@@ -290,7 +290,7 @@ class TestAmberDataCoordinator:
         """Test _fetch_site_info handles 429 and records rate limit."""
         # Create a mock ApiException with headers
         err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "120"}
+        err.headers = make_rate_limit_headers(reset=120)
 
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_site_info()
@@ -309,7 +309,7 @@ class TestAmberDataCoordinator:
     async def test_fetch_amber_data_429_error(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data handles 429 error with backoff."""
         err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "60"}
+        err.headers = make_rate_limit_headers(reset=60)
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_amber_data()
             # 60 + 2 buffer = 62
@@ -319,7 +319,7 @@ class TestAmberDataCoordinator:
     async def test_fetch_amber_data_429_uses_reset_header(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data uses reset header from 429 response."""
         err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "120"}
+        err.headers = make_rate_limit_headers(reset=120)
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_amber_data()
             # 120 + 2 buffer = 122
@@ -355,7 +355,7 @@ class TestAmberDataCoordinator:
     async def test_fetch_forecasts_429(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_forecasts handles 429 with rate limit and API status tracking."""
         err = ApiException(status=429)
-        err.headers = {"ratelimit-reset": "60"}
+        err.headers = make_rate_limit_headers(reset=60)
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             result = await coordinator._fetch_forecasts(30)
             assert result is None
