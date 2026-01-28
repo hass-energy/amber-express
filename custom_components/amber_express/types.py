@@ -104,11 +104,11 @@ class SiteInfoData(TypedDict, total=False):
 
     id: str
     nmi: str
-    network: str | None
+    network: str
     status: str
     channels: list[ChannelInfo]
     active_from: str | None
-    interval_length: float | None
+    interval_length: float
 
 
 class TariffInfoData(TypedDict, total=False):
