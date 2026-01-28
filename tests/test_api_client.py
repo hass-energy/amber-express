@@ -3,6 +3,10 @@
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from amberelectric.models import Site
+from amberelectric.models.channel import Channel
+from amberelectric.models.channel_type import ChannelType
+from amberelectric.models.site_status import SiteStatus
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 import pytest
@@ -33,10 +37,16 @@ class TestAmberApiClient:
 
     async def test_fetch_sites_success(self, api_client: AmberApiClient) -> None:
         """Test successful site fetch."""
-        mock_site = MagicMock()
-        mock_site.id = "test_site"
+        site = Site(
+            id="test_site",
+            nmi="1234567890",
+            channels=[Channel(identifier="E1", type=ChannelType.GENERAL, tariff="A1")],
+            network="Ausgrid",
+            status=SiteStatus.ACTIVE,
+            interval_length=30,
+        )
         mock_response = MagicMock()
-        mock_response.data = [mock_site]
+        mock_response.data = [site]
         mock_response.headers = {}
 
         with patch.object(
@@ -52,9 +62,9 @@ class TestAmberApiClient:
             assert api_client.last_status == HTTPStatus.OK
 
     async def test_fetch_sites_empty(self, api_client: AmberApiClient) -> None:
-        """Test site fetch with no data."""
+        """Test site fetch with no sites."""
         mock_response = MagicMock()
-        mock_response.data = None
+        mock_response.data = []
         mock_response.headers = {}
 
         with patch.object(

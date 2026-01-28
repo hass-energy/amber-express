@@ -6,11 +6,12 @@ import contextlib
 from dataclasses import dataclass
 from http import HTTPStatus
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 import amberelectric
 from amberelectric.api import amber_api
 from amberelectric.configuration import Configuration
+from amberelectric.models import Site
 from amberelectric.rest import ApiException
 import http_sf
 
@@ -24,6 +25,11 @@ _LOGGER = logging.getLogger(__name__)
 
 # HTTP status codes
 HTTP_TOO_MANY_REQUESTS = 429
+
+
+def _is_site_list(data: object) -> TypeGuard[list[Site]]:
+    """Validate data is a list of Site objects."""
+    return isinstance(data, list) and all(isinstance(site, Site) for site in data)
 
 
 @dataclass
@@ -85,7 +91,7 @@ class AmberApiClient:
         """Get rate limit information from last API response."""
         return self._rate_limit_info
 
-    async def fetch_sites(self) -> list[Any] | None:
+    async def fetch_sites(self) -> list[Site] | None:
         """Fetch all sites for this API token.
 
         Returns:
@@ -96,7 +102,10 @@ class AmberApiClient:
             response = await self._hass.async_add_executor_job(self._api.get_sites_with_http_info)
             self._parse_rate_limit_headers(response.headers)
             self._last_api_status = HTTPStatus.OK
-            return response.data if response.data else []
+            if not _is_site_list(response.data):
+                _LOGGER.warning("Unexpected response format from get_sites")
+                return None
+            return response.data
         except ApiException as err:
             if err.status == HTTP_TOO_MANY_REQUESTS:
                 reset_seconds = self._get_reset_from_error(err)
