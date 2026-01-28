@@ -48,7 +48,6 @@ class CDFPollingStrategy:
 
     # Configuration constants
     WINDOW_SIZE = 100  # Rolling window of observations (N)
-    MIN_POLLS_PER_INTERVAL = 1  # Minimum polls per interval
     MIN_CDF_POINTS = 2  # Minimum points required for a valid CDF
     COLD_START_INTERVAL: ClassVar[IntervalObservation] = {"start": 15.0, "end": 45.0}
 
@@ -73,7 +72,7 @@ class CDFPollingStrategy:
         self._scheduled_polls: list[float] = []
         self._next_poll_index = 0
         self._confirmatory_poll_count = 0
-        self._polls_per_interval = max(self.MIN_POLLS_PER_INTERVAL, polls_per_interval)
+        self._polls_per_interval = polls_per_interval
 
         # Pre-compute schedule for first interval
         self._compute_poll_schedule()
@@ -91,7 +90,7 @@ class CDFPollingStrategy:
 
         # Update polls per interval if provided
         if polls_per_interval is not None:
-            self._polls_per_interval = max(self.MIN_POLLS_PER_INTERVAL, polls_per_interval)
+            self._polls_per_interval = polls_per_interval
             # Recompute schedule with new k
             self._compute_poll_schedule()
 
@@ -106,7 +105,7 @@ class CDFPollingStrategy:
             elapsed_seconds: Current elapsed time in the interval
 
         """
-        self._polls_per_interval = max(self.MIN_POLLS_PER_INTERVAL, polls_per_interval)
+        self._polls_per_interval = polls_per_interval
         self._compute_poll_schedule(condition_on_elapsed=elapsed_seconds)
         # All scheduled polls are in the future, start from index 0
         self._next_poll_index = 0

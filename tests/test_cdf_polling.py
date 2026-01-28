@@ -289,15 +289,15 @@ def test_start_interval_with_custom_polls_per_interval() -> None:
     assert strategy.scheduled_polls == [25.0, 35.0]
 
 
-def test_start_interval_clamps_polls_per_interval_to_min() -> None:
-    """Test that polls_per_interval is clamped to minimum."""
+def test_start_interval_zero_budget_produces_empty_schedule() -> None:
+    """Test that zero polls_per_interval produces an empty schedule."""
     strategy = CDFPollingStrategy(4)
 
-    # Too low - should clamp to MIN (1)
+    # Zero budget = no polls
     strategy.start_interval(polls_per_interval=0)
-    assert len(strategy.scheduled_polls) == 1
+    assert len(strategy.scheduled_polls) == 0
 
-    # No max - can use any positive value
+    # Can use any positive value
     strategy.start_interval(polls_per_interval=50)
     assert len(strategy.scheduled_polls) == 50
 
