@@ -5,39 +5,34 @@ todos:
   - id: add-constants
     content: Add UNIFORM_BLEND_K_HIGH/K_LOW constants to CDFPollingStrategy
     status: pending
-  - id: interval-length
-    content: Add interval_seconds parameter to CDFPollingStrategy constructor
-    status: pending
-    dependencies:
-      - add-constants
   - id: weight-method
     content: Add _compute_blend_weight() method
     status: pending
     dependencies:
       - add-constants
-  - id: uniform-cdf
-    content: Add _build_uniform_cdf() method
-    status: pending
-    dependencies:
-      - interval-length
   - id: blend-cdfs
-    content: Add _blend_cdfs() method to combine CDFs at common time points
+    content: Add _blend_cdfs() method to combine targeted and uniform CDFs
     status: pending
     dependencies:
-      - uniform-cdf
+      - add-constants
+  - id: update-signatures
+    content: Add reset_seconds param to update_budget() and _compute_poll_schedule()
+    status: pending
+    dependencies:
+      - blend-cdfs
   - id: integrate-blending
-    content: Modify _compute_poll_schedule() to use blended CDF
+    content: Modify _compute_poll_schedule() to build uniform CDF and blend
     status: pending
     dependencies:
       - weight-method
-      - blend-cdfs
+      - update-signatures
   - id: update-smart-polling
-    content: Update SmartPollingManager to pass interval_seconds
+    content: Update SmartPollingManager.update_budget() to pass reset_seconds
     status: pending
     dependencies:
-      - interval-length
+      - update-signatures
   - id: update-tests
-    content: Update tests for new constructor signature and add blend tests
+    content: Update tests for new signatures and add blend behavior tests
     status: pending
     dependencies:
       - integrate-blending
@@ -55,8 +50,15 @@ F_blended(t) = w × F_targeted(t) + (1-w) × F_uniform(t)
 
 where:
   w = clamp((k - 10) / (30 - 10), 0, 1)
-  F_uniform(t) = (t - t_start) / (t_end - t_start)
+
+  # Synthetic observation for uniform CDF:
+  uniform_start = elapsed (current time from interval start)
+  uniform_end = elapsed + reset_seconds (when API quota resets)
+
+  F_uniform(t) = (t - uniform_start) / (uniform_end - uniform_start)
 ```
+
+The synthetic observation `[elapsed, elapsed + reset_seconds]` represents "confirmed price could arrive uniformly at any point from now until quota resets". This naturally spreads polls across the remaining quota window.
 
 ## Changes to [`cdf_polling.py`](custom_components/amber_express/cdf_polling.py)
 
@@ -65,12 +67,7 @@ where:
    - `UNIFORM_BLEND_K_HIGH = 30`
    - `UNIFORM_BLEND_K_LOW = 10`
 
-2. **Store interval length** in constructor (needed to compute uniform CDF endpoint):
-
-   - Add `interval_seconds: int` parameter to `__init__`
-   - Store as `self._interval_seconds`
-
-3. **Add weight calculation method**:
+2. **Add weight calculation method**:
    ```python
    def _compute_blend_weight(self, k: int) -> float:
        """Compute weight for blending targeted vs uniform CDF."""
@@ -81,38 +78,53 @@ where:
        return (k - self.UNIFORM_BLEND_K_LOW) / (self.UNIFORM_BLEND_K_HIGH - self.UNIFORM_BLEND_K_LOW)
    ```
 
-4. **Modify `_compute_poll_schedule()`** to blend CDFs:
-
-   - Compute weight from current k
-   - If w < 1.0, build uniform CDF from `condition_on_elapsed` (or 0) to `interval_seconds`
-   - Create blended CDF: `F_blended(t) = w × F_targeted(t) + (1-w) × F_uniform(t)`
-   - Sample poll times from blended CDF
-
-5. **Add `_build_uniform_cdf()` method**:
+3. **Modify `update_budget()` signature** to accept reset_seconds:
    ```python
-   def _build_uniform_cdf(self, start: float, end: float) -> list[tuple[float, float]]:
-       """Build uniform CDF from start to end time."""
-       return [(start, 0.0), (end, 1.0)]
+   def update_budget(self, polls_per_interval: int, elapsed_seconds: float, reset_seconds: int) -> None:
    ```
 
-6. **Add `_blend_cdfs()` method** to combine targeted and uniform CDFs at common time points.
+4. **Modify `_compute_poll_schedule()` signature** to accept reset_seconds:
+   ```python
+   def _compute_poll_schedule(
+       self,
+       condition_on_elapsed: float | None = None,
+       reset_seconds: int | None = None,
+   ) -> None:
+   ```
+
+5. **Build uniform CDF** using the synthetic observation:
+
+   - `uniform_start = condition_on_elapsed` (or 0 if unconditional)
+   - `uniform_end = condition_on_elapsed + reset_seconds`
+   - Creates observation `[uniform_start, uniform_end]`
+
+6. **Add `_blend_cdfs()` method** to combine targeted and uniform CDFs:
+
+   - Merge time points from both CDFs
+   - At each time point, compute `w × F_targeted(t) + (1-w) × F_uniform(t)`
+   - Return blended CDF for inverse sampling
 
 ## Changes to [`smart_polling.py`](custom_components/amber_express/smart_polling.py)
 
-1. **Pass interval length** to `CDFPollingStrategy` constructor:
+1. **Pass reset_seconds** to `CDFPollingStrategy.update_budget()`:
    ```python
-   self._cdf_strategy = CDFPollingStrategy(
-       observations,
-       interval_seconds=interval_length * 60,
-   )
+   def update_budget(self, rate_limit_info: RateLimitInfo) -> None:
+       # ...existing code...
+       self._cdf_strategy.update_budget(
+           polls_per_interval,
+           elapsed,
+           rate_limit_info["reset_seconds"],
+       )
    ```
 
 
 ## Testing
 
-Update existing tests in `tests/test_cdf_polling.py` to:
+Update existing tests in `tests/test_cdf_polling.py`:
 
-- Pass `interval_seconds` to constructor
-- Add tests for blend weight calculation
-- Add tests verifying poll schedule stretches out as k decreases
-- Add tests for edge cases (k=0, k very high)
+- Update `update_budget()` calls to pass `reset_seconds` parameter
+- Add tests for `_compute_blend_weight()`: verify clamped linear behavior at k=10, k=20, k=30
+- Add tests verifying poll schedule stretches towards uniform as k decreases:
+  - k=30: polls clustered around historical observation times
+  - k=10: polls evenly spread from elapsed to reset time
+- Add tests for edge cases (k=0, k > 30)
