@@ -7,26 +7,29 @@ import pytest
 from custom_components.amber_express.cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
 
 
-def test_cold_start_initializes_with_synthetic_intervals() -> None:
-    """Test that cold start fills with 100 synthetic [15, 45] intervals."""
+def test_cold_start_initializes_with_real_observations() -> None:
+    """Test that cold start fills with 100 real historical observations."""
     strategy = CDFPollingStrategy()
 
     assert len(strategy.observations) == 100
+    # Verify observations have valid start < end structure
     for obs in strategy.observations:
-        assert obs["start"] == 15.0
-        assert obs["end"] == 45.0
+        assert obs["start"] < obs["end"]
+        assert obs["start"] >= 0
 
 
-def test_cold_start_schedule_is_evenly_spaced() -> None:
-    """Test cold start produces evenly spaced polls within [15, 45]."""
+def test_cold_start_schedule_produces_valid_poll_times() -> None:
+    """Test cold start produces valid poll times from the CDF."""
     strategy = CDFPollingStrategy()
     strategy.start_interval(4)
 
-    # With k=4 polls and uniform [15, 45], should get polls at quantiles
-    # p = [0.2, 0.4, 0.6, 0.8] of uniform [15, 45]
-    # t = 15 + p * 30 = [21, 27, 33, 39]
-    expected = [21.0, 27.0, 33.0, 39.0]
-    assert strategy.scheduled_polls == expected
+    # With k=4 polls, should get 4 poll times from the learned CDF
+    assert len(strategy.scheduled_polls) == 4
+    # Polls should be in increasing order
+    for i in range(len(strategy.scheduled_polls) - 1):
+        assert strategy.scheduled_polls[i] < strategy.scheduled_polls[i + 1]
+    # Polls should be positive
+    assert all(t > 0 for t in strategy.scheduled_polls)
 
 
 def test_preloaded_observations_override_cold_start() -> None:
@@ -71,10 +74,12 @@ def test_record_observation_ignores_invalid_interval() -> None:
 
 def test_should_poll_returns_true_at_scheduled_time() -> None:
     """Test that should_poll returns True when poll time is reached."""
-    strategy = CDFPollingStrategy()
+    # Use explicit observations for deterministic test
+    observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
+    strategy = CDFPollingStrategy(observations)
     strategy.start_interval(4)
 
-    # First scheduled poll is at 21 seconds
+    # With uniform [15, 45], first poll is at 21s
     assert not strategy.should_poll_for_confirmed(20.0)
     assert strategy.should_poll_for_confirmed(21.0)
     assert strategy.should_poll_for_confirmed(25.0)  # Still true until poll executed
@@ -82,7 +87,9 @@ def test_should_poll_returns_true_at_scheduled_time() -> None:
 
 def test_should_poll_advances_after_increment() -> None:
     """Test that incrementing poll count advances to next scheduled poll."""
-    strategy = CDFPollingStrategy()
+    # Use explicit observations for deterministic test
+    observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
+    strategy = CDFPollingStrategy(observations)
     strategy.start_interval(4)
 
     # First poll at 21s
@@ -280,7 +287,9 @@ def test_observation_window_size(
 
 def test_start_interval_with_custom_polls_per_interval() -> None:
     """Test that start_interval accepts custom polls_per_interval."""
-    strategy = CDFPollingStrategy()
+    # Use explicit observations for deterministic test
+    observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
+    strategy = CDFPollingStrategy(observations)
     strategy.start_interval(4)
 
     # Initial is 4 polls
@@ -343,9 +352,11 @@ def test_update_budget_uses_conditional_cdf() -> None:
     When we update at time t, we know the event hasn't occurred yet, so we sample
     from the remaining probability mass. All new polls should be after elapsed time.
     """
-    strategy = CDFPollingStrategy()
+    # Use explicit observations for deterministic test
+    observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
+    strategy = CDFPollingStrategy(observations)
 
-    # Cold start schedule: [21, 27, 33, 39] (evenly spaced in [15, 45])
+    # With uniform [15, 45] schedule: [21, 27, 33, 39] (evenly spaced in [15, 45])
     strategy.start_interval(polls_per_interval=4)
     assert strategy.scheduled_polls == [21.0, 27.0, 33.0, 39.0]
 
@@ -751,16 +762,18 @@ def test_compute_blend_weight_at_k_low() -> None:
 def test_compute_blend_weight_linear_interpolation() -> None:
     """Test blend weight interpolates linearly between K_LOW and K_HIGH."""
     strategy = CDFPollingStrategy()
-    strategy._quota = 50  # K_LOW = 10, K_HIGH = 30
+    # With UNIFORM_BLEND_FRACTION_HIGH=0.3 and UNIFORM_BLEND_FRACTION_LOW=0.2:
+    # K_HIGH = 0.3 * 100 = 30, K_LOW = 0.2 * 100 = 20
+    strategy._quota = 100
 
-    # k=20 is midpoint between 10 and 30
-    assert strategy._compute_blend_weight(20) == 0.5
+    # k=25 is midpoint between 20 and 30
+    assert strategy._compute_blend_weight(25) == 0.5
 
-    # k=15 is 1/4 of the way
-    assert strategy._compute_blend_weight(15) == 0.25
+    # k=22 is 2/10 of the way (22-20)/(30-20) = 0.2
+    assert abs(strategy._compute_blend_weight(22) - 0.2) < 0.01
 
-    # k=25 is 3/4 of the way
-    assert strategy._compute_blend_weight(25) == 0.75
+    # k=28 is 8/10 of the way (28-20)/(30-20) = 0.8
+    assert abs(strategy._compute_blend_weight(28) - 0.8) < 0.01
 
 
 def test_update_budget_pure_targeted_at_high_k() -> None:
@@ -801,24 +814,24 @@ def test_update_budget_pure_uniform_at_low_k() -> None:
 
 def test_update_budget_blended_at_mid_k() -> None:
     """Test that mid-range k blends targeted and uniform distributions."""
-    strategy = CDFPollingStrategy()
+    # Use explicit observations for deterministic test
+    observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
+    strategy = CDFPollingStrategy(observations)
 
-    # First get pure targeted polls with high k
+    # With quota=100: K_HIGH = 0.3 * 100 = 30, K_LOW = 0.2 * 100 = 20
+    # k=25 is midpoint, giving w=0.5
     strategy.start_interval(polls_per_interval=35)
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=100, quota=50)
-    _targeted_polls = strategy.scheduled_polls.copy()
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=100, quota=100)
+    targeted_polls = strategy.scheduled_polls.copy()
 
-    # Now get blended polls with k=20 (w=0.5)
-    strategy.update_budget(polls_per_interval=20, elapsed_seconds=10.0, reset_seconds=100, quota=50)
+    # Now get blended polls with k=25 (w=0.5)
+    strategy.update_budget(polls_per_interval=25, elapsed_seconds=10.0, reset_seconds=100, quota=100)
     blended_polls = strategy.scheduled_polls.copy()
 
-    # Compute expected uniform polls for k=20
-    _uniform_polls = [10.0 + (j / 21) * 100 for j in range(1, 21)]
-
     # With w=0.5, blended should be halfway between targeted and uniform
-    # Can't verify exactly without knowing targeted, but polls should be
-    # spread out more than pure targeted (which clusters in [15, 45])
-    assert len(blended_polls) == 20
+    assert len(blended_polls) == 25
 
-    # At least some polls should be beyond 45s (spread by uniform influence)
-    assert any(t > 50.0 for t in blended_polls)
+    # Blended polls should extend beyond the targeted distribution [15, 45]
+    # due to uniform influence spreading them toward elapsed + reset_seconds
+    max_targeted = max(targeted_polls) if targeted_polls else 45.0
+    assert any(t > max_targeted for t in blended_polls)

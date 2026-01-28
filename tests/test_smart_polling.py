@@ -288,9 +288,9 @@ class TestGetCDFStats:
 
         stats = manager.get_cdf_stats()
 
-        assert stats.observation_count == 100  # Cold start synthetic observations
+        assert stats.observation_count == 100  # Cold start real observations
         assert stats.confirmatory_poll_count == 0
-        assert stats.scheduled_polls == [21.0, 27.0, 33.0, 39.0]
+        assert len(stats.scheduled_polls) == 4
 
 
 class TestPollingState:
@@ -439,11 +439,14 @@ class TestGetNextPollDelay:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
 
-            # At interval start, first poll is at 21s (cold start schedule with k=4)
+            # Get first scheduled poll time from CDF stats
+            first_poll = manager.get_cdf_stats().scheduled_polls[0]
+
+            # At 5s elapsed, delay should be (first_poll - 5)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
             delay = manager.get_next_poll_delay()
             assert delay is not None
-            assert delay == 16.0  # 21 - 5
+            assert abs(delay - (first_poll - 5.0)) < 0.001
 
 
 class TestObservationsProperty:

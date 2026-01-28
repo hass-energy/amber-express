@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, TypedDict
+from typing import TypedDict
+
+from .cdf_cold_start import COLD_START_OBSERVATIONS
 
 
 class IntervalObservation(TypedDict):
@@ -42,14 +44,13 @@ class CDFPollingStrategy:
     This class is a pure algorithm with no dependencies on Home Assistant or the
     Amber API. It only knows about time intervals and probability distributions.
 
-    Cold start: Uses synthetic observations centered around [15s, 45s] until real
+    Cold start: Uses real observations from historical data until real-time
     data is collected.
     """
 
     # Configuration constants
     WINDOW_SIZE = 100  # Rolling window of observations (N)
     MIN_CDF_POINTS = 2  # Minimum points required for a valid CDF
-    COLD_START_INTERVAL: ClassVar[IntervalObservation] = {"start": 15.0, "end": 45.0}
 
     # Uniform blending thresholds as fractions of quota: blend targeted CDF with
     # uniform distribution based on remaining poll budget (k) to spread polls when low
@@ -69,8 +70,8 @@ class CDFPollingStrategy:
         if observations is not None:
             self._observations = observations[-self.WINDOW_SIZE :]
         else:
-            # Cold start: fill with synthetic intervals
-            self._observations = [self.COLD_START_INTERVAL.copy() for _ in range(self.WINDOW_SIZE)]
+            # Cold start: use real historical observations
+            self._observations = list(COLD_START_OBSERVATIONS)
 
         self._scheduled_polls: list[float] = []
         self._next_poll_index = 0
