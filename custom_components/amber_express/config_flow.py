@@ -6,9 +6,6 @@ import logging
 from types import MappingProxyType
 from typing import Any
 
-import amberelectric
-from amberelectric.api import amber_api
-from amberelectric.configuration import Configuration
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -26,6 +23,7 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
+from .api_client import AmberApiClient
 from .const import (
     API_DEVELOPER_URL,
     CONF_API_TOKEN,
@@ -45,6 +43,7 @@ from .const import (
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
+from .rate_limiter import ExponentialBackoffRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,17 +66,21 @@ class RateLimitedError(HomeAssistantError):
 
 async def validate_api_token(hass: HomeAssistant, api_token: str) -> list[dict[str, Any]]:
     """Validate the API token and return available sites."""
-    configuration = Configuration(access_token=api_token)
-    api = amber_api.AmberApi(amberelectric.ApiClient(configuration))
+    # Use a temporary rate limiter (not shared with coordinator)
+    rate_limiter = ExponentialBackoffRateLimiter()
+    client = AmberApiClient(hass, api_token, rate_limiter)
 
-    try:
-        sites = await hass.async_add_executor_job(api.get_sites)
-    except amberelectric.ApiException as err:
-        if err.status == HTTP_FORBIDDEN:
-            raise InvalidAuthError from err
-        if err.status == HTTP_TOO_MANY_REQUESTS:
-            raise RateLimitedError from err
-        raise
+    sites = await client.fetch_sites()
+
+    # Handle errors based on status code
+    if sites is None:
+        if client.last_status == HTTP_FORBIDDEN:
+            raise InvalidAuthError
+        if client.last_status == HTTP_TOO_MANY_REQUESTS:
+            raise RateLimitedError
+        # Other errors - raise generic
+        msg = f"Failed to fetch sites: API returned status {client.last_status}"
+        raise HomeAssistantError(msg)
 
     if not sites:
         raise NoSitesFoundError

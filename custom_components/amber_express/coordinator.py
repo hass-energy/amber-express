@@ -225,7 +225,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Check if this is a new interval
         if not self._polling_manager.check_new_interval(
             has_data=bool(self.current_data),
-            rate_limit_info=self._rate_limit_info,
+            rate_limit_info=self._api_client.rate_limit_info,
         ):
             return
 

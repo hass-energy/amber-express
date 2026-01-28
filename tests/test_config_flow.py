@@ -1,9 +1,8 @@
 """Tests for config flow."""
 
 from collections.abc import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import amberelectric
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -20,49 +19,50 @@ from custom_components.amber_express.const import (
 )
 
 
+def _create_mock_site(
+    site_id: str,
+    nmi: str,
+    status: str = "active",
+    network: str = "Ausgrid",
+) -> MagicMock:
+    """Create a mock Site object."""
+    mock_site = MagicMock()
+    mock_site.id = site_id
+    mock_site.nmi = nmi
+    mock_site.status = MagicMock(value=status)
+    mock_site.network = network
+    mock_site.channels = []
+    return mock_site
+
+
 @pytest.fixture
 def mock_amber_api_multi_site() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with multiple active sites."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with multiple active sites."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Create two mock sites
-        mock_site1 = MagicMock()
-        mock_site1.id = "site1"
-        mock_site1.nmi = "1111111111"
-        mock_site1.status = MagicMock(value="active")
-        mock_site1.network = "Ausgrid"
-        mock_site1.channels = []
+        mock_site1 = _create_mock_site("site1", "1111111111", "active", "Ausgrid")
+        mock_site2 = _create_mock_site("site2", "2222222222", "active", "Endeavour")
 
-        mock_site2 = MagicMock()
-        mock_site2.id = "site2"
-        mock_site2.nmi = "2222222222"
-        mock_site2.status = MagicMock(value="active")
-        mock_site2.network = "Endeavour"
-        mock_site2.channels = []
+        mock_client.fetch_sites = AsyncMock(return_value=[mock_site1, mock_site2])
+        mock_client.last_status = 200
 
-        mock_instance.get_sites.return_value = [mock_site1, mock_site2]
-
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_inactive_site() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with only inactive sites."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with only inactive sites."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        mock_site = MagicMock()
-        mock_site.id = "inactive_site"
-        mock_site.nmi = "9999999999"
-        mock_site.status = MagicMock(value="closed")
-        mock_site.channels = []
+        mock_site = _create_mock_site("inactive_site", "9999999999", "closed")
+        mock_client.fetch_sites = AsyncMock(return_value=[mock_site])
+        mock_client.last_status = 200
 
-        mock_instance.get_sites.return_value = [mock_site]
-
-        yield mock_instance
+        yield mock_client
 
 
 async def test_form_user_step(hass: HomeAssistant, mock_amber_api: MagicMock) -> None:
@@ -113,11 +113,14 @@ async def test_form_unknown_error(hass: HomeAssistant, mock_amber_api_unknown_er
 
 
 async def test_form_other_api_exception(hass: HomeAssistant) -> None:
-    """Test handling of non-403 API exception."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
-        mock_instance.get_sites.side_effect = amberelectric.ApiException(status=500)
+    """Test handling of non-403 API exception (server error)."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        # Server error - returns None with status 500
+        mock_client.fetch_sites = AsyncMock(return_value=None)
+        mock_client.last_status = 500
 
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
@@ -351,9 +354,9 @@ async def test_already_configured_token(hass: HomeAssistant, mock_amber_api: Mag
 
 async def test_validate_api_token_with_channels(hass: HomeAssistant) -> None:
     """Test validate_api_token extracts channel info."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
         mock_site = MagicMock()
         mock_site.id = "test_site"
@@ -367,7 +370,8 @@ async def test_validate_api_token_with_channels(hass: HomeAssistant) -> None:
         mock_channel.tariff = "EA116"
         mock_site.channels = [mock_channel]
 
-        mock_instance.get_sites.return_value = [mock_site]
+        mock_client.fetch_sites = AsyncMock(return_value=[mock_site])
+        mock_client.last_status = 200
 
         result = await validate_api_token(hass, "test_token")
 
@@ -382,9 +386,9 @@ async def test_validate_api_token_with_channels(hass: HomeAssistant) -> None:
 
 async def test_site_with_network_info(hass: HomeAssistant) -> None:
     """Test that site network info is stored in subentry data."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
         mock_site = MagicMock()
         mock_site.id = "test_site"
@@ -398,7 +402,8 @@ async def test_site_with_network_info(hass: HomeAssistant) -> None:
         mock_channel.tariff = "EA116"
         mock_site.channels = [mock_channel]
 
-        mock_instance.get_sites.return_value = [mock_site]
+        mock_client.fetch_sites = AsyncMock(return_value=[mock_site])
+        mock_client.last_status = 200
 
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 

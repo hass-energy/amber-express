@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import amberelectric
 from amberelectric.models import CurrentInterval, ForecastInterval, Interval
@@ -133,63 +133,77 @@ def mock_config_entry(
     return entry
 
 
+def _create_mock_site(
+    site_id: str = "01ABCDEFGHIJKLMNOPQRSTUV",
+    nmi: str = "1234567890",
+    status: str = "active",
+    network: str = "Ausgrid",
+) -> MagicMock:
+    """Create a mock Site object."""
+    mock_site = MagicMock()
+    mock_site.id = site_id
+    mock_site.nmi = nmi
+    mock_site.status = MagicMock(value=status)
+    mock_site.network = network
+    mock_site.channels = []
+    return mock_site
+
+
 @pytest.fixture
 def mock_amber_api() -> Generator[MagicMock]:
-    """Mock the Amber Electric API."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client for config flow."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites response
-        mock_site = MagicMock()
-        mock_site.id = "01ABCDEFGHIJKLMNOPQRSTUV"
-        mock_site.nmi = "1234567890"
-        mock_site.status = MagicMock(value="active")
-        mock_site.network = "Ausgrid"
-        mock_site.channels = []
+        # Mock successful fetch_sites
+        mock_site = _create_mock_site()
+        mock_client.fetch_sites = AsyncMock(return_value=[mock_site])
+        mock_client.last_status = 200
 
-        mock_instance.get_sites.return_value = [mock_site]
-
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_invalid() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with invalid auth."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with invalid auth (403)."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites to raise 403
-        mock_instance.get_sites.side_effect = amberelectric.ApiException(status=403)
+        # Mock 403 error - returns None with status 403
+        mock_client.fetch_sites = AsyncMock(return_value=None)
+        mock_client.last_status = 403
 
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_no_sites() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with no sites."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with no sites."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites to return empty list
-        mock_instance.get_sites.return_value = []
+        # Mock empty sites list
+        mock_client.fetch_sites = AsyncMock(return_value=[])
+        mock_client.last_status = 200
 
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_unknown_error() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with unknown error."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with unknown error."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites to raise generic exception
-        mock_instance.get_sites.side_effect = Exception("Unknown error")
+        # Mock server error - returns None with status 500
+        mock_client.fetch_sites = AsyncMock(return_value=None)
+        mock_client.last_status = 500
 
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
