@@ -1,18 +1,44 @@
 """Tests for the Amber API client."""
 
+from datetime import date, datetime
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from amberelectric.models import Site
 from amberelectric.models.channel import Channel
 from amberelectric.models.channel_type import ChannelType
+from amberelectric.models.current_interval import CurrentInterval
+from amberelectric.models.interval import Interval
+from amberelectric.models.price_descriptor import PriceDescriptor
 from amberelectric.models.site_status import SiteStatus
+from amberelectric.models.spike_status import SpikeStatus
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 import pytest
 
 from custom_components.amber_express.api_client import AmberApiClient, FetchResult
 from custom_components.amber_express.rate_limiter import ExponentialBackoffRateLimiter
+
+
+def _make_interval(per_kwh: float = 25.0) -> Interval:
+    """Create a test Interval object."""
+    return Interval(
+        actual_instance=CurrentInterval(
+            type="CurrentInterval",
+            duration=30,
+            spot_per_kwh=5.0,
+            per_kwh=per_kwh,
+            date=date(2024, 1, 1),
+            nem_time=datetime(2024, 1, 1, 10, 0, 0),
+            start_time=datetime(2024, 1, 1, 9, 30, 0),
+            end_time=datetime(2024, 1, 1, 10, 0, 0),
+            renewables=45.0,
+            channel_type=ChannelType.GENERAL,
+            spike_status=SpikeStatus.NONE,
+            descriptor=PriceDescriptor.NEUTRAL,
+            estimate=True,
+        )
+    )
 
 
 @pytest.fixture
@@ -108,9 +134,9 @@ class TestAmberApiClient:
 
     async def test_fetch_current_prices_success(self, api_client: AmberApiClient) -> None:
         """Test successful price fetch."""
-        mock_interval = MagicMock()
+        interval = _make_interval()
         mock_response = MagicMock()
-        mock_response.data = [mock_interval]
+        mock_response.data = [interval]
         mock_response.headers = {"ratelimit-remaining": "45"}
 
         with patch.object(
@@ -129,9 +155,9 @@ class TestAmberApiClient:
 
     async def test_fetch_current_prices_with_forecasts(self, api_client: AmberApiClient) -> None:
         """Test price fetch with forecast intervals."""
-        mock_intervals = [MagicMock() for _ in range(10)]
+        intervals = [_make_interval(per_kwh=20.0 + i) for i in range(10)]
         mock_response = MagicMock()
-        mock_response.data = mock_intervals
+        mock_response.data = intervals
         mock_response.headers = {}
 
         with patch.object(

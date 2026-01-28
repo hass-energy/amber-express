@@ -6,12 +6,13 @@ import contextlib
 from dataclasses import dataclass
 from http import HTTPStatus
 import logging
-from typing import TYPE_CHECKING, Any, TypeGuard
+from typing import TYPE_CHECKING, TypeGuard
 
 import amberelectric
 from amberelectric.api import amber_api
 from amberelectric.configuration import Configuration
 from amberelectric.models import Site
+from amberelectric.models.interval import Interval
 from amberelectric.rest import ApiException
 import http_sf
 
@@ -32,11 +33,16 @@ def _is_site_list(data: object) -> TypeGuard[list[Site]]:
     return isinstance(data, list) and all(isinstance(site, Site) for site in data)
 
 
+def _is_interval_list(data: object) -> TypeGuard[list[Interval]]:
+    """Validate data is a list of Interval objects."""
+    return isinstance(data, list) and all(isinstance(item, Interval) for item in data)
+
+
 @dataclass
 class FetchResult:
     """Result of fetching prices from the API."""
 
-    intervals: list[Any] | None
+    intervals: list[Interval] | None
     status: int
     rate_limited: bool = False
 
@@ -155,6 +161,10 @@ class AmberApiClient:
             self._parse_rate_limit_headers(response.headers)
             self._rate_limiter.record_success()
             self._last_api_status = HTTPStatus.OK
+
+            if not _is_interval_list(response.data):
+                _LOGGER.warning("Unexpected response format from get_current_prices")
+                return FetchResult(intervals=None, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
             return FetchResult(
                 intervals=response.data,
