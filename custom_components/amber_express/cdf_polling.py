@@ -53,13 +53,11 @@ class CDFPollingStrategy:
 
     def __init__(
         self,
-        polls_per_interval: int,
         observations: list[IntervalObservation] | None = None,
     ) -> None:
         """Initialize the strategy.
 
         Args:
-            polls_per_interval: Initial number of confirmatory polls to schedule
             observations: Optional pre-loaded observations from storage
 
         """
@@ -72,10 +70,7 @@ class CDFPollingStrategy:
         self._scheduled_polls: list[float] = []
         self._next_poll_index = 0
         self._confirmatory_poll_count = 0
-        self._polls_per_interval = polls_per_interval
-
-        # Pre-compute schedule for first interval
-        self._compute_poll_schedule()
+        self._polls_per_interval = 0
 
     def start_interval(self, polls_per_interval: int | None = None) -> None:
         """Reset state for a new interval.

@@ -37,6 +37,7 @@ from custom_components.amber_express.const import (
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
 from custom_components.amber_express.smart_polling import SmartPollingManager
+from custom_components.amber_express.types import RateLimitInfo
 from tests.conftest import make_forecast_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
 
 
@@ -73,7 +74,7 @@ class TestAmberDataCoordinator:
         mock_config_entry.add_to_hass(hass)
         coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
         # Create polling manager and set site for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5, 4)
+        coord._polling_manager = SmartPollingManager(5)
         coord._site = make_site(site_id=coord.site_id, interval_length=5)
         return coord
 
@@ -420,7 +421,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Create a confirmed interval (estimate=False)
@@ -469,7 +470,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -573,7 +574,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Simulate that first poll already happened (estimate received)
@@ -636,7 +637,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         mock_interval = MagicMock(spec=CurrentInterval)
@@ -679,7 +680,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Simulate first poll already happened with data
@@ -730,7 +731,7 @@ class TestAmberDataCoordinator:
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
         coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5, 4)
+        coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
 
         # Create a confirmed interval
@@ -778,7 +779,7 @@ class TestCoordinatorLifecycle:
         mock_config_entry.add_to_hass(hass)
         coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
         # Create polling manager and set site for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5, 4)
+        coord._polling_manager = SmartPollingManager(5)
         coord._site = make_site(site_id=coord.site_id, interval_length=5)
         return coord
 
@@ -891,11 +892,17 @@ class TestCoordinatorLifecycle:
 
     def test_get_cdf_polling_stats(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_cdf_polling_stats returns correct stats."""
+        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset": 300}
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            coordinator._polling_manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+
         stats = coordinator.get_cdf_polling_stats()
 
         assert stats.observation_count == 100  # Cold start
         assert stats.confirmatory_poll_count == 0
-        assert len(stats.scheduled_polls) == 4  # Default k
+        assert len(stats.scheduled_polls) == 4
 
     def test_get_rate_limit_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_rate_limit_info returns api client info."""
@@ -968,10 +975,12 @@ class TestCoordinatorLifecycle:
 
     def test_schedule_next_poll_schedules_next(self, coordinator: AmberDataCoordinator) -> None:
         """Test _schedule_next_poll schedules when polls remain."""
+        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset": 300}
+
         # Set up interval so we have a next poll delay
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
 
         with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
             mock_call_later.return_value = MagicMock()

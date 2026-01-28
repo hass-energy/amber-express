@@ -149,7 +149,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         rate_limit_info = self._api_client.rate_limit_info
         self._polling_manager = SmartPollingManager(
             int(self._site.interval_length),
-            rate_limit_info["remaining"],
             self._observations,
         )
 
