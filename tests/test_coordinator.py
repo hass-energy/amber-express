@@ -76,29 +76,6 @@ class TestAmberDataCoordinator:
         assert coordinator.data_source == DATA_SOURCE_POLLING
         assert coordinator.current_data == {}
 
-    def test_should_poll_first_run(self, coordinator: AmberDataCoordinator) -> None:
-        """Test should_poll returns True on first run."""
-        assert coordinator.current_data == {}
-        assert coordinator.should_poll() is True
-
-    def test_should_poll_confirmed_price_stops_polling(self, coordinator: AmberDataCoordinator) -> None:
-        """Test should_poll returns False after confirmed price."""
-        coordinator.current_data = {"some": "data"}
-        # Trigger interval start and then confirm
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator.should_poll()  # This starts the interval
-            coordinator._polling_manager.on_confirmed_received()
-
-            # Now check that polling stops
-            result = coordinator.should_poll()
-            assert result is False
-
-    def test_should_poll_public_interface(self, coordinator: AmberDataCoordinator) -> None:
-        """Test should_poll public interface."""
-        coordinator.current_data = {}
-        assert coordinator.should_poll() is True
-
     def test_get_channel_data(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_channel_data."""
         coordinator.current_data = {CHANNEL_GENERAL: {"price": 0.25}}
@@ -442,23 +419,6 @@ class TestAmberDataCoordinator:
     def test_log_price_data_empty(self, coordinator: AmberDataCoordinator) -> None:
         """Test _log_price_data with empty data."""
         coordinator._log_price_data({}, "Test")
-
-    def test_should_poll_delegates_to_polling_manager(self, coordinator: AmberDataCoordinator) -> None:
-        """Test should_poll correctly delegates to SmartPollingManager."""
-        # Verify the integration works - detailed behavior tested in test_smart_polling.py
-        coordinator.current_data = {"some": "data"}
-
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-
-            # First poll should return True (new interval)
-            result = coordinator.should_poll()
-            assert result is True
-
-            # After confirmed, should return False
-            coordinator._polling_manager.on_confirmed_received()
-            result = coordinator.should_poll()
-            assert result is False
 
     def test_is_price_spike_null_status(self, coordinator: AmberDataCoordinator) -> None:
         """Test is_price_spike returns False with null spike status."""

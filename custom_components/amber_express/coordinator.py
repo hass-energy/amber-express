@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime
 from http import HTTPStatus
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import amberelectric
 from amberelectric.api import amber_api
@@ -13,8 +14,12 @@ from amberelectric.configuration import Configuration
 from amberelectric.rest import ApiException
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_time_change
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import http_sf
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from .cdf_polling import CDFPollingStats, IntervalObservation
 from .const import (
@@ -50,6 +55,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # HTTP status codes
 HTTP_TOO_MANY_REQUESTS = 429
+
+# Interval detection - check every second to detect 5-minute interval boundaries
+_INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -120,6 +128,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Rate limit info from API response headers
         self._rate_limit_info: RateLimitInfo = {}
 
+        # Poll scheduling state (managed by start/stop)
+        self._unsub_time_change: Callable[[], None] | None = None
+        self._cancel_next_poll: Callable[[], None] | None = None
+
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
         return self.subentry.data.get(key, default)
@@ -127,6 +139,120 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def update_pricing_mode(self, new_mode: str) -> None:
         """Update the pricing mode and recreate the interval processor."""
         self._interval_processor = IntervalProcessor(new_mode)
+
+    async def start(self) -> None:
+        """Start the coordinator polling lifecycle.
+
+        Performs initial data fetch and sets up interval-aligned polling.
+        """
+        # Initial fetch
+        await self.async_config_entry_first_refresh()
+
+        # Set up interval detection (checks every second for 5-minute boundaries)
+        self._unsub_time_change = async_track_time_change(
+            self.hass,
+            self._on_interval_check,
+            second=_INTERVAL_CHECK_SECONDS,
+        )
+
+        # Start sub-second polling chain if we don't have confirmed price yet
+        self._schedule_next_poll()
+
+        _LOGGER.debug("Coordinator started for site %s", self.subentry.title)
+
+    async def stop(self) -> None:
+        """Stop the coordinator polling lifecycle."""
+        # Cancel any pending scheduled poll
+        if self._cancel_next_poll:
+            self._cancel_next_poll()
+            self._cancel_next_poll = None
+
+        # Unsubscribe from time change listener
+        if self._unsub_time_change:
+            self._unsub_time_change()
+            self._unsub_time_change = None
+
+        _LOGGER.debug("Coordinator stopped for site %s", self.subentry.title)
+
+    def _cancel_pending_poll(self) -> None:
+        """Cancel any pending scheduled poll."""
+        if self._cancel_next_poll:
+            self._cancel_next_poll()
+            self._cancel_next_poll = None
+
+    async def _do_scheduled_poll(self) -> None:
+        """Execute the scheduled poll."""
+        _LOGGER.debug("Sub-second scheduled poll firing")
+        self._cancel_next_poll = None
+
+        # Double-check we still need to poll
+        if self._polling_manager.has_confirmed_price:
+            _LOGGER.debug("Skipping scheduled poll: already have confirmed price")
+            return
+
+        await self.async_refresh()
+
+        # Schedule the next poll if we still don't have confirmed price
+        self._schedule_next_poll()
+
+    @callback
+    def _on_scheduled_poll(self, _now: datetime) -> None:
+        """Handle the async_call_later callback by creating a task."""
+        self.hass.async_create_task(self._do_scheduled_poll())
+
+    def _schedule_next_poll(self) -> None:
+        """Schedule the next poll using sub-second precision."""
+        self._cancel_pending_poll()
+
+        # Don't schedule if we have confirmed price
+        if self._polling_manager.has_confirmed_price:
+            _LOGGER.debug("Not scheduling poll: already have confirmed price")
+            return
+
+        # If rate limited, schedule a resume when rate limit expires
+        if self._rate_limiter.is_limited():
+            remaining = self._rate_limiter.remaining_seconds()
+            if remaining > 0:
+                _LOGGER.debug("Rate limit active, scheduling resume in %.0fs", remaining + 1)
+                # Schedule resume 1 second after rate limit expires
+                self._cancel_next_poll = async_call_later(
+                    self.hass,
+                    remaining + 1,
+                    self._on_scheduled_poll,
+                )
+            return
+
+        delay = self._polling_manager.get_next_poll_delay()
+        if delay is None:
+            _LOGGER.debug("Not scheduling poll: no delay returned (no more polls)")
+            return
+
+        _LOGGER.debug("Scheduling next poll in %.2fs", delay)
+
+        # Schedule the next poll with sub-second precision
+        self._cancel_next_poll = async_call_later(
+            self.hass,
+            delay,
+            self._on_scheduled_poll,
+        )
+
+    async def _on_interval_check(self, _now: object) -> None:
+        """Check for new interval and start sub-second polling chain."""
+        # Check if this is a new interval
+        if not self._polling_manager.check_new_interval(
+            has_data=bool(self.current_data),
+            rate_limit_info=self._rate_limit_info,
+        ):
+            return
+
+        # New interval - cancel any pending poll from previous interval
+        self._cancel_pending_poll()
+
+        # New interval - do immediate first poll
+        await self.async_refresh()
+
+        # Start the sub-second polling chain for confirmatory polls
+        self._schedule_next_poll()
 
     def _build_site_info_from_subentry(self) -> SiteInfoData:
         """Build initial site info from subentry data."""
@@ -148,35 +274,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "status": "active",
             "channels": channels,
         }
-
-    def should_poll(self) -> bool:
-        """Check if polling is needed (public interface for __init__.py)."""
-        return self._polling_manager.should_poll(
-            has_data=bool(self.current_data),
-            rate_limit_until=self._rate_limiter.rate_limit_until,
-            rate_limit_info=self._rate_limit_info,
-        )
-
-    def check_new_interval(self) -> bool:
-        """Check if we've entered a new interval (for sub-second polling).
-
-        Returns:
-            True if this is a new interval (should poll immediately).
-
-        """
-        return self._polling_manager.check_new_interval(
-            has_data=bool(self.current_data),
-            rate_limit_info=self._rate_limit_info,
-        )
-
-    def get_next_poll_delay(self) -> float | None:
-        """Get the delay in seconds until the next scheduled poll.
-
-        Returns:
-            Seconds until next poll, or None if no more polls scheduled.
-
-        """
-        return self._polling_manager.get_next_poll_delay()
 
     @property
     def has_confirmed_price(self) -> bool:

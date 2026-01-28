@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 import logging
-from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later, async_track_time_change
+from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_API_TOKEN,
@@ -25,14 +22,7 @@ from .const import (
 from .coordinator import AmberDataCoordinator
 from .websocket import AmberWebSocketClient
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 _LOGGER = logging.getLogger(__name__)
-
-# Interval detection - check every second to detect 5-minute interval boundaries
-# Sub-second poll timing is handled by async_call_later chains
-INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 
@@ -43,8 +33,6 @@ class SiteRuntimeData:
 
     coordinator: AmberDataCoordinator
     websocket_client: AmberWebSocketClient | None = None
-    unsub_time_change: Callable[[], None] | None = None
-    cancel_next_poll: Callable[[], None] | None = None
 
 
 @dataclass(slots=True)
@@ -113,102 +101,15 @@ async def _setup_site(
             on_message=coordinator.update_from_websocket,
         )
 
-    # Store site runtime data (before setting up polling so callbacks can access it)
+    # Store site runtime data
     site_data = SiteRuntimeData(
         coordinator=coordinator,
         websocket_client=websocket_client,
     )
     runtime_data.sites[subentry_id] = site_data
 
-    def _cancel_pending_poll() -> None:
-        """Cancel any pending scheduled poll."""
-        if site_data.cancel_next_poll:
-            site_data.cancel_next_poll()
-            site_data.cancel_next_poll = None
-
-    async def _do_scheduled_poll() -> None:
-        """Execute the scheduled poll."""
-        _LOGGER.debug("Sub-second scheduled poll firing")
-        site_data.cancel_next_poll = None
-
-        # Double-check we still need to poll
-        if coordinator.has_confirmed_price:
-            _LOGGER.debug("Skipping scheduled poll: already have confirmed price")
-            return
-
-        await coordinator.async_refresh()
-
-        # Schedule the next poll if we still don't have confirmed price
-        _schedule_next_poll()
-
-    @callback
-    def _on_scheduled_poll(_now: datetime) -> None:
-        """Handle the async_call_later callback by creating a task."""
-        hass.async_create_task(_do_scheduled_poll())
-
-    def _schedule_next_poll() -> None:
-        """Schedule the next poll using sub-second precision."""
-        _cancel_pending_poll()
-
-        # Don't schedule if we have confirmed price
-        if coordinator.has_confirmed_price:
-            _LOGGER.debug("Not scheduling poll: already have confirmed price")
-            return
-
-        # If rate limited, schedule a resume when rate limit expires
-        if coordinator.is_rate_limited:
-            remaining = coordinator.rate_limit_remaining_seconds()
-            if remaining > 0:
-                _LOGGER.debug("Rate limit active, scheduling resume in %.0fs", remaining + 1)
-                # Schedule resume 1 second after rate limit expires
-                site_data.cancel_next_poll = async_call_later(
-                    hass,
-                    remaining + 1,
-                    _on_scheduled_poll,
-                )
-            return
-
-        delay = coordinator.get_next_poll_delay()
-        if delay is None:
-            _LOGGER.debug("Not scheduling poll: no delay returned (no more polls)")
-            return
-
-        _LOGGER.debug("Scheduling next poll in %.2fs", delay)
-
-        # Schedule the next poll with sub-second precision
-        site_data.cancel_next_poll = async_call_later(
-            hass,
-            delay,
-            _on_scheduled_poll,
-        )
-
-    async def _check_interval(_now: object) -> None:
-        """Check for new interval and start sub-second polling chain."""
-        # Check if this is a new interval
-        if not coordinator.check_new_interval():
-            return
-
-        # New interval - cancel any pending poll from previous interval
-        _cancel_pending_poll()
-
-        # New interval - do immediate first poll
-        await coordinator.async_refresh()
-
-        # Start the sub-second polling chain for confirmatory polls
-        _schedule_next_poll()
-
-    unsub_time_change = async_track_time_change(
-        hass,
-        _check_interval,
-        second=INTERVAL_CHECK_SECONDS,
-    )
-    site_data.unsub_time_change = unsub_time_change
-
-    # Initial fetch
-    await coordinator.async_config_entry_first_refresh()
-
-    # Start sub-second polling chain if we don't have confirmed price yet
-    _schedule_next_poll()
+    # Start the coordinator (initial fetch + polling lifecycle)
+    await coordinator.start()
 
     # Start WebSocket client if enabled
     if websocket_client:
@@ -217,18 +118,10 @@ async def _setup_site(
     _LOGGER.debug("Site %s set up successfully", subentry.title)
 
 
-async def _teardown_site(
-    hass: HomeAssistant,  # noqa: ARG001
-    site_data: SiteRuntimeData,
-) -> None:
+async def _teardown_site(site_data: SiteRuntimeData) -> None:
     """Tear down a single site."""
-    # Cancel any pending scheduled poll
-    if site_data.cancel_next_poll:
-        site_data.cancel_next_poll()
-
-    # Unsubscribe from time change listener
-    if site_data.unsub_time_change:
-        site_data.unsub_time_change()
+    # Stop the coordinator polling lifecycle
+    await site_data.coordinator.stop()
 
     # Stop WebSocket client
     if site_data.websocket_client:
@@ -243,7 +136,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> bo
     if unload_ok and entry.runtime_data:
         # Tear down all sites
         for site_data in entry.runtime_data.sites.values():
-            await _teardown_site(hass, site_data)
+            await _teardown_site(site_data)
         entry.runtime_data = None
 
     return unload_ok
