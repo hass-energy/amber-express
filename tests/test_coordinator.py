@@ -39,7 +39,14 @@ from custom_components.amber_express.const import (
 from custom_components.amber_express.coordinator import AmberDataCoordinator
 from custom_components.amber_express.smart_polling import SmartPollingManager
 from custom_components.amber_express.types import RateLimitInfo
-from tests.conftest import make_current_interval, make_forecast_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
+from tests.conftest import (
+    make_current_interval,
+    make_forecast_interval,
+    make_rate_limit_headers,
+    make_site,
+    wrap_api_response,
+    wrap_interval,
+)
 
 
 def create_mock_subentry_for_coordinator(
@@ -77,7 +84,13 @@ class TestAmberDataCoordinator:
         # Create polling manager and set site for tests (normally done in start())
         coord._polling_manager = SmartPollingManager(5)
         coord._site = make_site(site_id=coord.site_id, interval_length=5)
-        coord._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coord._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
         return coord
 
     def test_coordinator_init(self, coordinator: AmberDataCoordinator) -> None:
@@ -425,7 +438,13 @@ class TestAmberDataCoordinator:
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         # Create a confirmed interval (estimate=False) using real SDK object
         interval = make_current_interval(per_kwh=25.0, estimate=False)
@@ -462,7 +481,13 @@ class TestAmberDataCoordinator:
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         interval = make_current_interval(per_kwh=25.0, estimate=True)
         wrapped = wrap_interval(interval)
@@ -528,7 +553,13 @@ class TestAmberDataCoordinator:
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         # Simulate that first poll already happened (estimate received)
         # This makes the next poll a "subsequent" poll that would need separate forecast fetch
@@ -579,7 +610,13 @@ class TestAmberDataCoordinator:
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         interval = make_current_interval(per_kwh=25.0, estimate=True)
         wrapped = wrap_interval(interval)
@@ -610,7 +647,13 @@ class TestAmberDataCoordinator:
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         # Simulate first poll already happened with data
         coordinator._polling_manager._poll_count_this_interval = 1
@@ -649,7 +692,13 @@ class TestAmberDataCoordinator:
         coordinator = AmberDataCoordinator(hass, entry, subentry)
         coordinator._polling_manager = SmartPollingManager(5)
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         # Create a confirmed interval using real SDK object
         interval = make_current_interval(per_kwh=25.0, estimate=False)
@@ -685,7 +734,13 @@ class TestCoordinatorLifecycle:
         # Create polling manager and set site for tests (normally done in start())
         coord._polling_manager = SmartPollingManager(5)
         coord._site = make_site(site_id=coord.site_id, interval_length=5)
-        coord._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coord._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
         return coord
 
     async def test_start_calls_first_refresh(
@@ -695,7 +750,13 @@ class TestCoordinatorLifecycle:
     ) -> None:
         """Test that start() calls async_config_entry_first_refresh."""
         site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         with (
             patch.object(coordinator, "_fetch_site_info", new=AsyncMock(return_value=site)) as mock_fetch_site,
@@ -718,7 +779,13 @@ class TestCoordinatorLifecycle:
         """Test that start() sets up interval detection."""
         mock_unsub = MagicMock()
         site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         with (
             patch.object(coordinator, "_fetch_site_info", new=AsyncMock(return_value=site)),
@@ -798,7 +865,13 @@ class TestCoordinatorLifecycle:
     def test_get_cdf_polling_stats(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_cdf_polling_stats returns correct stats."""
         # remaining=9 gives 4 polls after buffer of 5
-        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 9, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        rate_limit_info: RateLimitInfo = {
+            "limit": 50,
+            "remaining": 9,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -881,7 +954,13 @@ class TestCoordinatorLifecycle:
     def test_schedule_next_poll_schedules_next(self, coordinator: AmberDataCoordinator) -> None:
         """Test _schedule_next_poll schedules when polls remain."""
         # remaining=10 gives 5 polls after buffer of 5
-        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        rate_limit_info: RateLimitInfo = {
+            "limit": 50,
+            "remaining": 10,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         # Set up interval so we have a next poll delay
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:

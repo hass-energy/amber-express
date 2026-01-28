@@ -498,8 +498,7 @@ class AmberSiteSensor(AmberBaseSensor):
             "status": site.status.value,
             "interval_length": site.interval_length,
             "channels": [
-                {"identifier": ch.identifier, "type": ch.type.value, "tariff": ch.tariff}
-                for ch in site.channels
+                {"identifier": ch.identifier, "type": ch.type.value, "tariff": ch.tariff} for ch in site.channels
             ],
         }
 

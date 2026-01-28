@@ -123,7 +123,13 @@ class TestShouldPoll:
         """Test that polling uses CDF scheduled times after first poll."""
         manager = SmartPollingManager(5)
         # remaining=10 gives us 5 polls after the buffer of 5 is subtracted
-        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        rate_limit_info: RateLimitInfo = {
+            "limit": 50,
+            "remaining": 10,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -268,7 +274,13 @@ class TestGetCDFStats:
         """Test that get_cdf_stats returns stats from CDF strategy."""
         manager = SmartPollingManager(5)
         # remaining=9 gives us 4 polls after the buffer of 5 is subtracted
-        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 9, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        rate_limit_info: RateLimitInfo = {
+            "limit": 50,
+            "remaining": 9,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -335,7 +347,13 @@ class TestRateLimitBasedPolling:
             # First poll with 45 remaining
             result = manager.should_poll(
                 has_data=True,
-                rate_limit_info={"limit": 50, "remaining": 45, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"},
+                rate_limit_info={
+                    "limit": 50,
+                    "remaining": 45,
+                    "reset_seconds": 300,
+                    "window_seconds": 300,
+                    "policy": "50;w=300",
+                },
             )
             assert result is True
 
@@ -352,12 +370,23 @@ class TestRateLimitBasedPolling:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Start interval with 45 remaining (40 after buffer)
-            manager.should_poll(has_data=True, rate_limit_info={"limit": 50, "remaining": 45, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"})
+            manager.should_poll(
+                has_data=True,
+                rate_limit_info={
+                    "limit": 50,
+                    "remaining": 45,
+                    "reset_seconds": 300,
+                    "window_seconds": 300,
+                    "policy": "50;w=300",
+                },
+            )
             assert len(manager.get_cdf_stats().scheduled_polls) == 45 - buffer
 
             # Time passes, budget shrinks to 15 (10 after buffer)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
-            manager.update_budget({"limit": 50, "remaining": 15, "reset_seconds": 285, "window_seconds": 300, "policy": "50;w=300"})
+            manager.update_budget(
+                {"limit": 50, "remaining": 15, "reset_seconds": 285, "window_seconds": 300, "policy": "50;w=300"}
+            )
 
             # Schedule should now have 10 polls
             assert len(manager.get_cdf_stats().scheduled_polls) == 15 - buffer
@@ -390,7 +419,13 @@ class TestGetNextPollDelay:
         """Test delay returns seconds until next poll."""
         manager = SmartPollingManager(5)
         # remaining=9 gives us 4 polls after buffer of 5
-        rate_limit_info: RateLimitInfo = {"limit": 50, "remaining": 9, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        rate_limit_info: RateLimitInfo = {
+            "limit": 50,
+            "remaining": 9,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -484,7 +519,9 @@ class TestUpdateBudgetEdgeCases:
         manager = SmartPollingManager(5)
 
         # Should not crash
-        manager.update_budget({"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"})
+        manager.update_budget(
+            {"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        )
 
 
 class TestCheckNewInterval:
@@ -524,7 +561,13 @@ class TestCheckNewInterval:
             # remaining=15 gives us 10 polls after buffer
             result = manager.check_new_interval(
                 has_data=True,
-                rate_limit_info={"limit": 50, "remaining": 15, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"},
+                rate_limit_info={
+                    "limit": 50,
+                    "remaining": 15,
+                    "reset_seconds": 300,
+                    "window_seconds": 300,
+                    "policy": "50;w=300",
+                },
             )
             assert result is True
 

@@ -193,19 +193,6 @@ class AmberApiClient:
             if not _is_interval_list(response.data):
                 msg = "Unexpected response format from get_current_prices"
                 raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
-
-            # DEBUG HACK: Force all intervals to be estimates to test polling behavior
-            # Set AMBER_DEBUG_FORCE_ESTIMATES=1 to enable
-            import os
-
-            if os.environ.get("AMBER_DEBUG_FORCE_ESTIMATES"):
-                from amberelectric.models import CurrentInterval
-
-                for interval in response.data:
-                    actual = interval.actual_instance
-                    if isinstance(actual, CurrentInterval):
-                        interval.actual_instance = actual.copy(update={"estimate": True})
-
             return response.data
         except ApiException as err:
             status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
