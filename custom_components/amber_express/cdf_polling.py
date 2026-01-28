@@ -51,6 +51,11 @@ class CDFPollingStrategy:
     MIN_CDF_POINTS = 2  # Minimum points required for a valid CDF
     COLD_START_INTERVAL: ClassVar[IntervalObservation] = {"start": 15.0, "end": 45.0}
 
+    # Uniform blending thresholds: blend targeted CDF with uniform distribution
+    # based on remaining poll budget (k) to spread polls when quota is low
+    UNIFORM_BLEND_K_HIGH = 30  # Pure targeted CDF when k >= this
+    UNIFORM_BLEND_K_LOW = 10  # Pure uniform distribution when k <= this
+
     def __init__(
         self,
         observations: list[IntervalObservation] | None = None,
@@ -89,19 +94,31 @@ class CDFPollingStrategy:
             # Recompute schedule with new k
             self._compute_poll_schedule()
 
-    def update_budget(self, polls_per_interval: int, elapsed_seconds: float) -> None:
+    def update_budget(
+        self,
+        polls_per_interval: int,
+        elapsed_seconds: float,
+        reset_seconds: int,
+    ) -> None:
         """Update the poll budget mid-interval based on new rate limit info.
 
         Recomputes the schedule using conditional probability - since we know
         the event hasn't occurred by elapsed_seconds, we sample from P(T | T > t).
 
+        When poll budget is low, blends targeted poll times with uniform distribution
+        to spread remaining polls evenly until the rate limit resets.
+
         Args:
             polls_per_interval: New number of confirmatory polls (from remaining quota)
             elapsed_seconds: Current elapsed time in the interval
+            reset_seconds: Seconds until rate limit quota resets
 
         """
         self._polls_per_interval = polls_per_interval
-        self._compute_poll_schedule(condition_on_elapsed=elapsed_seconds)
+        self._compute_poll_schedule(
+            condition_on_elapsed=elapsed_seconds,
+            reset_seconds=reset_seconds,
+        )
         # All scheduled polls are in the future, start from index 0
         self._next_poll_index = 0
 
@@ -199,12 +216,22 @@ class CDFPollingStrategy:
             last_observation=self._observations[-1] if self._observations else None,
         )
 
-    def _compute_poll_schedule(self, condition_on_elapsed: float | None = None) -> None:
-        """Compute optimal poll times using inverse CDF sampling.
+    def _compute_poll_schedule(
+        self,
+        condition_on_elapsed: float | None = None,
+        reset_seconds: int | None = None,
+    ) -> None:
+        """Compute optimal poll times using inverse CDF sampling with quantile blending.
+
+        When poll budget (k) is low, blends targeted poll times with uniform
+        distribution to spread polls evenly. Uses quantile blending: each poll
+        time is interpolated between targeted and uniform positions.
 
         Args:
             condition_on_elapsed: If provided, compute conditional schedule given
                 that the event hasn't occurred by this time. Uses P(T | T > t).
+            reset_seconds: Seconds until rate limit resets. Used for uniform
+                distribution endpoint when blending.
 
         """
         if not self._observations:
@@ -239,7 +266,33 @@ class CDFPollingStrategy:
             # Unconditional sampling
             target_probabilities = [j / (k + 1) for j in range(1, k + 1)]
 
-        self._scheduled_polls = [self._inverse_cdf(p, cdf_points) for p in target_probabilities]
+        # Compute targeted poll times from CDF
+        targeted_polls = [self._inverse_cdf(p, cdf_points) for p in target_probabilities]
+
+        # Apply quantile blending if we have reset_seconds and weight < 1
+        w = self._compute_blend_weight(k)
+
+        if w >= 1.0 or reset_seconds is None:
+            # Pure targeted CDF (no blending needed)
+            self._scheduled_polls = targeted_polls
+        else:
+            # Blend targeted with uniform distribution
+            # Uniform spans from elapsed to reset time
+            uniform_start = condition_on_elapsed if condition_on_elapsed else 0.0
+            uniform_end = uniform_start + reset_seconds
+
+            # For uniform CDF, quantile p maps to: start + p * (end - start)
+            # But we need to use the same probability space as targeted
+            # The target_probabilities are already in [0,1] for the conditional case
+            # For uniform blending, we use simple linear interpolation in [0,1]
+            uniform_probs = [j / (k + 1) for j in range(1, k + 1)]
+
+            self._scheduled_polls = []
+            for i, t_targeted in enumerate(targeted_polls):
+                p_uniform = uniform_probs[i]
+                t_uniform = uniform_start + p_uniform * (uniform_end - uniform_start)
+                t_blended = w * t_targeted + (1 - w) * t_uniform
+                self._scheduled_polls.append(t_blended)
 
     def _build_cdf(self) -> list[tuple[float, float]]:
         """Build piecewise linear CDF from interval observations.
@@ -358,3 +411,24 @@ class CDFPollingStrategy:
                 return t0 + fraction * (t1 - t0)
 
         return cdf_points[-1][0]
+
+    def _compute_blend_weight(self, k: int) -> float:
+        """Compute weight for blending targeted CDF vs uniform distribution.
+
+        Uses clamped linear interpolation between K_LOW and K_HIGH.
+        At k >= K_HIGH: returns 1.0 (pure targeted CDF)
+        At k <= K_LOW: returns 0.0 (pure uniform distribution)
+        In between: linear interpolation
+
+        Args:
+            k: Number of polls remaining (poll budget)
+
+        Returns:
+            Weight in [0.0, 1.0] for targeted CDF contribution
+
+        """
+        if k >= self.UNIFORM_BLEND_K_HIGH:
+            return 1.0
+        if k <= self.UNIFORM_BLEND_K_LOW:
+            return 0.0
+        return (k - self.UNIFORM_BLEND_K_LOW) / (self.UNIFORM_BLEND_K_HIGH - self.UNIFORM_BLEND_K_LOW)

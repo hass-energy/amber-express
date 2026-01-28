@@ -4,6 +4,10 @@
 
 from unittest.mock import MagicMock
 
+from amberelectric.models import Site
+from amberelectric.models.channel import Channel
+from amberelectric.models.channel_type import ChannelType
+from amberelectric.models.site_status import SiteStatus
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -296,11 +300,14 @@ class TestAsyncSetupEntry:
         # Coordinator without general channel
         coordinator = MagicMock()
         coordinator.get_site_info = MagicMock(
-            return_value={
-                "id": "test_site",
-                "network": "Ausgrid",
-                "channels": [{"type": "feedIn", "tariff": "EA116"}],  # Only feed-in
-            }
+            return_value=Site(
+                id="test_site",
+                nmi="1234567890",
+                network="Ausgrid",
+                status=SiteStatus.ACTIVE,
+                channels=[Channel(identifier="B1", type=ChannelType.FEEDIN, tariff="EA116")],
+                interval_length=30,
+            )
         )
 
         mock_config_entry.add_to_hass(hass)

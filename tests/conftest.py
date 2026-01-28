@@ -334,18 +334,18 @@ def mock_coordinator_with_data(
     def get_active_channels() -> list:
         return [ch for ch in [CHANNEL_GENERAL, CHANNEL_FEED_IN, CHANNEL_CONTROLLED_LOAD] if ch in data]
 
-    def get_site_info() -> dict:
-        return {
-            "id": "01ABCDEFGHIJKLMNOPQRSTUV",
-            "nmi": "1234567890",
-            "network": "Ausgrid",
-            "status": "active",
-            "channels": [
-                {"type": "general", "tariff": "EA116", "identifier": "E1"},
-                {"type": "feedIn", "tariff": "EA029", "identifier": "B1"},
+    def get_site_info() -> Site:
+        return Site(
+            id="01ABCDEFGHIJKLMNOPQRSTUV",
+            nmi="1234567890",
+            network="Ausgrid",
+            status=SiteStatus.ACTIVE,
+            channels=[
+                Channel(identifier="E1", type=ChannelType.GENERAL, tariff="EA116"),
+                Channel(identifier="B1", type=ChannelType.FEEDIN, tariff="EA029"),
             ],
-            "interval_length": 30,
-        }
+            interval_length=30,
+        )
 
     def get_cdf_polling_stats() -> CDFPollingStats:
         return CDFPollingStats(

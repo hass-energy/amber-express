@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from custom_components.amber_express.cdf_polling import IntervalObservation
 from custom_components.amber_express.smart_polling import PollingState, SmartPollingManager
+from custom_components.amber_express.types import RateLimitInfo
 
 
 class TestSmartPollingManagerInit:
@@ -121,7 +122,7 @@ class TestShouldPoll:
     def test_cdf_scheduled_polling_after_first_poll(self) -> None:
         """Test that polling uses CDF scheduled times after first poll."""
         manager = SmartPollingManager(5)
-        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset": 300}
+        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset_seconds": 300, "window_seconds": 300, "policy": "10;w=300"}
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -265,7 +266,7 @@ class TestGetCDFStats:
     def test_returns_cdf_strategy_stats(self) -> None:
         """Test that get_cdf_stats returns stats from CDF strategy."""
         manager = SmartPollingManager(5)
-        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset": 300}
+        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset_seconds": 300, "window_seconds": 300, "policy": "10;w=300"}
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -326,7 +327,7 @@ class TestRateLimitBasedPolling:
             # First poll with 45 remaining
             result = manager.should_poll(
                 has_data=True,
-                rate_limit_info={"remaining": 45},
+                rate_limit_info={"limit": 50, "remaining": 45, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"},
             )
             assert result is True
 
@@ -342,12 +343,12 @@ class TestRateLimitBasedPolling:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Start interval with 45 remaining
-            manager.should_poll(has_data=True, rate_limit_info={"remaining": 45})
+            manager.should_poll(has_data=True, rate_limit_info={"limit": 50, "remaining": 45, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"})
             assert len(manager.get_cdf_stats().scheduled_polls) == 45
 
             # Time passes, budget shrinks to 10
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
-            manager.update_budget({"remaining": 10})
+            manager.update_budget({"limit": 50, "remaining": 10, "reset_seconds": 285, "window_seconds": 300, "policy": "50;w=300"})
 
             # Schedule should now have 10 polls
             assert len(manager.get_cdf_stats().scheduled_polls) == 10
@@ -379,7 +380,7 @@ class TestGetNextPollDelay:
     def test_get_next_poll_delay_returns_seconds(self) -> None:
         """Test delay returns seconds until next poll."""
         manager = SmartPollingManager(5)
-        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset": 300}
+        rate_limit_info: RateLimitInfo = {"limit": 10, "remaining": 4, "reset_seconds": 300, "window_seconds": 300, "policy": "10;w=300"}
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -473,7 +474,7 @@ class TestUpdateBudgetEdgeCases:
         manager = SmartPollingManager(5)
 
         # Should not crash
-        manager.update_budget({"remaining": 10})
+        manager.update_budget({"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"})
 
 
 class TestCheckNewInterval:
@@ -511,7 +512,7 @@ class TestCheckNewInterval:
 
             result = manager.check_new_interval(
                 has_data=True,
-                rate_limit_info={"remaining": 10},
+                rate_limit_info={"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"},
             )
             assert result is True
 

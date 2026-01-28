@@ -95,14 +95,13 @@ def _add_site_sensors(
 ) -> None:
     """Add sensors for a single site."""
     # Get available channels from site info
-    site_info = coordinator.get_site_info()
-    site_channels = site_info.get("channels", [])
+    site = coordinator.get_site_info()
 
     # Map API channel types to internal channel constants
     available_channels: set[str] = set()
-    for ch in site_channels:
-        api_type = ch.get("type")
-        if api_type and api_type in CHANNEL_TYPE_MAP:
+    for ch in site.channels:
+        api_type = ch.type.value
+        if api_type in CHANNEL_TYPE_MAP:
             available_channels.add(CHANNEL_TYPE_MAP[api_type])
 
     # Create sensors for each available channel
@@ -485,13 +484,24 @@ class AmberSiteSensor(AmberBaseSensor):
     @property
     def native_value(self) -> str | None:
         """Return the network name as the state."""
-        site_info = self.coordinator.get_site_info()
-        return site_info.get("network")
+        site = self.coordinator.get_site_info()
+        return site.network
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return site info as attributes."""
-        return self.coordinator.get_site_info()
+        site = self.coordinator.get_site_info()
+        return {
+            "id": site.id,
+            "nmi": site.nmi,
+            "network": site.network,
+            "status": site.status.value,
+            "interval_length": site.interval_length,
+            "channels": [
+                {"identifier": ch.identifier, "type": ch.type.value, "tariff": ch.tariff}
+                for ch in site.channels
+            ],
+        }
 
 
 class AmberPollingStatsSensor(AmberBaseSensor):

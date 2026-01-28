@@ -4,36 +4,31 @@ overview: Add uniform CDF blending to the polling strategy. When poll budget (k)
 todos:
   - id: add-constants
     content: Add UNIFORM_BLEND_K_HIGH/K_LOW constants to CDFPollingStrategy
-    status: pending
+    status: completed
   - id: weight-method
     content: Add _compute_blend_weight() method
-    status: pending
-    dependencies:
-      - add-constants
-  - id: blend-cdfs
-    content: Add _blend_cdfs() method to combine targeted and uniform CDFs
-    status: pending
+    status: completed
     dependencies:
       - add-constants
   - id: update-signatures
     content: Add reset_seconds param to update_budget() and _compute_poll_schedule()
-    status: pending
+    status: completed
     dependencies:
-      - blend-cdfs
+      - add-constants
   - id: integrate-blending
-    content: Modify _compute_poll_schedule() to build uniform CDF and blend
-    status: pending
+    content: Modify _compute_poll_schedule() to blend poll times via quantile blending
+    status: completed
     dependencies:
       - weight-method
       - update-signatures
   - id: update-smart-polling
     content: Update SmartPollingManager.update_budget() to pass reset_seconds
-    status: pending
+    status: completed
     dependencies:
       - update-signatures
   - id: update-tests
     content: Update tests for new signatures and add blend behavior tests
-    status: pending
+    status: completed
     dependencies:
       - integrate-blending
       - update-smart-polling
@@ -43,22 +38,21 @@ todos:
 
 Blend targeted CDF (from historical observations) with uniform CDF (synthetic) based on remaining poll budget. Uses clamped linear interpolation: pure targeted at k>=30, pure uniform at k<=10, linear blend in between.
 
-## Algorithm
+## Algorithm (Quantile Blending)
 
 ```
-F_blended(t) = w × F_targeted(t) + (1-w) × F_uniform(t)
+For each target probability p:
+    t_targeted = inverse_cdf_targeted(p)    # existing code
+    t_uniform = elapsed + p × (reset_time - elapsed)  # linear formula
+    t_blended = w × t_targeted + (1-w) × t_uniform
 
 where:
-  w = clamp((k - 10) / (30 - 10), 0, 1)
-
-  # Synthetic observation for uniform CDF:
-  uniform_start = elapsed (current time from interval start)
-  uniform_end = elapsed + reset_seconds (when API quota resets)
-
-  F_uniform(t) = (t - uniform_start) / (uniform_end - uniform_start)
+    w = clamp((k - 10) / (30 - 10), 0, 1)
+    elapsed = current time from interval start
+    reset_time = elapsed + reset_seconds
 ```
 
-The synthetic observation `[elapsed, elapsed + reset_seconds]` represents "confirmed price could arrive uniformly at any point from now until quota resets". This naturally spreads polls across the remaining quota window.
+Quantile blending interpolates poll *times* directly rather than blending probability distributions. This gives smooth, predictable spreading: each poll gradually shifts from its targeted position toward uniform spacing as k decreases.
 
 ## Changes to [`cdf_polling.py`](custom_components/amber_express/cdf_polling.py)
 
@@ -92,17 +86,18 @@ The synthetic observation `[elapsed, elapsed + reset_seconds]` represents "confi
    ) -> None:
    ```
 
-5. **Build uniform CDF** using the synthetic observation:
-
-   - `uniform_start = condition_on_elapsed` (or 0 if unconditional)
-   - `uniform_end = condition_on_elapsed + reset_seconds`
-   - Creates observation `[uniform_start, uniform_end]`
-
-6. **Add `_blend_cdfs()` method** to combine targeted and uniform CDFs:
-
-   - Merge time points from both CDFs
-   - At each time point, compute `w × F_targeted(t) + (1-w) × F_uniform(t)`
-   - Return blended CDF for inverse sampling
+5. **Blend poll times in `_compute_poll_schedule()`**:
+   ```python
+   # After computing targeted poll times via inverse CDF:
+   w = self._compute_blend_weight(k)
+   if w < 1.0 and reset_seconds is not None:
+       uniform_start = condition_on_elapsed or 0.0
+       uniform_end = uniform_start + reset_seconds
+       for i, t_targeted in enumerate(self._scheduled_polls):
+           p = target_probabilities[i]  # or derive from position
+           t_uniform = uniform_start + p * (uniform_end - uniform_start)
+           self._scheduled_polls[i] = w * t_targeted + (1-w) * t_uniform
+   ```
 
 ## Changes to [`smart_polling.py`](custom_components/amber_express/smart_polling.py)
 
