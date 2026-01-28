@@ -331,7 +331,7 @@ def test_update_budget_recomputes_schedule() -> None:
     assert len(strategy.scheduled_polls) == 4
 
     # Update budget to 2 polls at 10 seconds elapsed, reset in 290s
-    strategy.update_budget(polls_per_interval=2, elapsed_seconds=10.0, reset_seconds=290)
+    strategy.update_budget(polls_per_interval=2, elapsed_seconds=10.0, reset_seconds=290, quota=50)
 
     # Should now have 2 scheduled polls
     assert len(strategy.scheduled_polls) == 2
@@ -350,7 +350,7 @@ def test_update_budget_uses_conditional_cdf() -> None:
     assert strategy.scheduled_polls == [21.0, 27.0, 33.0, 39.0]
 
     # Update at 25 seconds - now we condition on T > 25, reset in 275s
-    strategy.update_budget(polls_per_interval=4, elapsed_seconds=25.0, reset_seconds=275)
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=25.0, reset_seconds=275, quota=50)
 
     # All polls should be > 25s (conditional sampling)
     assert all(t > 25.0 for t in strategy.scheduled_polls)
@@ -375,7 +375,7 @@ def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
 
     # Update at 30 seconds - half the probability mass is now gone, reset in 270s
     # Use k=35 to keep pure targeted behavior (no uniform blending)
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=30.0, reset_seconds=270)
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=30.0, reset_seconds=270, quota=50)
 
     # New schedule should be compressed into [30, 45]
     # All polls should be in the remaining mass
@@ -395,7 +395,7 @@ def test_update_budget_all_mass_in_past() -> None:
 
     # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
     # With k=4 (below K_LOW=10), w=0 so we use pure uniform from 50 to 300 (50+250)
-    strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0, reset_seconds=250)
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0, reset_seconds=250, quota=50)
 
     # Falls back to uniform: polls at 50 + [1/5, 2/5, 3/5, 4/5] * 250 = [100, 150, 200, 250]
     assert strategy.scheduled_polls == [100.0, 150.0, 200.0, 250.0]
@@ -729,6 +729,7 @@ def test_inverse_cdf_loop_fallback_with_gaps() -> None:
 def test_compute_blend_weight_at_k_high() -> None:
     """Test blend weight is 1.0 when k >= K_HIGH."""
     strategy = CDFPollingStrategy()
+    strategy._quota = 50  # K_HIGH = 0.6 * 50 = 30
 
     # At or above K_HIGH (30), weight should be 1.0 (pure targeted)
     assert strategy._compute_blend_weight(30) == 1.0
@@ -739,6 +740,7 @@ def test_compute_blend_weight_at_k_high() -> None:
 def test_compute_blend_weight_at_k_low() -> None:
     """Test blend weight is 0.0 when k <= K_LOW."""
     strategy = CDFPollingStrategy()
+    strategy._quota = 50  # K_LOW = 0.2 * 50 = 10
 
     # At or below K_LOW (10), weight should be 0.0 (pure uniform)
     assert strategy._compute_blend_weight(10) == 0.0
@@ -749,6 +751,7 @@ def test_compute_blend_weight_at_k_low() -> None:
 def test_compute_blend_weight_linear_interpolation() -> None:
     """Test blend weight interpolates linearly between K_LOW and K_HIGH."""
     strategy = CDFPollingStrategy()
+    strategy._quota = 50  # K_LOW = 10, K_HIGH = 30
 
     # k=20 is midpoint between 10 and 30
     assert strategy._compute_blend_weight(20) == 0.5
@@ -767,7 +770,7 @@ def test_update_budget_pure_targeted_at_high_k() -> None:
 
     # With k=35 (above K_HIGH=30), should use pure targeted CDF
     # Cold start observations are [15, 45], so polls should be in that range
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=290)
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=290, quota=50)
 
     # Polls should be after elapsed (10s) but within targeted distribution
     assert all(10.0 < t <= 45.0 for t in strategy.scheduled_polls)
@@ -780,7 +783,7 @@ def test_update_budget_pure_uniform_at_low_k() -> None:
 
     # With k=5 (below K_LOW=10), should use pure uniform distribution
     # Uniform spans from elapsed (10s) to elapsed + reset_seconds (10 + 100 = 110s)
-    strategy.update_budget(polls_per_interval=5, elapsed_seconds=10.0, reset_seconds=100)
+    strategy.update_budget(polls_per_interval=5, elapsed_seconds=10.0, reset_seconds=100, quota=50)
 
     # With pure uniform from 10 to 110, polls at quantiles 1/6, 2/6, 3/6, 4/6, 5/6
     # t = 10 + p * 100, so approximately [26.67, 43.33, 60, 76.67, 93.33]
@@ -802,11 +805,11 @@ def test_update_budget_blended_at_mid_k() -> None:
 
     # First get pure targeted polls with high k
     strategy.start_interval(polls_per_interval=35)
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=100)
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=100, quota=50)
     _targeted_polls = strategy.scheduled_polls.copy()
 
     # Now get blended polls with k=20 (w=0.5)
-    strategy.update_budget(polls_per_interval=20, elapsed_seconds=10.0, reset_seconds=100)
+    strategy.update_budget(polls_per_interval=20, elapsed_seconds=10.0, reset_seconds=100, quota=50)
     blended_polls = strategy.scheduled_polls.copy()
 
     # Compute expected uniform polls for k=20

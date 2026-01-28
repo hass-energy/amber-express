@@ -267,6 +267,7 @@ class SmartPollingManager:
             polls_per_interval,
             elapsed,
             rate_limit_info["reset_seconds"],
+            rate_limit_info["limit"],
         )
 
         if self._cdf_strategy.scheduled_polls != old_schedule:

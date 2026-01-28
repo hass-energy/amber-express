@@ -51,10 +51,10 @@ class CDFPollingStrategy:
     MIN_CDF_POINTS = 2  # Minimum points required for a valid CDF
     COLD_START_INTERVAL: ClassVar[IntervalObservation] = {"start": 15.0, "end": 45.0}
 
-    # Uniform blending thresholds: blend targeted CDF with uniform distribution
-    # based on remaining poll budget (k) to spread polls when quota is low
-    UNIFORM_BLEND_K_HIGH = 30  # Pure targeted CDF when k >= this
-    UNIFORM_BLEND_K_LOW = 10  # Pure uniform distribution when k <= this
+    # Uniform blending thresholds as fractions of quota: blend targeted CDF with
+    # uniform distribution based on remaining poll budget (k) to spread polls when low
+    UNIFORM_BLEND_FRACTION_HIGH = 0.6  # Pure targeted CDF when k >= quota * this
+    UNIFORM_BLEND_FRACTION_LOW = 0.2  # Pure uniform distribution when k <= quota * this
 
     def __init__(
         self,
@@ -76,6 +76,7 @@ class CDFPollingStrategy:
         self._next_poll_index = 0
         self._confirmatory_poll_count = 0
         self._polls_per_interval = 0
+        self._quota: int | None = None
 
     def start_interval(self, polls_per_interval: int | None = None) -> None:
         """Reset state for a new interval.
@@ -99,6 +100,7 @@ class CDFPollingStrategy:
         polls_per_interval: int,
         elapsed_seconds: float,
         reset_seconds: int,
+        quota: int,
     ) -> None:
         """Update the poll budget mid-interval based on new rate limit info.
 
@@ -112,9 +114,11 @@ class CDFPollingStrategy:
             polls_per_interval: New number of confirmatory polls (from remaining quota)
             elapsed_seconds: Current elapsed time in the interval
             reset_seconds: Seconds until rate limit quota resets
+            quota: Rate limit quota (limit). Used to compute blend thresholds.
 
         """
         self._polls_per_interval = polls_per_interval
+        self._quota = quota
         self._compute_poll_schedule(
             condition_on_elapsed=elapsed_seconds,
             reset_seconds=reset_seconds,
@@ -420,9 +424,11 @@ class CDFPollingStrategy:
     def _compute_blend_weight(self, k: int) -> float:
         """Compute weight for blending targeted CDF vs uniform distribution.
 
-        Uses clamped linear interpolation between K_LOW and K_HIGH.
-        At k >= K_HIGH: returns 1.0 (pure targeted CDF)
-        At k <= K_LOW: returns 0.0 (pure uniform distribution)
+        Uses clamped linear interpolation between K_LOW and K_HIGH, which are
+        computed dynamically from the rate limit quota.
+
+        At k >= K_HIGH (60% of quota): returns 1.0 (pure targeted CDF)
+        At k <= K_LOW (20% of quota): returns 0.0 (pure uniform distribution)
         In between: linear interpolation
 
         Args:
@@ -432,8 +438,15 @@ class CDFPollingStrategy:
             Weight in [0.0, 1.0] for targeted CDF contribution
 
         """
-        if k >= self.UNIFORM_BLEND_K_HIGH:
+        # Before first update_budget call, use pure targeted CDF (no blending)
+        if self._quota is None:
             return 1.0
-        if k <= self.UNIFORM_BLEND_K_LOW:
+
+        k_high = int(self._quota * self.UNIFORM_BLEND_FRACTION_HIGH)
+        k_low = int(self._quota * self.UNIFORM_BLEND_FRACTION_LOW)
+
+        if k >= k_high:
+            return 1.0
+        if k <= k_low:
             return 0.0
-        return (k - self.UNIFORM_BLEND_K_LOW) / (self.UNIFORM_BLEND_K_HIGH - self.UNIFORM_BLEND_K_LOW)
+        return (k - k_low) / (k_high - k_low)
