@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+from custom_components.amber_express.cdf_polling import IntervalObservation
 from custom_components.amber_express.smart_polling import PollingState, SmartPollingManager
 
 
@@ -350,3 +351,180 @@ class TestRateLimitBasedPolling:
 
             # Schedule should now have 10 polls
             assert len(manager.get_cdf_stats().scheduled_polls) == 10
+
+
+class TestGetNextPollDelay:
+    """Tests for get_next_poll_delay method."""
+
+    def test_get_next_poll_delay_when_confirmed(self) -> None:
+        """Test delay returns None when confirmed price received."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+            manager.on_confirmed_received()
+
+            delay = manager.get_next_poll_delay()
+            assert delay is None
+
+    def test_get_next_poll_delay_no_interval(self) -> None:
+        """Test delay returns None before interval starts."""
+        manager = SmartPollingManager()
+
+        # No interval started yet
+        delay = manager.get_next_poll_delay()
+        assert delay is None
+
+    def test_get_next_poll_delay_returns_seconds(self) -> None:
+        """Test delay returns seconds until next poll."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+
+            # At interval start, first poll is at 21s (cold start schedule)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
+            delay = manager.get_next_poll_delay()
+            assert delay is not None
+            assert delay == 16.0  # 21 - 5
+
+
+class TestObservationsProperty:
+    """Tests for observations property."""
+
+    def test_observations_returns_copy(self) -> None:
+        """Test observations property returns a copy."""
+        manager = SmartPollingManager()
+
+        obs1 = manager.observations
+        obs2 = manager.observations
+
+        assert obs1 == obs2
+        assert obs1 is not obs2
+
+    def test_observations_with_preloaded(self) -> None:
+        """Test observations initialized with preloaded data."""
+        observations: list[IntervalObservation] = [
+            {"start": 10.0, "end": 20.0},
+            {"start": 15.0, "end": 25.0},
+        ]
+        manager = SmartPollingManager(observations)
+
+        result = manager.observations
+        assert len(result) == 2
+        assert result[0]["start"] == 10.0
+
+
+class TestObservationRecording:
+    """Tests for observation recording edge cases."""
+
+    def test_confirmed_without_estimate_skips_observation(self) -> None:
+        """Test confirmed without prior estimate doesn't record observation."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+
+            # Force past first interval flag
+            manager._first_interval_after_startup = False
+
+            # Receive confirmed without estimate
+            manager.on_confirmed_received()
+
+            # Observation count should remain at cold start
+            stats = manager.get_cdf_stats()
+            # Cold start has 100 observations, confirm without estimate doesn't add
+            assert stats.observation_count == 100
+
+    def test_confirmed_with_estimate_records_observation(self) -> None:
+        """Test confirmed with prior estimate records observation."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+
+            # Force past first interval flag
+            manager._first_interval_after_startup = False
+
+            # Receive estimate then confirmed
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 10, tzinfo=UTC)
+            manager.on_estimate_received()
+
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 25, tzinfo=UTC)
+            manager.on_confirmed_received()
+
+            # Should have recorded observation
+            stats = manager.get_cdf_stats()
+            assert stats.last_observation is not None
+            assert stats.last_observation["start"] == 10.0
+            assert stats.last_observation["end"] == 25.0
+
+
+class TestUpdateBudgetEdgeCases:
+    """Tests for update_budget edge cases."""
+
+    def test_update_budget_no_interval(self) -> None:
+        """Test update_budget before interval starts."""
+        manager = SmartPollingManager()
+
+        # Should not crash
+        manager.update_budget({"remaining": 10})
+
+    def test_update_budget_no_remaining(self) -> None:
+        """Test update_budget with no remaining in rate limit info."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.should_poll(has_data=True)
+
+            # Update with empty info - should not crash
+            manager.update_budget({})
+
+
+class TestCheckNewInterval:
+    """Tests for check_new_interval method."""
+
+    def test_check_new_interval_first_call(self) -> None:
+        """Test check_new_interval on first call."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            result = manager.check_new_interval(has_data=False)
+            assert result is True
+
+    def test_check_new_interval_same_interval(self) -> None:
+        """Test check_new_interval returns False for same interval."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            manager.check_new_interval(has_data=True)
+
+            # Same interval
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 2, 30, tzinfo=UTC)
+            result = manager.check_new_interval(has_data=True)
+            assert result is False
+
+    def test_check_new_interval_with_rate_limit_info(self) -> None:
+        """Test check_new_interval uses rate limit info for k."""
+        manager = SmartPollingManager()
+
+        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+
+            result = manager.check_new_interval(
+                has_data=True,
+                rate_limit_info={"remaining": 10},
+            )
+            assert result is True
+
+            # Should have scheduled 10 polls
+            stats = manager.get_cdf_stats()
+            assert len(stats.scheduled_polls) == 10

@@ -278,3 +278,109 @@ class TestRateLimitHeaderParsing:
 
             # Should not crash, info should be empty
             assert api_client.rate_limit_info == {}
+
+    async def test_parse_invalid_policy_header(self, api_client: AmberApiClient) -> None:
+        """Test handling of malformed ratelimit-policy header."""
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_response.headers = {
+            "ratelimit-policy": "invalid{{malformed",  # Invalid structured field
+            "ratelimit-remaining": "42",
+        }
+
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            await api_client.fetch_current_prices("test_site")
+
+            # Should parse remaining but skip invalid policy
+            info = api_client.rate_limit_info
+            assert info.get("remaining") == 42
+            assert info.get("limit") is None
+            assert info.get("window_seconds") is None
+
+    async def test_parse_policy_without_window(self, api_client: AmberApiClient) -> None:
+        """Test policy header with value but no window parameter."""
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_response.headers = {
+            "ratelimit-policy": "50",  # No ;w=N parameter
+        }
+
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            await api_client.fetch_current_prices("test_site")
+
+            info = api_client.rate_limit_info
+            assert info.get("limit") == 50
+            assert info.get("window_seconds") is None
+
+    async def test_parse_policy_non_int_value(self, api_client: AmberApiClient) -> None:
+        """Test policy header with non-integer value."""
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_response.headers = {
+            "ratelimit-policy": '"string_value";w=300',  # String instead of int
+        }
+
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            await api_client.fetch_current_prices("test_site")
+
+            info = api_client.rate_limit_info
+            # limit should be None since value isn't int
+            assert info.get("limit") is None
+
+
+class TestApiClientErrorExtraction:
+    """Tests for error header extraction."""
+
+    async def test_get_reset_from_error_no_headers(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error with no headers."""
+        err = ApiException(status=429)
+        err.headers = None
+
+        result = api_client._get_reset_from_error(err)
+        assert result is None
+
+    async def test_get_reset_from_error_no_reset_header(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error with headers but no reset."""
+        err = ApiException(status=429)
+        err.headers = {"other-header": "value"}
+
+        result = api_client._get_reset_from_error(err)
+        assert result is None
+
+    async def test_get_reset_from_error_invalid_reset(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error with invalid reset value."""
+        err = ApiException(status=429)
+        err.headers = {"ratelimit-reset": "not-a-number"}
+
+        result = api_client._get_reset_from_error(err)
+        assert result is None
+
+    async def test_get_reset_from_error_valid_reset(self, api_client: AmberApiClient) -> None:
+        """Test _get_reset_from_error with valid reset value."""
+        err = ApiException(status=429)
+        err.headers = {"ratelimit-reset": "120"}
+
+        result = api_client._get_reset_from_error(err)
+        assert result == 120
+
+    async def test_fetch_sites_generic_exception(self, api_client: AmberApiClient) -> None:
+        """Test fetch_sites with generic exception."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=Exception("Network error")),
+        ):
+            result = await api_client.fetch_sites()
+            assert result is None

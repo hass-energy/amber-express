@@ -31,6 +31,7 @@ from custom_components.amber_express.sensor import (
     AmberApiStatusSensor,
     AmberConfirmationLagSensor,
     AmberDetailedPriceSensor,
+    AmberPollingStatsSensor,
     AmberPriceSensor,
     AmberRenewablesSensor,
     AmberSiteSensor,
@@ -741,6 +742,137 @@ class TestAsyncSetupEntry:
         # With only controlled load channel:
         # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag = 7
         assert len(added_entities) == 7
+
+
+class TestAmberPollingStatsSensor:
+    """Tests for AmberPollingStatsSensor."""
+
+    def test_polling_stats_sensor_native_value_with_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor returns last confirmed elapsed time."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=100,
+                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+                next_poll_index=0,
+                confirmatory_poll_count=2,
+                polls_per_interval=4,
+                last_observation={"start": 15.0, "end": 27.5},
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        # native_value should be the last_observation["end"]
+        assert sensor.native_value == 27.5
+
+    def test_polling_stats_sensor_native_value_no_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor returns None when no observation."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=0,
+                scheduled_polls=[],
+                next_poll_index=0,
+                confirmatory_poll_count=0,
+                polls_per_interval=4,
+                last_observation=None,
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
+
+    def test_polling_stats_sensor_extra_state_attributes(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor extra attributes."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=100,
+                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+                next_poll_index=2,
+                confirmatory_poll_count=2,
+                polls_per_interval=4,
+                last_observation={"start": 15.0, "end": 27.5},
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        attrs = sensor.extra_state_attributes
+
+        assert attrs["scheduled_polls"] == [21.0, 27.0, 33.0, 39.0]
+        assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
+        assert attrs["observation_count"] == 100
+        assert attrs["last_estimate_elapsed"] == 15.0
+        assert attrs["last_confirmed_elapsed"] == 27.5
+
+    def test_polling_stats_sensor_attributes_no_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor attributes when no observation."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=0,
+                scheduled_polls=[21.0, 27.0],
+                next_poll_index=0,
+                confirmatory_poll_count=0,
+                polls_per_interval=2,
+                last_observation=None,
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        attrs = sensor.extra_state_attributes
+
+        # Should still have base attributes
+        assert attrs["scheduled_polls"] == [21.0, 27.0]
+        assert attrs["poll_count"] == 1
+        assert attrs["observation_count"] == 0
+        # Should not have elapsed attributes
+        assert "last_estimate_elapsed" not in attrs
+        assert "last_confirmed_elapsed" not in attrs
 
 
 class TestAmberConfirmationLagSensor:

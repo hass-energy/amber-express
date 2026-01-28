@@ -192,6 +192,20 @@ def mock_amber_api_no_sites() -> Generator[MagicMock]:
 
 
 @pytest.fixture
+def mock_amber_api_rate_limited() -> Generator[MagicMock]:
+    """Mock the Amber API client with rate limiting (429)."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        # Mock 429 error - returns None with status 429
+        mock_client.fetch_sites = AsyncMock(return_value=None)
+        mock_client.last_status = 429
+
+        yield mock_client
+
+
+@pytest.fixture
 def mock_amber_api_unknown_error() -> Generator[MagicMock]:
     """Mock the Amber API client with unknown error."""
     with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:

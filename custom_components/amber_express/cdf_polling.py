@@ -313,13 +313,12 @@ class CDFPollingStrategy:
             return cdf_points[-1][1]
 
         # Find segment containing t and interpolate
+        # CDF is contiguous so a matching segment always exists when t is in range
         for i in range(len(cdf_points) - 1):
             t0, p0 = cdf_points[i]
             t1, p1 = cdf_points[i + 1]
 
             if t0 <= t <= t1:
-                if t1 == t0:
-                    return p0
                 fraction = (t - t0) / (t1 - t0)
                 return p0 + fraction * (p1 - p0)
 
@@ -346,16 +345,13 @@ class CDFPollingStrategy:
             return cdf_points[-1][0]
 
         # Find segment containing target_p
+        # CDF is strictly increasing so a matching segment always exists
         for i in range(len(cdf_points) - 1):
             t0, p0 = cdf_points[i]
             t1, p1 = cdf_points[i + 1]
 
             if p0 <= target_p <= p1:
-                # Linear interpolation
-                if p1 == p0:
-                    return t0
                 fraction = (target_p - p0) / (p1 - p0)
                 return t0 + fraction * (t1 - t0)
 
-        # Should not reach here, but return last point as fallback
         return cdf_points[-1][0]

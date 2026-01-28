@@ -99,6 +99,19 @@ async def test_form_no_sites(hass: HomeAssistant, mock_amber_api_no_sites: Magic
     assert result["errors"] == {"base": "no_sites"}
 
 
+async def test_form_rate_limited(hass: HomeAssistant, mock_amber_api_rate_limited: MagicMock) -> None:
+    """Test rate limited error (429)."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_API_TOKEN: "valid_token"},
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "rate_limited"}
+
+
 async def test_form_unknown_error(hass: HomeAssistant, mock_amber_api_unknown_error: MagicMock) -> None:
     """Test unknown error handling."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
