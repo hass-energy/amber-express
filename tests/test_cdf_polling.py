@@ -803,14 +803,14 @@ def test_update_budget_blended_at_mid_k() -> None:
     # First get pure targeted polls with high k
     strategy.start_interval(polls_per_interval=35)
     strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=100)
-    targeted_polls = strategy.scheduled_polls.copy()
+    _targeted_polls = strategy.scheduled_polls.copy()
 
     # Now get blended polls with k=20 (w=0.5)
     strategy.update_budget(polls_per_interval=20, elapsed_seconds=10.0, reset_seconds=100)
     blended_polls = strategy.scheduled_polls.copy()
 
     # Compute expected uniform polls for k=20
-    uniform_polls = [10.0 + (j / 21) * 100 for j in range(1, 21)]
+    _uniform_polls = [10.0 + (j / 21) * 100 for j in range(1, 21)]
 
     # With w=0.5, blended should be halfway between targeted and uniform
     # Can't verify exactly without knowing targeted, but polls should be

@@ -1,5 +1,7 @@
 """Pytest fixtures for Amber Express tests."""
 
+# pyright: reportArgumentType=false
+
 from collections.abc import Generator
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch

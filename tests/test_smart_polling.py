@@ -323,17 +323,25 @@ class TestRateLimitBasedPolling:
         manager = SmartPollingManager(5)
         buffer = manager.RATE_LIMIT_BUFFER  # Currently 5
 
-        result = manager._calculate_polls_per_interval({"remaining": 45})
+        base_info: RateLimitInfo = {
+            "limit": 50,
+            "remaining": 45,
+            "reset_seconds": 300,
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
+
+        result = manager._calculate_polls_per_interval(base_info)
         assert result == 45 - buffer  # 40
 
-        result = manager._calculate_polls_per_interval({"remaining": 10})
+        result = manager._calculate_polls_per_interval({**base_info, "remaining": 10})
         assert result == 10 - buffer  # 5
 
         # At or below buffer, result is 0
-        result = manager._calculate_polls_per_interval({"remaining": 5})
+        result = manager._calculate_polls_per_interval({**base_info, "remaining": 5})
         assert result == 0
 
-        result = manager._calculate_polls_per_interval({"remaining": 1})
+        result = manager._calculate_polls_per_interval({**base_info, "remaining": 1})
         assert result == 0
 
     def test_should_poll_uses_rate_limit_info(self) -> None:

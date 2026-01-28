@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from amberelectric.models import CurrentInterval, Interval
+from amberelectric.models import Interval
 from amberelectric.models.channel_type import ChannelType
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant

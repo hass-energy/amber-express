@@ -1,5 +1,7 @@
 """Tests for the interval processor."""
 
+# pyright: reportArgumentType=false
+
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock
 
