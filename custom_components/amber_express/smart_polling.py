@@ -31,9 +31,7 @@ class SmartPollingManager:
     optimizing for minimal API calls while ensuring timely price updates.
     """
 
-    def __init__(
-        self, observations: list[IntervalObservation] | None = None
-    ) -> None:
+    def __init__(self, observations: list[IntervalObservation] | None = None) -> None:
         """Initialize the polling manager.
 
         Args:

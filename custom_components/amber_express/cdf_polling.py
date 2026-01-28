@@ -26,7 +26,7 @@ class CDFPollingStats:
 
 
 class CDFPollingStrategy:
-    """CDF-based polling strategy that learns optimal poll times from observations.
+    """Cumulative Distribution Function strategy that learns optimal poll times from observations.
 
     Maintains a rolling window of interval observations [a, b] where the confirmed
     price became available somewhere in that interval. Builds an empirical CDF from
@@ -47,9 +47,7 @@ class CDFPollingStrategy:
             self._observations = observations[-self.WINDOW_SIZE :]
         else:
             # Cold start: fill with synthetic intervals
-            self._observations = [
-                self.COLD_START_INTERVAL.copy() for _ in range(self.WINDOW_SIZE)
-            ]
+            self._observations = [self.COLD_START_INTERVAL.copy() for _ in range(self.WINDOW_SIZE)]
 
         self._scheduled_polls: list[float] = []
         self._next_poll_index = 0
@@ -221,16 +219,12 @@ class CDFPollingStrategy:
 
             # Map uniform [0,1] targets to conditional targets
             remaining_mass = 1.0 - f_elapsed
-            target_probabilities = [
-                f_elapsed + (j / (k + 1)) * remaining_mass for j in range(1, k + 1)
-            ]
+            target_probabilities = [f_elapsed + (j / (k + 1)) * remaining_mass for j in range(1, k + 1)]
         else:
             # Unconditional sampling
             target_probabilities = [j / (k + 1) for j in range(1, k + 1)]
 
-        self._scheduled_polls = [
-            self._inverse_cdf(p, cdf_points) for p in target_probabilities
-        ]
+        self._scheduled_polls = [self._inverse_cdf(p, cdf_points) for p in target_probabilities]
 
     def _build_cdf(self) -> list[tuple[float, float]]:
         """Build piecewise linear CDF from interval observations.
@@ -319,9 +313,7 @@ class CDFPollingStrategy:
 
         return cdf_points[-1][1]
 
-    def _inverse_cdf(
-        self, target_p: float, cdf_points: list[tuple[float, float]]
-    ) -> float:
+    def _inverse_cdf(self, target_p: float, cdf_points: list[tuple[float, float]]) -> float:
         """Compute inverse CDF (quantile function) via linear interpolation.
 
         Args:
