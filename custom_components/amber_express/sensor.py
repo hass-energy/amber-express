@@ -535,7 +535,7 @@ class AmberPollingStatsSensor(AmberBaseSensor):
         """Return polling statistics as attributes."""
         stats = self.coordinator.get_cdf_polling_stats()
         attrs: dict[str, Any] = {
-            "scheduled_polls": [round(t, 1) for t in stats.scheduled_polls],
+            "poll_schedule": [round(t, 1) for t in stats.scheduled_polls],
             "poll_count": stats.confirmatory_poll_count + 1,
             "observation_count": stats.observation_count,
         }
