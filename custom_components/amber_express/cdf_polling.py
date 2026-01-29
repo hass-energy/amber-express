@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from math import ceil
 
 import numpy as np
@@ -80,7 +81,7 @@ class CDFPollingStrategy:
         self,
         polls_per_interval: int,
         elapsed_seconds: float,
-        reset_seconds: int,
+        reset_at: datetime,
         interval_seconds: int,
     ) -> None:
         """Update the poll budget mid-interval based on new rate limit info.
@@ -94,14 +95,14 @@ class CDFPollingStrategy:
         Args:
             polls_per_interval: New number of confirmatory polls (from remaining quota)
             elapsed_seconds: Current elapsed time in the interval
-            reset_seconds: Seconds until rate limit quota resets
+            reset_at: When rate limit quota resets (absolute time)
             interval_seconds: Length of the interval in seconds
 
         """
         self._polls_per_interval = polls_per_interval
         self._recompute_schedule(
             condition_on_elapsed=elapsed_seconds,
-            reset_seconds=reset_seconds,
+            reset_at=reset_at,
             interval_seconds=interval_seconds,
         )
         # All scheduled polls are in the future, start from index 0
@@ -220,19 +221,28 @@ class CDFPollingStrategy:
     def _recompute_schedule(
         self,
         condition_on_elapsed: float | None = None,
-        reset_seconds: int | None = None,
+        reset_at: datetime | None = None,
         interval_seconds: int | None = None,
     ) -> None:
         """Recompute poll schedule using pure algorithm functions.
 
-        Always blends targeted CDF with uniform distribution when reset_seconds
+        Always blends targeted CDF with uniform distribution when reset_at
         is available. Weights are based on a minimum sample rate target.
 
         Injects forced polls at boundary times (reserving budget for them):
         - Next interval start (interval_seconds)
-        - Rate limit reset time (elapsed + reset_seconds)
+        - Rate limit reset time (reset_at)
         """
         elapsed = condition_on_elapsed or 0.0
+        now = datetime.now().astimezone()
+
+        # Convert reset_at to seconds from interval start
+        reset_seconds: float | None = None
+        if reset_at is not None:
+            seconds_until_reset = (reset_at - now).total_seconds()
+            reset_time = elapsed + seconds_until_reset
+        else:
+            reset_time = None
 
         # Calculate forced polls first to reserve budget for them
         forced_polls: list[float] = []
@@ -241,12 +251,17 @@ class CDFPollingStrategy:
         if interval_seconds is not None and interval_seconds > elapsed:
             forced_polls.append(float(interval_seconds))
 
-        # Poll at rate limit reset time
-        if reset_seconds is not None and reset_seconds > 0:
-            reset_time = elapsed + reset_seconds
-            # Only add if it's before the next interval (otherwise interval poll covers it)
+        # Poll at rate limit reset time (guaranteed fresh quota, good time to reassess)
+        if reset_time is not None and reset_time > elapsed:
             if interval_seconds is None or reset_time < interval_seconds:
                 forced_polls.append(reset_time)
+            # Compute reset_seconds for uniform distribution calculation
+            reset_seconds = reset_time - elapsed
+        elif reset_time is not None:
+            # Reset just happened - schedule poll 1 second from now to get fresh quota
+            soon = elapsed + 1.0
+            if interval_seconds is None or soon < interval_seconds:
+                forced_polls.append(soon)
 
         # Reserve budget for forced polls
         cdf_budget = max(0, self._polls_per_interval - len(forced_polls))

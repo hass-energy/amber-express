@@ -1,6 +1,6 @@
 """Tests for the smart polling manager."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from custom_components.amber_express.cdf_polling import IntervalObservation
@@ -18,7 +18,6 @@ class TestSmartPollingManagerInit:
 
         assert state.current_interval_start is None
         assert state.has_confirmed_price is False
-        assert state.forecasts_pending is False
         assert state.poll_count_this_interval == 0
         assert state.first_interval_after_startup is True
         assert state.last_estimate_elapsed is None
@@ -28,7 +27,6 @@ class TestSmartPollingManagerInit:
         manager = SmartPollingManager(5)
 
         assert manager.has_confirmed_price is False
-        assert manager.forecasts_pending is False
         assert manager.poll_count_this_interval == 0
         assert manager.first_interval_after_startup is True
 
@@ -80,45 +78,6 @@ class TestShouldPoll:
             result = manager.should_poll(has_data=True)
             assert result is False
 
-    def test_forecasts_pending_allows_retry(self) -> None:
-        """Test that forecasts pending allows retry polling."""
-        manager = SmartPollingManager(5)
-
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-
-            # Start interval
-            manager.should_poll(has_data=True)
-
-            # Receive confirmed price but forecasts failed
-            manager.on_confirmed_received()
-            manager.set_forecasts_pending()
-
-            # Should poll to retry forecasts
-            result = manager.should_poll(has_data=True)
-            assert result is True
-
-    def test_forecasts_pending_respects_rate_limit(self) -> None:
-        """Test that forecasts pending respects rate limit."""
-        manager = SmartPollingManager(5)
-
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-
-            # Start interval
-            manager.should_poll(has_data=True)
-
-            # Receive confirmed price but forecasts failed
-            manager.on_confirmed_received()
-            manager.set_forecasts_pending()
-
-            # Set rate limit until 10:01
-            rate_limit_until = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
-
-            # Still at 10:00 - should not poll
-            result = manager.should_poll(has_data=True, rate_limit_until=rate_limit_until)
-            assert result is False
-
     def test_cdf_scheduled_polling_after_first_poll(self) -> None:
         """Test that polling uses CDF scheduled times after first poll."""
         manager = SmartPollingManager(5)
@@ -126,16 +85,23 @@ class TestShouldPoll:
         # 1 poll reserved for interval end (300s), leaving 4 CDF polls
         # With cdf_budget=4 and reset=300, uniform_polls_needed = ceil(300/30) = 10
         # Since 4 <= 10, uses pure uniform: 4 polls at 60, 120, 180, 240 + forced at 300
-        rate_limit_info: RateLimitInfo = {
-            "limit": 50,
-            "remaining": 10,
-            "reset_seconds": 300,
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
 
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        with (
+            patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime,
+            patch("custom_components.amber_express.cdf_polling.datetime") as mock_cdf_datetime,
+        ):
+            base_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            mock_datetime.now.return_value = base_time
+            mock_cdf_datetime.now.return_value = base_time
+
+            # Create rate_limit_info with reset_at based on the mocked time
+            rate_limit_info: RateLimitInfo = {
+                "limit": 50,
+                "remaining": 10,
+                "reset_at": base_time + timedelta(seconds=300),
+                "window_seconds": 300,
+                "policy": "50;w=300",
+            }
 
             # First poll starts the interval
             result1 = manager.should_poll(has_data=True)
@@ -202,29 +168,6 @@ class TestPollLifecycle:
         assert manager.has_confirmed_price is True
 
 
-class TestForecastsPending:
-    """Tests for forecasts pending state."""
-
-    def test_set_forecasts_pending(self) -> None:
-        """Test setting forecasts pending."""
-        manager = SmartPollingManager(5)
-
-        assert manager.forecasts_pending is False
-
-        manager.set_forecasts_pending()
-        assert manager.forecasts_pending is True
-
-    def test_clear_forecasts_pending(self) -> None:
-        """Test clearing forecasts pending."""
-        manager = SmartPollingManager(5)
-
-        manager.set_forecasts_pending()
-        assert manager.forecasts_pending is True
-
-        manager.clear_forecasts_pending()
-        assert manager.forecasts_pending is False
-
-
 class TestIntervalReset:
     """Tests for interval reset behavior."""
 
@@ -239,11 +182,9 @@ class TestIntervalReset:
             manager.on_poll_started()
             manager.on_poll_started()
             manager.on_confirmed_received()
-            manager.set_forecasts_pending()
 
             # Verify state is set
             assert manager.has_confirmed_price is True
-            assert manager.forecasts_pending is True
             assert manager.poll_count_this_interval == 2
 
             # Move to next interval
@@ -252,7 +193,6 @@ class TestIntervalReset:
 
             # Verify state is reset
             assert manager.has_confirmed_price is False
-            assert manager.forecasts_pending is False
             assert manager.poll_count_this_interval == 0
 
     def test_first_interval_flag_clears_on_second_interval(self) -> None:
@@ -283,7 +223,7 @@ class TestGetCDFStats:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 9,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -310,7 +250,6 @@ class TestPollingState:
         state = PollingState(
             current_interval_start=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
             has_confirmed_price=True,
-            forecasts_pending=False,
             poll_count_this_interval=3,
             first_interval_after_startup=False,
             last_estimate_elapsed=10.5,
@@ -318,7 +257,6 @@ class TestPollingState:
 
         assert state.current_interval_start == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
         assert state.has_confirmed_price is True
-        assert state.forecasts_pending is False
         assert state.poll_count_this_interval == 3
         assert state.first_interval_after_startup is False
         assert state.last_estimate_elapsed == 10.5
@@ -335,7 +273,7 @@ class TestRateLimitBasedPolling:
         base_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 45,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -370,7 +308,7 @@ class TestRateLimitBasedPolling:
                 {
                     "limit": 50,
                     "remaining": 45,
-                    "reset_seconds": 300,
+                    "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                     "window_seconds": 300,
                     "policy": "50;w=300",
                 }
@@ -397,7 +335,7 @@ class TestRateLimitBasedPolling:
                 {
                     "limit": 50,
                     "remaining": 45,
-                    "reset_seconds": 300,
+                    "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                     "window_seconds": 300,
                     "policy": "50;w=300",
                 }
@@ -407,7 +345,13 @@ class TestRateLimitBasedPolling:
             # Time passes, budget shrinks to 15 (10 after buffer)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
             manager.update_budget(
-                {"limit": 50, "remaining": 15, "reset_seconds": 285, "window_seconds": 300, "policy": "50;w=300"}
+                {
+                    "limit": 50,
+                    "remaining": 15,
+                    "reset_at": datetime.now(UTC) + timedelta(seconds=285),
+                    "window_seconds": 300,
+                    "policy": "50;w=300",
+                }
             )
 
             # k=10 total: 9 CDF polls + 1 forced at interval end = 10 total
@@ -444,7 +388,7 @@ class TestGetNextPollDelay:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 9,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -546,7 +490,13 @@ class TestUpdateBudgetEdgeCases:
 
         # Should not crash
         manager.update_budget(
-            {"limit": 50, "remaining": 10, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+            {
+                "limit": 50,
+                "remaining": 10,
+                "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+                "window_seconds": 300,
+                "policy": "50;w=300",
+            }
         )
 
 
@@ -593,7 +543,7 @@ class TestCheckNewInterval:
                 {
                     "limit": 50,
                     "remaining": 15,
-                    "reset_seconds": 300,
+                    "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                     "window_seconds": 300,
                     "policy": "50;w=300",
                 }

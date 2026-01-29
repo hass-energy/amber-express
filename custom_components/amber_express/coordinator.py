@@ -316,19 +316,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         resolution = int(self._site.interval_length)
 
         # Skip if we already have confirmed price for this interval
-        if self._polling_manager.has_confirmed_price and not self._polling_manager.forecasts_pending:
-            return
-
-        # If we have confirmed price but forecasts are pending, only fetch forecasts
-        if self._polling_manager.has_confirmed_price and self._polling_manager.forecasts_pending:
-            _LOGGER.debug("Retrying forecast fetch...")
-            forecasts_fetched = await self._fetch_forecasts(resolution)
-            if forecasts_fetched:
-                self._polling_manager.clear_forecasts_pending()
-                self._data_sources.update_polling(forecasts_fetched)
-                self._update_from_sources()
-                self.async_set_updated_data(self.current_data)
-                _LOGGER.info("Forecasts fetched successfully on retry")
+        if self._polling_manager.has_confirmed_price:
             return
 
         # Record poll started
@@ -340,14 +328,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._polling_manager.poll_count_this_interval,
         )
 
-        # First poll of interval: fetch with forecasts to ensure we have them immediately
-        # Subsequent polls: fetch without forecasts (just checking for confirmed)
-        next_intervals = FORECAST_INTERVALS if is_first_poll else 0
-
         try:
             intervals = await self._api_client.fetch_current_prices(
                 self.site_id,
-                next_intervals=next_intervals,
+                next_intervals=FORECAST_INTERVALS,
                 resolution=resolution,
             )
         except RateLimitedError:
@@ -378,51 +362,18 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Confirmed price: update and stop polling
         if is_estimate is False:
-            # Record observation for CDF strategy
             self._polling_manager.on_confirmed_received()
-
-            # If not first poll, we need to fetch forecasts separately
-            if not is_first_poll:
-                forecasts_fetched = await self._fetch_forecasts(resolution)
-                if not forecasts_fetched:
-                    self._polling_manager.set_forecasts_pending()
-                else:
-                    self._polling_manager.clear_forecasts_pending()
-                    data = forecasts_fetched
-
             self._data_sources.update_polling(data)
             _LOGGER.info("Confirmed price received, stopping polling for this interval")
-        # Estimated price: only update on first poll (which has forecasts)
+        # Estimated price: update sensors (unless waiting for confirmed on first poll)
         else:
-            # Track when we got this estimate for offset calculation
             self._polling_manager.on_estimate_received()
 
-            # Only update on first poll - subsequent estimates are ignored to preserve forecasts
-            if is_first_poll and not wait_for_confirmed:
-                self._data_sources.update_polling(data)
-                _LOGGER.debug("First poll estimate received with forecasts, updating sensors")
-            elif is_first_poll:
+            if is_first_poll and wait_for_confirmed:
                 _LOGGER.debug("First poll estimate received, waiting for confirmed")
             else:
-                _LOGGER.debug("Subsequent estimate ignored (preserving forecasts, polling for confirmed)")
-
-    async def _fetch_forecasts(self, resolution: int) -> dict[str, ChannelData] | None:
-        """Fetch forecasts. Returns data with forecasts or None on failure."""
-        try:
-            intervals = await self._api_client.fetch_current_prices(
-                self.site_id,
-                next_intervals=FORECAST_INTERVALS,
-                resolution=resolution,
-            )
-        except RateLimitedError:
-            return None
-        except AmberApiError as err:
-            _LOGGER.debug("Failed to fetch forecasts: %s", err)
-            return None
-
-        data = self._interval_processor.process_intervals(intervals)
-        _LOGGER.debug("Fetched %d forecast intervals", FORECAST_INTERVALS)
-        return data
+                self._data_sources.update_polling(data)
+                _LOGGER.debug("Estimate received, updating sensors")
 
     def _update_from_sources(self) -> None:
         """Update current_data from the merged data sources."""
