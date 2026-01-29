@@ -195,7 +195,7 @@ class AmberApiClient:
                 msg = "Unexpected response format from get_current_prices"
                 raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-            # HACK: Force all prices to be estimates for testing CDF polling
+            # Debug: Force all prices to be estimates for testing CDF polling
             if os.environ.get("AMBER_FORCE_ESTIMATES"):
                 for interval in response.data:
                     inner = interval.actual_instance
