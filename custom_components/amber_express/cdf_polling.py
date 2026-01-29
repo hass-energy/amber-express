@@ -257,6 +257,11 @@ class CDFPollingStrategy:
                 forced_polls.append(reset_time)
             # Compute reset_seconds for uniform distribution calculation
             reset_seconds = reset_time - elapsed
+        elif reset_time is not None:
+            # Reset just happened - schedule poll 1 second from now to get fresh quota
+            soon = elapsed + 1.0
+            if interval_seconds is None or soon < interval_seconds:
+                forced_polls.append(soon)
 
         # Reserve budget for forced polls
         cdf_budget = max(0, self._polls_per_interval - len(forced_polls))
