@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 import logging
+import os
 from typing import TYPE_CHECKING, TypeGuard
 
 import amberelectric
@@ -193,6 +194,14 @@ class AmberApiClient:
             if not _is_interval_list(response.data):
                 msg = "Unexpected response format from get_current_prices"
                 raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+            # HACK: Force all prices to be estimates for testing CDF polling
+            if os.environ.get("AMBER_FORCE_ESTIMATES"):
+                for interval in response.data:
+                    inner = interval.actual_instance
+                    if hasattr(inner, "estimate"):
+                        inner.__dict__["estimate"] = True
+
             return response.data
         except ApiException as err:
             status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
