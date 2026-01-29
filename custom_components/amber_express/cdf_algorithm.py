@@ -61,27 +61,9 @@ def build_cdf(
         empty = np.array([], dtype=np.float64)
         return empty, empty
 
-    # For each segment [t_i, t_{i+1}), check which intervals contain the segment start
-    segment_starts = time_grid[:-1]
-
-    # Boolean mask: covers[i, j] = True if observation j covers segment i
-    covers = (starts <= segment_starts[:, np.newaxis]) & (segment_starts[:, np.newaxis] < ends)
-
-    # Compute density for each observation: weight / (total_weight * (end - start))
-    densities = weights / (total_weight * (ends - starts))
-
-    # Compute slope for each segment: sum of densities for covering observations
-    slopes = np.sum(covers * densities, axis=1)
-
-    # Compute segment lengths
-    segment_lengths = time_grid[1:] - time_grid[:-1]
-
-    # Integrate: cumulative sum of slope * length
-    cumulative = np.concatenate([[0.0], np.cumsum(slopes * segment_lengths)])
-
-    # Normalize so CDF ends at 1.0
-    if cumulative[-1] > 0:
-        cumulative = cumulative / cumulative[-1]
+    # Compute individual CDFs for all observations and take weighted average
+    individual_cdfs = np.clip((time_grid - starts[:, np.newaxis]) / (ends - starts)[:, np.newaxis], 0.0, 1.0)
+    cumulative = np.sum(individual_cdfs * weights[:, np.newaxis], axis=0) / total_weight
 
     return time_grid, cumulative
 
