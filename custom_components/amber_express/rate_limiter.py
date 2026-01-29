@@ -11,8 +11,21 @@ _LOGGER = logging.getLogger(__name__)
 class ExponentialBackoffRateLimiter:
     """Manages exponential backoff for rate-limited API calls.
 
-    This class tracks rate limit events and applies exponential backoff
-    to prevent overwhelming the API.
+    Responsibilities:
+    - Tracking whether we're currently in a rate-limit backoff period
+    - Recording rate limit events (429 responses) and calculating backoff duration
+    - Using API-provided reset time when available, falling back to exponential backoff
+    - Resetting backoff on successful API calls
+    - Providing remaining seconds until rate limit expires
+
+    The backoff strategy:
+    1. If API provides ratelimit-reset header, use that duration + 2s buffer
+    2. Otherwise, start at initial_backoff (10s) and double on each consecutive 429
+    3. Cap at max_backoff (300s / 5 minutes)
+    4. Reset to 0 on any successful API call
+
+    This class is shared between AmberApiClient (which records events) and the
+    coordinator (which checks before scheduling polls).
     """
 
     def __init__(
@@ -61,20 +74,20 @@ class ExponentialBackoffRateLimiter:
         self._backoff_seconds = 0
         self._rate_limit_until = None
 
-    def record_rate_limit(self, reset_seconds: int | None = None) -> datetime:
+    def record_rate_limit(self, reset_seconds: int) -> datetime:
         """Record a rate limit event and set backoff.
 
-        If reset_seconds is provided (from API ratelimit-reset header), use that.
-        Otherwise, fall back to exponential backoff.
+        Uses reset_seconds from API header if positive, otherwise falls back
+        to exponential backoff.
 
         Args:
-            reset_seconds: Seconds until quota resets (from API header)
+            reset_seconds: Seconds until quota resets (from API header), or 0 to use backoff
 
         Returns:
             When the rate limit expires
 
         """
-        if reset_seconds is not None and reset_seconds > 0:
+        if reset_seconds > 0:
             # Use the API-provided reset time (add small buffer)
             self._backoff_seconds = reset_seconds + 2
             _LOGGER.warning(

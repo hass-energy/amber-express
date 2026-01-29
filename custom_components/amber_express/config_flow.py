@@ -6,9 +6,6 @@ import logging
 from types import MappingProxyType
 from typing import Any
 
-import amberelectric
-from amberelectric.api import amber_api
-from amberelectric.configuration import Configuration
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -26,6 +23,8 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
+from .api_client import AmberApiClient, AmberApiError
+from .api_client import RateLimitedError as ApiRateLimitedError
 from .const import (
     API_DEVELOPER_URL,
     CONF_API_TOKEN,
@@ -45,6 +44,7 @@ from .const import (
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
+from .rate_limiter import ExponentialBackoffRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,17 +67,19 @@ class RateLimitedError(HomeAssistantError):
 
 async def validate_api_token(hass: HomeAssistant, api_token: str) -> list[dict[str, Any]]:
     """Validate the API token and return available sites."""
-    configuration = Configuration(access_token=api_token)
-    api = amber_api.AmberApi(amberelectric.ApiClient(configuration))
+    # Use a temporary rate limiter (not shared with coordinator)
+    rate_limiter = ExponentialBackoffRateLimiter()
+    client = AmberApiClient(hass, api_token, rate_limiter)
 
     try:
-        sites = await hass.async_add_executor_job(api.get_sites)
-    except amberelectric.ApiException as err:
+        sites = await client.fetch_sites()
+    except ApiRateLimitedError as err:
+        raise RateLimitedError from err
+    except AmberApiError as err:
         if err.status == HTTP_FORBIDDEN:
             raise InvalidAuthError from err
-        if err.status == HTTP_TOO_MANY_REQUESTS:
-            raise RateLimitedError from err
-        raise
+        msg = f"Failed to fetch sites: {err}"
+        raise HomeAssistantError(msg) from err
 
     if not sites:
         raise NoSitesFoundError
@@ -86,26 +88,24 @@ async def validate_api_token(hass: HomeAssistant, api_token: str) -> list[dict[s
     site_list = []
     for site in sites:
         # Extract full channel info including tariff codes
-        channels_info = []
-        for ch in site.channels or []:
-            channel_type = ch.type.value if hasattr(ch.type, "value") else str(ch.type)
-            channels_info.append(
-                {
-                    "identifier": getattr(ch, "identifier", None),
-                    "type": channel_type,
-                    "tariff": getattr(ch, "tariff", None),
-                }
-            )
+        channels_info = [
+            {
+                "identifier": ch.identifier,
+                "type": ch.type.value,
+                "tariff": ch.tariff,
+            }
+            for ch in site.channels
+        ]
 
         site_list.append(
             {
                 "id": site.id,
                 "nmi": site.nmi,
-                "status": site.status.value if hasattr(site.status, "value") else str(site.status),
-                "network": getattr(site, "network", None),
+                "status": site.status.value,
+                "network": site.network,
                 "channels": channels_info,
-                "active_from": getattr(site, "active_from", None),
-                "interval_length": getattr(site, "interval_length", None),
+                "active_from": str(site.active_from) if site.active_from else None,
+                "interval_length": site.interval_length,
             }
         )
 

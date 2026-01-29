@@ -68,11 +68,10 @@ def _add_site_binary_sensors(
 ) -> None:
     """Add binary sensors for a single site."""
     # Get available channels from site info
-    site_info = coordinator.get_site_info()
-    site_channels = site_info.get("channels", [])
+    site = coordinator.get_site_info()
 
     # Check if general channel is available
-    has_general = any(CHANNEL_TYPE_MAP.get(ch.get("type")) == CHANNEL_GENERAL for ch in site_channels)
+    has_general = any(CHANNEL_TYPE_MAP.get(ch.type.value) == CHANNEL_GENERAL for ch in site.channels)
 
     # Only add sensors if general channel is available
     if has_general:

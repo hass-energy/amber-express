@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
-from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
     CONF_API_TOKEN,
@@ -24,14 +22,7 @@ from .const import (
 from .coordinator import AmberDataCoordinator
 from .websocket import AmberWebSocketClient
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 _LOGGER = logging.getLogger(__name__)
-
-# Polling seconds - check every second to support 2-second confirmatory polling
-# The coordinator's should_poll() decides when to actually make API calls
-POLL_SECONDS = list(range(0, 60, 1))
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 
@@ -42,7 +33,6 @@ class SiteRuntimeData:
 
     coordinator: AmberDataCoordinator
     websocket_client: AmberWebSocketClient | None = None
-    unsub_time_change: Callable[[], None] | None = None
 
 
 @dataclass(slots=True)
@@ -111,29 +101,15 @@ async def _setup_site(
             on_message=coordinator.update_from_websocket,
         )
 
-    # Set up clock-aligned polling for this coordinator
-    async def _clock_aligned_poll(_now: object) -> None:
-        """Poll at clock-aligned times with smart offset logic."""
-        if not coordinator.should_poll():
-            return
-        await coordinator.async_refresh()
-
-    unsub_time_change = async_track_time_change(
-        hass,
-        _clock_aligned_poll,
-        second=POLL_SECONDS,
-    )
-
     # Store site runtime data
     site_data = SiteRuntimeData(
         coordinator=coordinator,
         websocket_client=websocket_client,
-        unsub_time_change=unsub_time_change,
     )
     runtime_data.sites[subentry_id] = site_data
 
-    # Initial fetch
-    await coordinator.async_config_entry_first_refresh()
+    # Start the coordinator (initial fetch + polling lifecycle)
+    await coordinator.start()
 
     # Start WebSocket client if enabled
     if websocket_client:
@@ -142,14 +118,10 @@ async def _setup_site(
     _LOGGER.debug("Site %s set up successfully", subentry.title)
 
 
-async def _teardown_site(
-    hass: HomeAssistant,  # noqa: ARG001
-    site_data: SiteRuntimeData,
-) -> None:
+async def _teardown_site(site_data: SiteRuntimeData) -> None:
     """Tear down a single site."""
-    # Unsubscribe from time change listener
-    if site_data.unsub_time_change:
-        site_data.unsub_time_change()
+    # Stop the coordinator polling lifecycle
+    await site_data.coordinator.stop()
 
     # Stop WebSocket client
     if site_data.websocket_client:
@@ -164,7 +136,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> bo
     if unload_ok and entry.runtime_data:
         # Tear down all sites
         for site_data in entry.runtime_data.sites.values():
-            await _teardown_site(hass, site_data)
+            await _teardown_site(site_data)
         entry.runtime_data = None
 
     return unload_ok

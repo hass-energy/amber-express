@@ -95,14 +95,13 @@ def _add_site_sensors(
 ) -> None:
     """Add sensors for a single site."""
     # Get available channels from site info
-    site_info = coordinator.get_site_info()
-    site_channels = site_info.get("channels", [])
+    site = coordinator.get_site_info()
 
     # Map API channel types to internal channel constants
     available_channels: set[str] = set()
-    for ch in site_channels:
-        api_type = ch.get("type")
-        if api_type and api_type in CHANNEL_TYPE_MAP:
+    for ch in site.channels:
+        api_type = ch.type.value
+        if api_type in CHANNEL_TYPE_MAP:
             available_channels.add(CHANNEL_TYPE_MAP[api_type])
 
     # Create sensors for each available channel
@@ -485,13 +484,23 @@ class AmberSiteSensor(AmberBaseSensor):
     @property
     def native_value(self) -> str | None:
         """Return the network name as the state."""
-        site_info = self.coordinator.get_site_info()
-        return site_info.get("network")
+        site = self.coordinator.get_site_info()
+        return site.network
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return site info as attributes."""
-        return self.coordinator.get_site_info()
+        site = self.coordinator.get_site_info()
+        return {
+            "id": site.id,
+            "nmi": site.nmi,
+            "network": site.network,
+            "status": site.status.value,
+            "interval_length": site.interval_length,
+            "channels": [
+                {"identifier": ch.identifier, "type": ch.type.value, "tariff": ch.tariff} for ch in site.channels
+            ],
+        }
 
 
 class AmberPollingStatsSensor(AmberBaseSensor):
@@ -516,22 +525,24 @@ class AmberPollingStatsSensor(AmberBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return the last time-to-confirmed value in seconds."""
-        offset_stats = self.coordinator.get_polling_offset_stats()
-        return offset_stats.last_confirmed_elapsed
+        stats = self.coordinator.get_cdf_polling_stats()
+        if stats.last_observation is not None:
+            return stats.last_observation["end"]
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return polling statistics as attributes."""
-        offset_stats = self.coordinator.get_polling_offset_stats()
+        stats = self.coordinator.get_cdf_polling_stats()
         attrs: dict[str, Any] = {
-            "polling_delay": offset_stats.offset,
-            "poll_count": offset_stats.confirmatory_poll_count + 1,
+            "scheduled_polls": [round(t, 1) for t in stats.scheduled_polls],
+            "poll_count": stats.confirmatory_poll_count + 1,
+            "observation_count": stats.observation_count,
         }
 
-        if offset_stats.last_estimate_elapsed is not None:
-            attrs["last_estimate_elapsed"] = round(offset_stats.last_estimate_elapsed, 1)
-        if offset_stats.last_confirmed_elapsed is not None:
-            attrs["last_confirmed_elapsed"] = round(offset_stats.last_confirmed_elapsed, 1)
+        if stats.last_observation is not None:
+            attrs["last_estimate_elapsed"] = round(stats.last_observation["start"], 1)
+            attrs["last_confirmed_elapsed"] = round(stats.last_observation["end"], 1)
 
         return attrs
 
@@ -563,7 +574,10 @@ class AmberConfirmationLagSensor(AmberBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return the time gap between estimate and confirmed polls."""
-        return self.coordinator.get_polling_offset_stats().confirmation_lag
+        stats = self.coordinator.get_cdf_polling_stats()
+        if stats.last_observation is not None:
+            return stats.last_observation["end"] - stats.last_observation["start"]
+        return None
 
 
 class AmberApiStatusSensor(AmberBaseSensor):

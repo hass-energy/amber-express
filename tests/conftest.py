@@ -1,14 +1,23 @@
 """Pytest fixtures for Amber Express tests."""
 
-from collections.abc import Generator
-from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+# pyright: reportArgumentType=false
 
-import amberelectric
-from amberelectric.models import CurrentInterval, ForecastInterval, Interval
+from collections.abc import Generator
+from datetime import UTC, date, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from amberelectric.models import CurrentInterval, ForecastInterval, Interval, Site
+from amberelectric.models.advanced_price import AdvancedPrice
+from amberelectric.models.channel import Channel
+from amberelectric.models.channel_type import ChannelType
+from amberelectric.models.price_descriptor import PriceDescriptor
+from amberelectric.models.site_status import SiteStatus
+from amberelectric.models.spike_status import SpikeStatus
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.amber_express.api_client import AmberApiError, RateLimitedError
+from custom_components.amber_express.cdf_polling import CDFPollingStats
 from custom_components.amber_express.const import (
     ATTR_DESCRIPTOR,
     ATTR_END_TIME,
@@ -35,10 +44,25 @@ from custom_components.amber_express.const import (
     DOMAIN,
     SUBENTRY_TYPE_SITE,
 )
-from custom_components.amber_express.polling_offset import PollingOffsetStats
 
 # Enable loading of the custom component
 pytest_plugins = "pytest_homeassistant_custom_component"
+
+
+def make_rate_limit_headers(
+    *,
+    limit: int = 50,
+    remaining: int = 45,
+    reset: int = 180,
+    window: int = 300,
+) -> dict[str, str]:
+    """Create valid rate limit headers for testing."""
+    return {
+        "ratelimit-limit": str(limit),
+        "ratelimit-remaining": str(remaining),
+        "ratelimit-reset": str(reset),
+        "ratelimit-policy": f"{limit};w={window}",
+    }
 
 
 @pytest.fixture
@@ -133,63 +157,88 @@ def mock_config_entry(
     return entry
 
 
+def _create_mock_site(
+    site_id: str = "01ABCDEFGHIJKLMNOPQRSTUV",
+    nmi: str = "1234567890",
+    status: str = "active",
+    network: str = "Ausgrid",
+) -> MagicMock:
+    """Create a mock Site object."""
+    mock_site = MagicMock()
+    mock_site.id = site_id
+    mock_site.nmi = nmi
+    mock_site.status = MagicMock(value=status)
+    mock_site.network = network
+    mock_site.channels = []
+    return mock_site
+
+
 @pytest.fixture
 def mock_amber_api() -> Generator[MagicMock]:
-    """Mock the Amber Electric API."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client for config flow."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites response
-        mock_site = MagicMock()
-        mock_site.id = "01ABCDEFGHIJKLMNOPQRSTUV"
-        mock_site.nmi = "1234567890"
-        mock_site.status = MagicMock(value="active")
-        mock_site.network = "Ausgrid"
-        mock_site.channels = []
+        # Mock successful fetch_sites
+        mock_site = _create_mock_site()
+        mock_client.fetch_sites = AsyncMock(return_value=[mock_site])
+        mock_client.last_status = 200
 
-        mock_instance.get_sites.return_value = [mock_site]
-
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_invalid() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with invalid auth."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with invalid auth (403)."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites to raise 403
-        mock_instance.get_sites.side_effect = amberelectric.ApiException(status=403)
+        # Mock 403 error - raises AmberApiError with status 403
+        mock_client.fetch_sites = AsyncMock(side_effect=AmberApiError("Forbidden", 403))
 
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_no_sites() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with no sites."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with no sites."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites to return empty list
-        mock_instance.get_sites.return_value = []
+        # Mock empty sites list
+        mock_client.fetch_sites = AsyncMock(return_value=[])
+        mock_client.last_status = 200
 
-        yield mock_instance
+        yield mock_client
+
+
+@pytest.fixture
+def mock_amber_api_rate_limited() -> Generator[MagicMock]:
+    """Mock the Amber API client with rate limiting (429)."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        # Mock 429 error - raises RateLimitedError
+        mock_client.fetch_sites = AsyncMock(side_effect=RateLimitedError(60))
+
+        yield mock_client
 
 
 @pytest.fixture
 def mock_amber_api_unknown_error() -> Generator[MagicMock]:
-    """Mock the Amber Electric API with unknown error."""
-    with patch("custom_components.amber_express.config_flow.amber_api") as mock_api:
-        mock_instance = MagicMock()
-        mock_api.AmberApi.return_value = mock_instance
+    """Mock the Amber API client with unknown error."""
+    with patch("custom_components.amber_express.config_flow.AmberApiClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
 
-        # Mock get_sites to raise generic exception
-        mock_instance.get_sites.side_effect = Exception("Unknown error")
+        # Mock server error - raises AmberApiError with status 500
+        mock_client.fetch_sites = AsyncMock(side_effect=AmberApiError("Server error", 500))
 
-        yield mock_instance
+        yield mock_client
 
 
 @pytest.fixture
@@ -287,25 +336,27 @@ def mock_coordinator_with_data(
     def get_active_channels() -> list:
         return [ch for ch in [CHANNEL_GENERAL, CHANNEL_FEED_IN, CHANNEL_CONTROLLED_LOAD] if ch in data]
 
-    def get_site_info() -> dict:
-        return {
-            "id": "01ABCDEFGHIJKLMNOPQRSTUV",
-            "nmi": "1234567890",
-            "network": "Ausgrid",
-            "status": "active",
-            "channels": [
-                {"type": "general", "tariff": "EA116", "identifier": "E1"},
-                {"type": "feedIn", "tariff": "EA029", "identifier": "B1"},
+    def get_site_info() -> Site:
+        return Site(
+            id="01ABCDEFGHIJKLMNOPQRSTUV",
+            nmi="1234567890",
+            network="Ausgrid",
+            status=SiteStatus.ACTIVE,
+            channels=[
+                Channel(identifier="E1", type=ChannelType.GENERAL, tariff="EA116"),
+                Channel(identifier="B1", type=ChannelType.FEEDIN, tariff="EA029"),
             ],
-            "interval_length": 30,
-        }
+            interval_length=30,
+        )
 
-    def get_polling_offset_stats() -> PollingOffsetStats:
-        return PollingOffsetStats(
-            offset=15,
-            last_estimate_elapsed=None,
-            last_confirmed_elapsed=None,
+    def get_cdf_polling_stats() -> CDFPollingStats:
+        return CDFPollingStats(
+            observation_count=100,
+            scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+            next_poll_index=0,
             confirmatory_poll_count=0,
+            polls_per_interval=4,
+            last_observation=None,
         )
 
     def get_api_status() -> int:
@@ -328,18 +379,16 @@ def mock_coordinator_with_data(
     coordinator.get_tariff_info = MagicMock(side_effect=get_tariff_info)
     coordinator.get_active_channels = MagicMock(side_effect=get_active_channels)
     coordinator.get_site_info = MagicMock(side_effect=get_site_info)
-    coordinator.get_polling_offset_stats = MagicMock(side_effect=get_polling_offset_stats)
+    coordinator.get_cdf_polling_stats = MagicMock(side_effect=get_cdf_polling_stats)
     coordinator.get_api_status = MagicMock(side_effect=get_api_status)
     coordinator.get_rate_limit_info = MagicMock(side_effect=get_rate_limit_info)
 
     return coordinator
 
 
-def wrap_interval(inner: MagicMock) -> MagicMock:
+def wrap_interval(inner: CurrentInterval | ForecastInterval) -> Interval:
     """Wrap an interval in an Interval wrapper for testing."""
-    wrapper = MagicMock(spec=Interval)
-    wrapper.actual_instance = inner
-    return wrapper
+    return Interval(actual_instance=inner)
 
 
 class MockApiResponse:
@@ -366,6 +415,99 @@ def wrap_api_response(
 ) -> MockApiResponse:
     """Wrap intervals in a mock ApiResponse for testing."""
     return MockApiResponse(intervals, headers)
+
+
+# =============================================================================
+# Real SDK Object Factories
+# =============================================================================
+
+
+def make_site(
+    *,
+    site_id: str = "01ABCDEFGHIJKLMNOPQRSTUV",
+    nmi: str = "1234567890",
+    network: str = "Ausgrid",
+    status: SiteStatus = SiteStatus.ACTIVE,
+    interval_length: float = 30,
+    channels: list[Channel] | None = None,
+    active_from: date | None = None,
+) -> Site:
+    """Create a real Site object for testing."""
+    if channels is None:
+        channels = [Channel(identifier="E1", type=ChannelType.GENERAL, tariff="EA116")]
+    return Site(
+        id=site_id,
+        nmi=nmi,
+        network=network,
+        status=status,
+        interval_length=interval_length,
+        channels=channels,
+        active_from=active_from,
+    )
+
+
+def make_current_interval(
+    *,
+    per_kwh: float = 25.0,
+    spot_per_kwh: float = 20.0,
+    renewables: float = 45.0,
+    estimate: bool = False,
+    channel_type: ChannelType = ChannelType.GENERAL,
+    descriptor: PriceDescriptor = PriceDescriptor.NEUTRAL,
+    spike_status: SpikeStatus = SpikeStatus.NONE,
+    start_time: datetime | None = None,
+    advanced_price: AdvancedPrice | None = None,
+) -> CurrentInterval:
+    """Create a real CurrentInterval object for testing."""
+    start = start_time or datetime(2024, 1, 1, 9, 30, 0, tzinfo=UTC)
+    end = start + timedelta(minutes=30)
+    return CurrentInterval(
+        type="CurrentInterval",
+        duration=30,
+        spot_per_kwh=spot_per_kwh,
+        per_kwh=per_kwh,
+        var_date=date(2024, 1, 1),
+        nem_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
+        start_time=start,
+        end_time=end,
+        renewables=renewables,
+        channel_type=channel_type,
+        spike_status=spike_status,
+        descriptor=descriptor,
+        estimate=estimate,
+        advanced_price=advanced_price,
+    )
+
+
+def make_forecast_interval(
+    *,
+    per_kwh: float = 26.0,
+    spot_per_kwh: float = 20.0,
+    renewables: float = 45.0,
+    channel_type: ChannelType = ChannelType.GENERAL,
+    descriptor: PriceDescriptor = PriceDescriptor.NEUTRAL,
+    spike_status: SpikeStatus = SpikeStatus.NONE,
+    start_time: datetime | None = None,
+    advanced_price: AdvancedPrice | None = None,
+) -> ForecastInterval:
+    """Create a real ForecastInterval object for testing."""
+    start = start_time or datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
+    end = start + timedelta(minutes=30)
+    return ForecastInterval(
+        type="ForecastInterval",
+        duration=30,
+        spot_per_kwh=spot_per_kwh,
+        per_kwh=per_kwh,
+        var_date=date(2024, 1, 1),
+        nem_time=datetime(2024, 1, 1, 10, 30, 0, tzinfo=UTC),
+        start_time=start,
+        end_time=end,
+        renewables=renewables,
+        channel_type=channel_type,
+        spike_status=spike_status,
+        descriptor=descriptor,
+        advanced_price=advanced_price,
+    )
 
 
 @pytest.fixture

@@ -4,6 +4,10 @@
 
 from unittest.mock import MagicMock
 
+from amberelectric.models import Site
+from amberelectric.models.channel import Channel
+from amberelectric.models.channel_type import ChannelType
+from amberelectric.models.site_status import SiteStatus
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -31,6 +35,7 @@ from custom_components.amber_express.sensor import (
     AmberApiStatusSensor,
     AmberConfirmationLagSensor,
     AmberDetailedPriceSensor,
+    AmberPollingStatsSensor,
     AmberPriceSensor,
     AmberRenewablesSensor,
     AmberSiteSensor,
@@ -678,11 +683,14 @@ class TestAsyncSetupEntry:
         # Coordinator with only general channel
         coordinator = MagicMock()
         coordinator.get_site_info = MagicMock(
-            return_value={
-                "id": "test_site",
-                "network": "Ausgrid",
-                "channels": [{"type": "general", "tariff": "EA116"}],
-            }
+            return_value=Site(
+                id="test_site",
+                nmi="1234567890",
+                network="Ausgrid",
+                status=SiteStatus.ACTIVE,
+                channels=[Channel(identifier="E1", type=ChannelType.GENERAL, tariff="EA116")],
+                interval_length=30,
+            )
         )
 
         mock_config_entry.add_to_hass(hass)
@@ -715,11 +723,14 @@ class TestAsyncSetupEntry:
         # Coordinator with only controlled load channel
         coordinator = MagicMock()
         coordinator.get_site_info = MagicMock(
-            return_value={
-                "id": "test_site",
-                "network": "Ausgrid",
-                "channels": [{"type": "controlledLoad", "tariff": "EA029"}],
-            }
+            return_value=Site(
+                id="test_site",
+                nmi="1234567890",
+                network="Ausgrid",
+                status=SiteStatus.ACTIVE,
+                channels=[Channel(identifier="E1", type=ChannelType.CONTROLLEDLOAD, tariff="EA029")],
+                interval_length=30,
+            )
         )
 
         mock_config_entry.add_to_hass(hass)
@@ -741,6 +752,137 @@ class TestAsyncSetupEntry:
         # With only controlled load channel:
         # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag = 7
         assert len(added_entities) == 7
+
+
+class TestAmberPollingStatsSensor:
+    """Tests for AmberPollingStatsSensor."""
+
+    def test_polling_stats_sensor_native_value_with_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor returns last confirmed elapsed time."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=100,
+                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+                next_poll_index=0,
+                confirmatory_poll_count=2,
+                polls_per_interval=4,
+                last_observation={"start": 15.0, "end": 27.5},
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        # native_value should be the last_observation["end"]
+        assert sensor.native_value == 27.5
+
+    def test_polling_stats_sensor_native_value_no_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor returns None when no observation."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=0,
+                scheduled_polls=[],
+                next_poll_index=0,
+                confirmatory_poll_count=0,
+                polls_per_interval=4,
+                last_observation=None,
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
+
+    def test_polling_stats_sensor_extra_state_attributes(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor extra attributes."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=100,
+                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+                next_poll_index=2,
+                confirmatory_poll_count=2,
+                polls_per_interval=4,
+                last_observation={"start": 15.0, "end": 27.5},
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        attrs = sensor.extra_state_attributes
+
+        assert attrs["scheduled_polls"] == [21.0, 27.0, 33.0, 39.0]
+        assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
+        assert attrs["observation_count"] == 100
+        assert attrs["last_estimate_elapsed"] == 15.0
+        assert attrs["last_confirmed_elapsed"] == 27.5
+
+    def test_polling_stats_sensor_attributes_no_observation(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test polling stats sensor attributes when no observation."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=0,
+                scheduled_polls=[21.0, 27.0],
+                next_poll_index=0,
+                confirmatory_poll_count=0,
+                polls_per_interval=2,
+                last_observation=None,
+            )
+        )
+
+        sensor = AmberPollingStatsSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        attrs = sensor.extra_state_attributes
+
+        # Should still have base attributes
+        assert attrs["scheduled_polls"] == [21.0, 27.0]
+        assert attrs["poll_count"] == 1
+        assert attrs["observation_count"] == 0
+        # Should not have elapsed attributes
+        assert "last_estimate_elapsed" not in attrs
+        assert "last_confirmed_elapsed" not in attrs
 
 
 class TestAmberConfirmationLagSensor:
@@ -802,15 +944,17 @@ class TestAmberConfirmationLagSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test confirmation lag sensor calculates gap from observation."""
-        from custom_components.amber_express.polling_offset import PollingOffsetStats  # noqa: PLC0415
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
 
         coordinator = MagicMock()
-        coordinator.get_polling_offset_stats = MagicMock(
-            return_value=PollingOffsetStats(
-                offset=15,
-                last_estimate_elapsed=15.0,
-                last_confirmed_elapsed=27.5,
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=100,
+                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+                next_poll_index=0,
                 confirmatory_poll_count=2,
+                polls_per_interval=4,
+                last_observation={"start": 15.0, "end": 27.5},
             )
         )
 

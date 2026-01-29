@@ -1,12 +1,11 @@
 """Tests for integration setup and unload."""
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.amber_express import POLL_SECONDS, async_setup_entry, async_unload_entry, async_update_listener
+from custom_components.amber_express import async_setup_entry, async_unload_entry, async_update_listener
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
@@ -90,22 +89,17 @@ class TestAsyncSetupEntry:
         with (
             patch("custom_components.amber_express.AmberDataCoordinator") as mock_coordinator_class,
             patch("custom_components.amber_express.AmberWebSocketClient") as mock_ws_class,
-            patch("custom_components.amber_express.async_track_time_change") as mock_track_time,
             patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()) as mock_forward,
         ):
             mock_coordinator = AsyncMock()
-            mock_coordinator.async_config_entry_first_refresh = AsyncMock()
-            mock_coordinator.should_poll = MagicMock(return_value=True)
-            mock_coordinator.async_refresh = AsyncMock()
+            mock_coordinator.start = AsyncMock()
+            mock_coordinator.stop = AsyncMock()
             mock_coordinator.update_from_websocket = MagicMock()
             mock_coordinator_class.return_value = mock_coordinator
 
             mock_ws = AsyncMock()
             mock_ws.start = AsyncMock()
             mock_ws_class.return_value = mock_ws
-
-            mock_unsub = MagicMock()
-            mock_track_time.return_value = mock_unsub
 
             result = await async_setup_entry(hass, entry)
 
@@ -115,7 +109,7 @@ class TestAsyncSetupEntry:
             assert entry.runtime_data.sites["test_subentry_id"].coordinator == mock_coordinator
             assert entry.runtime_data.sites["test_subentry_id"].websocket_client == mock_ws
 
-            mock_coordinator.async_config_entry_first_refresh.assert_called_once()
+            mock_coordinator.start.assert_called_once()
             mock_ws.start.assert_called_once()
             mock_forward.assert_called_once()
 
@@ -129,107 +123,18 @@ class TestAsyncSetupEntry:
         with (
             patch("custom_components.amber_express.AmberDataCoordinator") as mock_coordinator_class,
             patch("custom_components.amber_express.AmberWebSocketClient") as mock_ws_class,
-            patch("custom_components.amber_express.async_track_time_change") as mock_track_time,
             patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
         ):
             mock_coordinator = AsyncMock()
-            mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+            mock_coordinator.start = AsyncMock()
+            mock_coordinator.stop = AsyncMock()
             mock_coordinator_class.return_value = mock_coordinator
-
-            mock_unsub = MagicMock()
-            mock_track_time.return_value = mock_unsub
 
             result = await async_setup_entry(hass, entry)
 
             assert result is True
             assert entry.runtime_data.sites["test_subentry_id"].websocket_client is None
             mock_ws_class.assert_not_called()
-
-    async def test_setup_entry_clock_aligned_poll(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test clock-aligned polling is set up correctly."""
-        entry = create_mock_entry_with_subentry(hass)
-
-        captured_callback: Any = None
-        captured_seconds: Any = None
-
-        def capture_track_time(hass: HomeAssistant, callback: Any, second: Any = None) -> MagicMock:
-            nonlocal captured_callback, captured_seconds
-            captured_callback = callback
-            captured_seconds = second
-            return MagicMock()
-
-        with (
-            patch("custom_components.amber_express.AmberDataCoordinator") as mock_coordinator_class,
-            patch("custom_components.amber_express.AmberWebSocketClient") as mock_ws_class,
-            patch(
-                "custom_components.amber_express.async_track_time_change",
-                side_effect=capture_track_time,
-            ),
-            patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
-        ):
-            mock_coordinator = AsyncMock()
-            mock_coordinator.async_config_entry_first_refresh = AsyncMock()
-            mock_coordinator.should_poll = MagicMock(return_value=True)
-            mock_coordinator.async_refresh = AsyncMock()
-            mock_coordinator.update_from_websocket = MagicMock()
-            mock_coordinator_class.return_value = mock_coordinator
-
-            mock_ws = AsyncMock()
-            mock_ws.start = AsyncMock()
-            mock_ws_class.return_value = mock_ws
-
-            await async_setup_entry(hass, entry)
-
-            assert captured_seconds == POLL_SECONDS
-            assert captured_callback is not None
-
-            # Test the callback - should_poll returns True
-            await captured_callback(None)
-            mock_coordinator.async_refresh.assert_called_once()
-
-    async def test_setup_entry_poll_skipped_when_not_needed(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test polling is skipped when should_poll returns False."""
-        entry = create_mock_entry_with_subentry(hass)
-
-        captured_callback: Any = None
-
-        def capture_track_time(hass: HomeAssistant, callback: Any, second: Any = None) -> MagicMock:
-            nonlocal captured_callback
-            captured_callback = callback
-            return MagicMock()
-
-        with (
-            patch("custom_components.amber_express.AmberDataCoordinator") as mock_coordinator_class,
-            patch("custom_components.amber_express.AmberWebSocketClient") as mock_ws_class,
-            patch(
-                "custom_components.amber_express.async_track_time_change",
-                side_effect=capture_track_time,
-            ),
-            patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
-        ):
-            mock_coordinator = AsyncMock()
-            mock_coordinator.async_config_entry_first_refresh = AsyncMock()
-            mock_coordinator.should_poll = MagicMock(return_value=False)
-            mock_coordinator.async_refresh = AsyncMock()
-            mock_coordinator.update_from_websocket = MagicMock()
-            mock_coordinator_class.return_value = mock_coordinator
-
-            mock_ws = AsyncMock()
-            mock_ws.start = AsyncMock()
-            mock_ws_class.return_value = mock_ws
-
-            await async_setup_entry(hass, entry)
-
-            # Test the callback - should_poll returns False, so refresh not called
-            mock_coordinator.async_refresh.reset_mock()
-            await captured_callback(None)
-            mock_coordinator.async_refresh.assert_not_called()
 
 
 class TestAsyncUnloadEntry:
@@ -242,20 +147,19 @@ class TestAsyncUnloadEntry:
         """Test successful unload."""
         entry = create_mock_entry_with_subentry(hass)
 
-        mock_unsub = MagicMock()
         mock_ws = AsyncMock()
         mock_ws.stop = AsyncMock()
 
         # Set up runtime data as if setup succeeded
         from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData  # noqa: PLC0415
 
-        mock_coordinator = MagicMock()
+        mock_coordinator = AsyncMock()
+        mock_coordinator.stop = AsyncMock()
         entry.runtime_data = AmberRuntimeData(
             sites={
                 "test_subentry_id": SiteRuntimeData(
                     coordinator=mock_coordinator,
                     websocket_client=mock_ws,
-                    unsub_time_change=mock_unsub,
                 )
             }
         )
@@ -269,7 +173,7 @@ class TestAsyncUnloadEntry:
 
             assert result is True
             assert entry.runtime_data is None
-            mock_unsub.assert_called_once()
+            mock_coordinator.stop.assert_called_once()
             mock_ws.stop.assert_called_once()
 
     async def test_unload_entry_without_websocket(
@@ -279,17 +183,15 @@ class TestAsyncUnloadEntry:
         """Test unload without websocket."""
         entry = create_mock_entry_with_subentry(hass)
 
-        mock_unsub = MagicMock()
-
         from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData  # noqa: PLC0415
 
-        mock_coordinator = MagicMock()
+        mock_coordinator = AsyncMock()
+        mock_coordinator.stop = AsyncMock()
         entry.runtime_data = AmberRuntimeData(
             sites={
                 "test_subentry_id": SiteRuntimeData(
                     coordinator=mock_coordinator,
                     websocket_client=None,
-                    unsub_time_change=mock_unsub,
                 )
             }
         )
@@ -302,7 +204,7 @@ class TestAsyncUnloadEntry:
             result = await async_unload_entry(hass, entry)
 
             assert result is True
-            mock_unsub.assert_called_once()
+            mock_coordinator.stop.assert_called_once()
 
     async def test_unload_entry_failure(
         self,
@@ -313,13 +215,13 @@ class TestAsyncUnloadEntry:
 
         from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData  # noqa: PLC0415
 
-        mock_coordinator = MagicMock()
+        mock_coordinator = AsyncMock()
+        mock_coordinator.stop = AsyncMock()
         runtime_data = AmberRuntimeData(
             sites={
                 "test_subentry_id": SiteRuntimeData(
                     coordinator=mock_coordinator,
                     websocket_client=None,
-                    unsub_time_change=None,
                 )
             }
         )
@@ -355,13 +257,3 @@ class TestAsyncUpdateListener:
             await async_update_listener(hass, entry)
 
             mock_reload.assert_called_once_with(entry.entry_id)
-
-
-class TestPollSeconds:
-    """Tests for POLL_SECONDS constant."""
-
-    def test_poll_seconds_contains_expected_values(self) -> None:
-        """Test POLL_SECONDS contains expected values."""
-        assert 0 in POLL_SECONDS
-        assert 5 in POLL_SECONDS
-        assert all(0 <= s < 60 for s in POLL_SECONDS)

@@ -9,6 +9,7 @@ dependencies = [
     "homeassistant>=2026.1.1",
     "amberelectric>=2.0.12",
     "http-sf>=1.1.1",
+    "numpy>=2.2.0",
 ]
 
 [dependency-groups]

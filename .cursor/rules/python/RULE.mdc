@@ -2,7 +2,7 @@
 applyTo: '**/*.py'
 description: Python coding standards
 globs: ['**/*.py']
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Python coding standards
@@ -48,6 +48,20 @@ Prefer the type system over runtime checks - tests should never verify things th
     - Use `asyncio.sleep()` not `time.sleep()`
     - Use executor for blocking I/O: `await hass.async_add_executor_job(fn, args)`
 - Use `@callback` decorator for event loop safe functions
+
+## No magic defaults
+
+Never add fallback/default values when data should be present. If data is missing, fail loudly rather than silently substituting a magic number.
+
+```python
+# ❌ Bad - magic fallback hides the real problem
+polls = rate_limit_info.get("remaining", 4)
+
+# ✅ Good - fails visibly if data is missing
+polls = rate_limit_info["remaining"]
+```
+
+If a value truly needs a default, it should be explicitly defined and documented at the appropriate boundary (e.g., config schema, API contract), not invented inline.
 
 ## Error handling
 
