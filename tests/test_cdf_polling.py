@@ -596,3 +596,44 @@ def test_update_budget_includes_reset_time_as_forced_poll() -> None:
 
     # Reset time (10 + 50 = 60) should be in the schedule
     assert 60.0 in strategy.scheduled_polls
+
+
+def test_update_budget_schedules_next_window_when_reset_zero() -> None:
+    """Test that next window start is always scheduled when reset just happened."""
+    strategy = CDFPollingStrategy()
+
+    # Scenario: rate limit just reset (reset_seconds=0)
+    # With window_seconds=300, we should schedule a poll at elapsed + 300
+    # This is unconditional - even with k>0, we want the reset boundary poll
+    strategy.update_budget(
+        polls_per_interval=5,  # Has budget, but still wants reset poll
+        elapsed_seconds=1.0,
+        reset_seconds=0,
+        interval_seconds=1800,
+        window_seconds=300,
+    )
+
+    # Next window (1 + 300 = 301) should be in schedule
+    assert 301.0 in strategy.scheduled_polls
+    # Interval end should also be present
+    assert 1800.0 in strategy.scheduled_polls
+
+
+def test_update_budget_next_window_not_added_when_past_interval() -> None:
+    """Test that next window poll is not added if it would be after interval end."""
+    strategy = CDFPollingStrategy()
+
+    # Scenario: reset just happened, k=0, but next window (elapsed + window_seconds)
+    # is after the interval end
+    strategy.update_budget(
+        polls_per_interval=0,
+        elapsed_seconds=1700.0,  # Near end of 30-min interval
+        reset_seconds=0,
+        interval_seconds=1800,
+        window_seconds=300,  # Next window at 2000, after interval
+    )
+
+    # Only interval end should be scheduled, not the next window
+    assert 1800.0 in strategy.scheduled_polls
+    assert 2000.0 not in strategy.scheduled_polls
+    assert len(strategy.scheduled_polls) == 1

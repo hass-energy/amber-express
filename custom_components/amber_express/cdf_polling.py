@@ -82,6 +82,7 @@ class CDFPollingStrategy:
         elapsed_seconds: float,
         reset_seconds: int,
         interval_seconds: int,
+        window_seconds: int | None = None,
     ) -> None:
         """Update the poll budget mid-interval based on new rate limit info.
 
@@ -96,6 +97,7 @@ class CDFPollingStrategy:
             elapsed_seconds: Current elapsed time in the interval
             reset_seconds: Seconds until rate limit quota resets
             interval_seconds: Length of the interval in seconds
+            window_seconds: Length of the rate limit window (for scheduling after reset)
 
         """
         self._polls_per_interval = polls_per_interval
@@ -103,6 +105,7 @@ class CDFPollingStrategy:
             condition_on_elapsed=elapsed_seconds,
             reset_seconds=reset_seconds,
             interval_seconds=interval_seconds,
+            window_seconds=window_seconds,
         )
         # All scheduled polls are in the future, start from index 0
         self._next_poll_index = 0
@@ -222,6 +225,7 @@ class CDFPollingStrategy:
         condition_on_elapsed: float | None = None,
         reset_seconds: int | None = None,
         interval_seconds: int | None = None,
+        window_seconds: int | None = None,
     ) -> None:
         """Recompute poll schedule using pure algorithm functions.
 
@@ -231,6 +235,7 @@ class CDFPollingStrategy:
         Injects forced polls at boundary times (reserving budget for them):
         - Next interval start (interval_seconds)
         - Rate limit reset time (elapsed + reset_seconds)
+        - Next window start if budget is exhausted (elapsed + window_seconds)
         """
         elapsed = condition_on_elapsed or 0.0
 
@@ -241,12 +246,16 @@ class CDFPollingStrategy:
         if interval_seconds is not None and interval_seconds > elapsed:
             forced_polls.append(float(interval_seconds))
 
-        # Poll at rate limit reset time
+        # Poll at rate limit reset time (guaranteed fresh quota, good time to reassess)
         if reset_seconds is not None and reset_seconds > 0:
             reset_time = elapsed + reset_seconds
-            # Only add if it's before the next interval (otherwise interval poll covers it)
             if interval_seconds is None or reset_time < interval_seconds:
                 forced_polls.append(reset_time)
+        elif reset_seconds == 0 and window_seconds is not None:
+            # Window just reset - schedule at next window boundary
+            next_window_time = elapsed + window_seconds
+            if interval_seconds is None or next_window_time < interval_seconds:
+                forced_polls.append(next_window_time)
 
         # Reserve budget for forced polls
         cdf_budget = max(0, self._polls_per_interval - len(forced_polls))
