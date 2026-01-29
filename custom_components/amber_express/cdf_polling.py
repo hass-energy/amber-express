@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 
 import numpy as np
 from numpy.typing import NDArray
@@ -43,10 +44,7 @@ class CDFPollingStrategy:
 
     # Configuration constants
     WINDOW_SIZE = 100  # Rolling window of observations (N)
-
-    # Uniform blending thresholds as fractions of quota
-    UNIFORM_BLEND_FRACTION_HIGH = 0.3  # Pure targeted CDF when k >= quota * this
-    UNIFORM_BLEND_FRACTION_LOW = 0.2  # Pure uniform distribution when k <= quota * this
+    MIN_SAMPLE_INTERVAL = 30  # Minimum seconds between uniform samples
 
     def __init__(
         self,
@@ -68,7 +66,6 @@ class CDFPollingStrategy:
         self._next_poll_index = 0
         self._confirmatory_poll_count = 0
         self._polls_per_interval = 0
-        self._quota: int | None = None
 
         # Cached CDF arrays (computed lazily)
         self._cdf_times: NDArray[np.float64] | None = None
@@ -96,25 +93,22 @@ class CDFPollingStrategy:
         polls_per_interval: int,
         elapsed_seconds: float,
         reset_seconds: int,
-        quota: int,
     ) -> None:
         """Update the poll budget mid-interval based on new rate limit info.
 
         Recomputes the schedule using conditional probability - since we know
         the event hasn't occurred by elapsed_seconds, we sample from P(T | T > t).
 
-        When poll budget is low, blends targeted poll times with uniform distribution
-        to spread remaining polls evenly until the rate limit resets.
+        Blends targeted poll times with uniform distribution based on minimum
+        sample rate requirements.
 
         Args:
             polls_per_interval: New number of confirmatory polls (from remaining quota)
             elapsed_seconds: Current elapsed time in the interval
             reset_seconds: Seconds until rate limit quota resets
-            quota: Rate limit quota (limit). Used to compute blend thresholds.
 
         """
         self._polls_per_interval = polls_per_interval
-        self._quota = quota
         self._recompute_schedule(
             condition_on_elapsed=elapsed_seconds,
             reset_seconds=reset_seconds,
@@ -232,27 +226,6 @@ class CDFPollingStrategy:
 
         return cdf_times, cdf_probs
 
-    def _compute_blend_weight(self) -> float:
-        """Compute weight for blending targeted CDF vs uniform distribution.
-
-        Returns:
-            Weight in [0.0, 1.0] for targeted CDF contribution.
-            1.0 = pure targeted CDF, 0.0 = pure uniform distribution.
-
-        """
-        if self._quota is None:
-            return 1.0
-
-        k = self._polls_per_interval
-        k_high = int(self._quota * self.UNIFORM_BLEND_FRACTION_HIGH)
-        k_low = int(self._quota * self.UNIFORM_BLEND_FRACTION_LOW)
-
-        if k >= k_high:
-            return 1.0
-        if k <= k_low:
-            return 0.0
-        return (k - k_low) / (k_high - k_low)
-
     def _recompute_schedule(
         self,
         condition_on_elapsed: float | None = None,
@@ -260,31 +233,34 @@ class CDFPollingStrategy:
     ) -> None:
         """Recompute poll schedule using pure algorithm functions.
 
-        When poll budget is low, blends the targeted CDF with a uniform distribution
-        by adding a synthetic uniform observation with appropriate weight.
+        Always blends targeted CDF with uniform distribution when reset_seconds
+        is available. Weights are based on a minimum sample rate target.
         """
         if not self._observations:
             self._scheduled_polls = []
             return
 
-        blend_weight = self._compute_blend_weight()
+        if reset_seconds is not None and reset_seconds > 0:
+            # Calculate polls needed for minimum sample rate
+            uniform_polls_needed = ceil(reset_seconds / self.MIN_SAMPLE_INTERVAL)
+            uniform_start = condition_on_elapsed or 0.0
+            uniform_end = uniform_start + reset_seconds
 
-        if blend_weight <= 0 and reset_seconds is not None and reset_seconds > 0:
-            # Pure uniform distribution - use only the synthetic observation
-            uniform_start = condition_on_elapsed or 0.0
-            uniform_end = uniform_start + reset_seconds
-            cdf_times, cdf_probs = build_cdf([{"start": uniform_start, "end": uniform_end}])
-        elif blend_weight < 1.0 and reset_seconds is not None and reset_seconds > 0:
-            # Blend by adding synthetic uniform observation with proportional weight
-            uniform_start = condition_on_elapsed or 0.0
-            uniform_end = uniform_start + reset_seconds
-            total_targeted_weight = sum(obs.get("weight", 1.0) for obs in self._observations)
-            uniform_weight = total_targeted_weight * (1 - blend_weight) / blend_weight
-            augmented: list[IntervalObservation] = [
-                *self._observations,
-                {"start": uniform_start, "end": uniform_end, "weight": uniform_weight},
-            ]
-            cdf_times, cdf_probs = build_cdf(augmented)
+            if self._polls_per_interval <= uniform_polls_needed:
+                # Pure uniform - not enough budget for targeted sampling
+                cdf_times, cdf_probs = build_cdf([{"start": uniform_start, "end": uniform_end}])
+            else:
+                # Blend: weight uniform based on reserved polls for minimum sample rate
+                total_obs_weight = len(self._observations)
+                # Scale so uniform represents uniform_polls_needed / k of total mass
+                uniform_weight = (
+                    total_obs_weight * uniform_polls_needed / (self._polls_per_interval - uniform_polls_needed)
+                )
+                augmented: list[IntervalObservation] = [
+                    *self._observations,
+                    {"start": uniform_start, "end": uniform_end, "weight": uniform_weight},
+                ]
+                cdf_times, cdf_probs = build_cdf(augmented)
         else:
             cdf_times, cdf_probs = self._build_cdf()
 
