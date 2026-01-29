@@ -55,55 +55,47 @@ def build_cdf(
     return time_grid, cumulative
 
 
-def compute_poll_times(
-    cdf_times: NDArray[np.float64],
-    cdf_probs: NDArray[np.float64],
-    k: int,
+def sample_quantiles(
+    cdf_x: NDArray[np.float64],
+    cdf_y: NDArray[np.float64],
+    n: int,
     *,
-    condition_on_elapsed: float | None = None,
+    condition_above: float | None = None,
 ) -> list[float]:
-    """Compute optimal poll times using inverse CDF sampling.
+    """Sample n quantile positions from a CDF using inverse CDF sampling.
 
-    Places k polls at quantile positions 1/(k+1), 2/(k+1), ..., k/(k+1) of the CDF.
-    Optionally conditions on elapsed time for mid-interval schedule updates.
+    Places n samples at quantile positions 1/(n+1), 2/(n+1), ..., n/(n+1).
+    Optionally conditions on a lower bound (samples from the conditional
+    distribution given X > lower_bound).
 
     Args:
-        cdf_times: Time values of the CDF
-        cdf_probs: Cumulative probability values of the CDF
-        k: Number of polls to schedule
-        condition_on_elapsed: If provided, compute conditional schedule given
-            that the event hasn't occurred by this time. Uses P(T | T > t).
+        cdf_x: X values of the CDF
+        cdf_y: Cumulative probability values of the CDF
+        n: Number of samples
+        condition_above: If provided, sample from conditional distribution
+            P(X | X > condition_above).
 
     Returns:
-        List of poll times in seconds from interval start.
+        List of sampled values.
 
     """
-    if k <= 0:
+    if n <= 0:
         return []
 
-    # Quantile positions for k polls
-    j_values = np.arange(1, k + 1)
-    quantile_probs = j_values / (k + 1)
+    quantiles = np.arange(1, n + 1) / (n + 1)
 
-    if condition_on_elapsed is not None and condition_on_elapsed > 0:
-        # Conditional sampling: we know T > elapsed, so sample from P(T | T > t)
-        # F_conditional(x) = (F(x) - F(t)) / (1 - F(t))
-        # To sample, we need F^-1(F(t) + p * (1 - F(t)))
-        f_elapsed = float(np.interp(condition_on_elapsed, cdf_times, cdf_probs))
+    if condition_above is not None and condition_above > 0:
+        # Conditional sampling from P(X | X > t)
+        f_t = float(np.interp(condition_above, cdf_x, cdf_y))
 
-        if f_elapsed >= 1.0:
-            # All probability mass is before elapsed - no valid polls
+        if f_t >= 1.0:
             return []
 
-        # Map uniform [0,1] targets to conditional targets
-        remaining_mass = 1.0 - f_elapsed
-        target_probabilities = f_elapsed + quantile_probs * remaining_mass
+        remaining_mass = 1.0 - f_t
+        target_probs = f_t + quantiles * remaining_mass
     else:
-        # Unconditional sampling
-        target_probabilities = quantile_probs
+        target_probs = quantiles
 
-    # Compute poll times from inverse CDF
-    # For inverse CDF, we interpolate with x=probs, y=times
-    poll_times = np.interp(target_probabilities, cdf_probs, cdf_times)
+    samples = np.interp(target_probs, cdf_y, cdf_x)
 
-    return poll_times.tolist()
+    return samples.tolist()

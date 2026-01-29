@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from .cdf_algorithm import IntervalObservation, build_cdf, compute_poll_times
+from .cdf_algorithm import IntervalObservation, build_cdf, sample_quantiles
 from .cdf_cold_start import COLD_START_OBSERVATIONS
 
 # Re-export for backwards compatibility
@@ -292,9 +292,9 @@ class CDFPollingStrategy:
             self._scheduled_polls = []
             return
 
-        self._scheduled_polls = compute_poll_times(
+        self._scheduled_polls = sample_quantiles(
             cdf_times,
             cdf_probs,
             self._polls_per_interval,
-            condition_on_elapsed=condition_on_elapsed,
+            condition_above=condition_on_elapsed,
         )
