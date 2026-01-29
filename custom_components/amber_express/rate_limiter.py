@@ -74,40 +74,43 @@ class ExponentialBackoffRateLimiter:
         self._backoff_seconds = 0
         self._rate_limit_until = None
 
-    def record_rate_limit(self, reset_seconds: int) -> datetime:
+    def record_rate_limit(self, reset_at: datetime | None) -> datetime:
         """Record a rate limit event and set backoff.
 
-        Uses reset_seconds from API header if positive, otherwise falls back
+        Uses reset_at from API header if provided, otherwise falls back
         to exponential backoff.
 
         Args:
-            reset_seconds: Seconds until quota resets (from API header), or 0 to use backoff
+            reset_at: When quota resets (from API header), or None to use backoff
 
         Returns:
             When the rate limit expires
 
         """
-        if reset_seconds > 0:
+        now = datetime.now(UTC)
+
+        if reset_at is not None:
             # Use the API-provided reset time (add small buffer)
-            self._backoff_seconds = reset_seconds + 2
+            self._backoff_seconds = int((reset_at - now).total_seconds()) + 2
+            self._rate_limit_until = reset_at + timedelta(seconds=2)
             _LOGGER.warning(
-                "Rate limited (429). Waiting %d seconds (from API reset header)",
-                self._backoff_seconds,
+                "Rate limited (429). Waiting until %s (from API reset header)",
+                self._rate_limit_until.strftime("%H:%M:%S"),
             )
         elif self._backoff_seconds == 0:
             self._backoff_seconds = self._initial_backoff
+            self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
             _LOGGER.warning(
                 "Rate limited (429). Backing off for %d seconds",
                 self._backoff_seconds,
             )
         else:
             self._backoff_seconds = min(self._backoff_seconds * 2, self._max_backoff)
+            self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
             _LOGGER.warning(
                 "Rate limited (429). Backing off for %d seconds (exponential)",
                 self._backoff_seconds,
             )
-
-        self._rate_limit_until = datetime.now(UTC) + timedelta(seconds=self._backoff_seconds)
 
         return self._rate_limit_until
 

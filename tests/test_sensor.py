@@ -2,6 +2,7 @@
 
 # pyright: reportArgumentType=false
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 from amberelectric.models import Site
@@ -1032,7 +1033,7 @@ class TestAmberApiStatusSensor:
             return_value={
                 "limit": 50,
                 "remaining": 45,
-                "reset_seconds": 300,
+                "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                 "window_seconds": 300,
                 "policy": "50;w=300",
             }
@@ -1049,7 +1050,7 @@ class TestAmberApiStatusSensor:
         assert attrs["status_code"] == 200
         assert attrs["rate_limit_quota"] == 50
         assert attrs["rate_limit_remaining"] == 45
-        assert attrs["rate_limit_reset_seconds"] == 300
+        assert "rate_limit_reset_at" in attrs  # ISO format datetime string
         assert attrs["rate_limit_window_seconds"] == 300
         assert attrs["rate_limit_policy"] == "50;w=300"
 
@@ -1065,7 +1066,7 @@ class TestAmberApiStatusSensor:
             return_value={
                 "limit": 50,
                 "remaining": 0,
-                "reset_seconds": 120,
+                "reset_at": datetime.now(UTC) + timedelta(seconds=120),
                 "window_seconds": 300,
                 "policy": "50;w=300",
             }

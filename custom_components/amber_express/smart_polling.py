@@ -221,24 +221,24 @@ class SmartPollingManager:
         polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
         now = datetime.now(UTC)
         elapsed = (now - self._current_interval_start).total_seconds()
+        reset_at = rate_limit_info["reset_at"]
 
         old_schedule = self._cdf_strategy.scheduled_polls.copy()
         self._cdf_strategy.update_budget(
             polls_per_interval,
             elapsed,
-            rate_limit_info["reset_seconds"],
+            reset_at,
             self._interval_length * 60,
-            rate_limit_info.get("window_seconds"),
         )
 
         if self._cdf_strategy.scheduled_polls != old_schedule:
-            reset_seconds = rate_limit_info["reset_seconds"]
+            reset_in = (reset_at - now).total_seconds()
             _LOGGER.debug(
-                "Poll schedule: remaining=%d, k=%d, reset=%.1fs (%+.0fs), polls: %s",
+                "Poll schedule: remaining=%d, k=%d, reset_at=%s (in %.0fs), polls: %s",
                 rate_limit_info["remaining"],
                 polls_per_interval,
-                elapsed + reset_seconds,
-                reset_seconds,
+                reset_at.strftime("%H:%M:%S"),
+                reset_in,
                 [f"{t:.1f}s ({t - elapsed:+.0f}s)" for t in self._cdf_strategy.scheduled_polls],
             )
 

@@ -87,7 +87,7 @@ class TestAmberDataCoordinator:
         coord._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -305,7 +305,7 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_amber_data_rate_limit_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data respects rate limit backoff."""
-        coordinator._rate_limiter.record_rate_limit(60)  # Sets rate limit
+        coordinator._rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))  # Sets rate limit
 
         with patch.object(coordinator.hass, "async_add_executor_job") as mock_job:
             await coordinator._fetch_amber_data()
@@ -317,8 +317,8 @@ class TestAmberDataCoordinator:
         err.headers = make_rate_limit_headers(reset=60)
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_amber_data()
-            # 60 + 2 buffer = 62
-            assert coordinator._rate_limiter.current_backoff == 62
+            # 60 + 2 buffer = 62 (may be 61-62 due to timing)
+            assert 61 <= coordinator._rate_limiter.current_backoff <= 62
             assert coordinator._rate_limiter.is_limited() is True
 
     async def test_fetch_amber_data_429_uses_reset_header(self, coordinator: AmberDataCoordinator) -> None:
@@ -327,8 +327,8 @@ class TestAmberDataCoordinator:
         err.headers = make_rate_limit_headers(reset=120)
         with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
             await coordinator._fetch_amber_data()
-            # 120 + 2 buffer = 122
-            assert coordinator._rate_limiter.current_backoff == 122
+            # 120 + 2 buffer = 122 (may be 121-122 due to timing)
+            assert 121 <= coordinator._rate_limiter.current_backoff <= 122
 
     async def test_fetch_amber_data_other_api_error(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data handles other API errors."""
@@ -384,7 +384,7 @@ class TestAmberDataCoordinator:
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -423,7 +423,7 @@ class TestAmberDataCoordinator:
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -460,7 +460,7 @@ class TestAmberDataCoordinator:
     async def test_fetch_amber_data_success_resets_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data resets rate limit backoff on success."""
         # Set up a previous rate limit that has now expired
-        coordinator._rate_limiter.record_rate_limit(60)
+        coordinator._rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))
         coordinator._rate_limiter._rate_limit_until = datetime.now(UTC) - timedelta(seconds=1)
 
         interval = make_current_interval(per_kwh=25.0, estimate=True)
@@ -495,7 +495,7 @@ class TestAmberDataCoordinator:
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -532,7 +532,7 @@ class TestAmberDataCoordinator:
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -574,7 +574,7 @@ class TestCoordinatorLifecycle:
         coord._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -590,7 +590,7 @@ class TestCoordinatorLifecycle:
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -619,7 +619,7 @@ class TestCoordinatorLifecycle:
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -687,14 +687,14 @@ class TestCoordinatorLifecycle:
         """Test is_rate_limited property."""
         assert coordinator.is_rate_limited is False
 
-        coordinator._rate_limiter.record_rate_limit(60)
+        coordinator._rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))
         assert coordinator.is_rate_limited is True
 
     def test_rate_limit_remaining_seconds(self, coordinator: AmberDataCoordinator) -> None:
         """Test rate_limit_remaining_seconds method."""
         assert coordinator.rate_limit_remaining_seconds() == 0.0
 
-        coordinator._rate_limiter.record_rate_limit(60)
+        coordinator._rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))
         remaining = coordinator.rate_limit_remaining_seconds()
         assert remaining > 0
         assert remaining <= 62  # 60 + buffer
@@ -705,7 +705,7 @@ class TestCoordinatorLifecycle:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 9,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }
@@ -726,7 +726,11 @@ class TestCoordinatorLifecycle:
     def test_get_rate_limit_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_rate_limit_info returns api client info."""
         info = coordinator.get_rate_limit_info()
-        assert info == {"remaining": 45, "limit": 50, "reset_seconds": 300, "window_seconds": 300, "policy": "50;w=300"}
+        assert info["remaining"] == 45
+        assert info["limit"] == 50
+        assert info["window_seconds"] == 300
+        assert info["policy"] == "50;w=300"
+        assert "reset_at" in info
 
     def test_cancel_pending_poll(self, coordinator: AmberDataCoordinator) -> None:
         """Test _cancel_pending_poll cancels and clears callback."""
@@ -778,7 +782,7 @@ class TestCoordinatorLifecycle:
 
     def test_schedule_next_poll_schedules_rate_limit_resume(self, coordinator: AmberDataCoordinator) -> None:
         """Test _schedule_next_poll schedules resume when rate limited."""
-        coordinator._rate_limiter.record_rate_limit(60)
+        coordinator._rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))
 
         with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
             mock_call_later.return_value = MagicMock()
@@ -797,7 +801,7 @@ class TestCoordinatorLifecycle:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 10,
-            "reset_seconds": 300,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
         }

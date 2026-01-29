@@ -617,7 +617,7 @@ class AmberApiStatusSensor(AmberBaseSensor):
             "status_code": self.coordinator.get_api_status(),
             "rate_limit_quota": rate_limit.get("limit"),
             "rate_limit_remaining": rate_limit.get("remaining"),
-            "rate_limit_reset_seconds": rate_limit.get("reset_seconds"),
+            "rate_limit_reset_at": rate_limit.get("reset_at").isoformat() if rate_limit.get("reset_at") else None,
             "rate_limit_window_seconds": rate_limit.get("window_seconds"),
             "rate_limit_policy": rate_limit.get("policy"),
         }

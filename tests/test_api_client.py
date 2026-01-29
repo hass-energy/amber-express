@@ -1,6 +1,6 @@
 """Tests for the Amber API client."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -146,7 +146,10 @@ class TestAmberApiClient:
             with pytest.raises(RateLimitedError) as exc_info:
                 await api_client.fetch_sites()
 
-            assert exc_info.value.reset_seconds == 60
+            assert exc_info.value.reset_at is not None
+            # reset_at should be approximately 60 seconds from now
+            delta = (exc_info.value.reset_at - datetime.now(UTC)).total_seconds()
+            assert 59 <= delta <= 61
             assert api_client.last_status == 429
             assert rate_limiter.is_limited() is True
 
@@ -189,7 +192,7 @@ class TestAmberApiClient:
     ) -> None:
         """Test price fetch when already in rate limit backoff raises RateLimitedError."""
         # Put rate limiter into backoff mode
-        rate_limiter.record_rate_limit(60)
+        rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))
 
         with pytest.raises(RateLimitedError):
             await api_client.fetch_current_prices("test_site")
@@ -222,7 +225,10 @@ class TestAmberApiClient:
             with pytest.raises(RateLimitedError) as exc_info:
                 await api_client.fetch_current_prices("test_site")
 
-            assert exc_info.value.reset_seconds == 120
+            assert exc_info.value.reset_at is not None
+            # reset_at should be approximately 120 seconds from now
+            delta = (exc_info.value.reset_at - datetime.now(UTC)).total_seconds()
+            assert 119 <= delta <= 121
             assert rate_limiter.is_limited() is True
 
     async def test_fetch_current_prices_rate_limit_without_headers(
@@ -244,8 +250,8 @@ class TestAmberApiClient:
             with pytest.raises(RateLimitedError) as exc_info:
                 await api_client.fetch_current_prices("test_site")
 
-            # No reset_seconds when headers are missing
-            assert exc_info.value.reset_seconds is None
+            # No reset_at when headers are missing
+            assert exc_info.value.reset_at is None
             # Still triggers backoff (initial backoff of 10s)
             assert rate_limiter.is_limited() is True
             assert rate_limiter.current_backoff == 10
@@ -255,7 +261,7 @@ class TestAmberApiClient:
     ) -> None:
         """Test successful fetch resets rate limiter backoff."""
         # Trigger a rate limit first
-        rate_limiter.record_rate_limit(5)
+        rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=5))
         # Wait for backoff to expire (simulate)
         rate_limiter._rate_limit_until = None  # Clear rate limit
 
@@ -294,7 +300,9 @@ class TestRateLimitHeaderParsing:
             info = api_client.rate_limit_info
             assert info["limit"] == 50
             assert info["remaining"] == 42
-            assert info["reset_seconds"] == 180
+            # reset_at should be approximately 180 seconds from now
+            delta = (info["reset_at"] - datetime.now(UTC)).total_seconds()
+            assert 179 <= delta <= 181
             assert info["window_seconds"] == 300
             assert info["policy"] == "50;w=300"
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from http import HTTPStatus
 import logging
 import os
@@ -44,10 +45,10 @@ class AmberApiError(Exception):
 class RateLimitedError(AmberApiError):
     """Raised when the API rate limit is exceeded."""
 
-    def __init__(self, reset_seconds: int | None = None) -> None:
-        """Initialize with optional reset time in seconds."""
+    def __init__(self, reset_at: datetime | None = None) -> None:
+        """Initialize with optional reset time."""
         super().__init__("Rate limited by Amber API", HTTP_TOO_MANY_REQUESTS)
-        self.reset_seconds = reset_seconds
+        self.reset_at = reset_at
 
 
 # =============================================================================
@@ -147,9 +148,9 @@ class AmberApiClient:
             self._last_api_status = status
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
-                reset_seconds = self._extract_reset_seconds_from_429(err.headers)
-                self._rate_limiter.record_rate_limit(reset_seconds)
-                raise RateLimitedError(reset_seconds if reset_seconds > 0 else None) from err
+                reset_at = self._extract_reset_at_from_429(err.headers)
+                self._rate_limiter.record_rate_limit(reset_at)
+                raise RateLimitedError(reset_at) from err
 
             msg = f"Failed to fetch sites: {err}"
             raise AmberApiError(msg, status) from err
@@ -218,31 +219,31 @@ class AmberApiClient:
             self._last_api_status = status
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
-                reset_seconds = self._extract_reset_seconds_from_429(err.headers)
-                self._rate_limiter.record_rate_limit(reset_seconds)
-                raise RateLimitedError(reset_seconds if reset_seconds > 0 else None) from err
+                reset_at = self._extract_reset_at_from_429(err.headers)
+                self._rate_limiter.record_rate_limit(reset_at)
+                raise RateLimitedError(reset_at) from err
 
             msg = f"Amber API error ({status}): {err.reason}"
             raise AmberApiError(msg, status) from err
 
-    def _extract_reset_seconds_from_429(self, headers: dict[str, str] | None) -> int:
-        """Extract reset seconds from 429 response headers, with fallback.
+    def _extract_reset_at_from_429(self, headers: dict[str, str] | None) -> datetime | None:
+        """Extract reset time from 429 response headers, with fallback.
 
-        Returns 0 if headers are missing or invalid, triggering exponential backoff.
+        Returns None if headers are missing or invalid, triggering exponential backoff.
         """
         if not headers:
             _LOGGER.debug("429 response missing headers, using exponential backoff")
-            return 0
+            return None
 
         try:
             self._rate_limit_info = self._extract_rate_limit_info(headers)
-            return self._rate_limit_info["reset_seconds"]
+            return self._rate_limit_info["reset_at"]
         except (KeyError, ValueError) as err:
             _LOGGER.debug(
                 "429 response missing rate limit headers (%s), using exponential backoff",
                 err,
             )
-            return 0
+            return None
 
     def _extract_rate_limit_info(self, headers: dict[str, str]) -> RateLimitInfo:
         """Extract rate limit info from IETF RateLimit headers.
@@ -269,10 +270,13 @@ class AmberApiClient:
         if "ratelimit-limit" in headers_lower:
             limit = int(headers_lower["ratelimit-limit"])
 
+        reset_seconds = int(headers_lower["ratelimit-reset"])
+        reset_at = datetime.now().astimezone() + timedelta(seconds=reset_seconds)
+
         return {
             "limit": limit,
             "remaining": int(headers_lower["ratelimit-remaining"]),
-            "reset_seconds": int(headers_lower["ratelimit-reset"]),
+            "reset_at": reset_at,
             "window_seconds": window,
             "policy": policy,
         }
