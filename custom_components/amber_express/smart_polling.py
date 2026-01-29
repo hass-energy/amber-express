@@ -18,7 +18,6 @@ class PollingState:
 
     current_interval_start: datetime | None
     has_confirmed_price: bool
-    forecasts_pending: bool
     poll_count_this_interval: int
     first_interval_after_startup: bool
     last_estimate_elapsed: float | None
@@ -30,7 +29,7 @@ class SmartPollingManager:
     Responsibilities:
     - Detecting interval boundaries and resetting state
     - Tracking whether confirmed price has been received this interval
-    - Deciding IF we should poll (has_confirmed_price, forecasts_pending)
+    - Deciding IF we should poll (based on has_confirmed_price)
     - Delegating WHEN to poll to CDFPollingStrategy
     - Recording observations when confirmed prices are received
     - Dynamically updating poll budget based on rate limit quota
@@ -58,7 +57,6 @@ class SmartPollingManager:
         self._poll_count_this_interval = 0
         self._first_interval_after_startup = True
         self._last_estimate_elapsed: float | None = None
-        self._forecasts_pending = False
         self._cdf_strategy = CDFPollingStrategy(observations)
 
     def _get_current_interval_start(self) -> datetime:
@@ -102,7 +100,6 @@ class SmartPollingManager:
         is_first_run = not has_data
         self._current_interval_start = current_interval
         self._has_confirmed_price = False
-        self._forecasts_pending = False
         self._poll_count_this_interval = 0
         self._last_estimate_elapsed = None
 
@@ -121,17 +118,11 @@ class SmartPollingManager:
 
         return True
 
-    def should_poll(
-        self,
-        *,
-        has_data: bool,
-        rate_limit_until: datetime | None = None,
-    ) -> bool:
+    def should_poll(self, *, has_data: bool) -> bool:
         """Determine if we should poll using smart CDF-based polling.
 
         Args:
             has_data: Whether we have any existing data (for first-run detection)
-            rate_limit_until: When rate limit expires (None if not limited)
 
         Returns:
             True if we should poll now, False otherwise
@@ -143,17 +134,9 @@ class SmartPollingManager:
 
         now = datetime.now(UTC)
 
-        # Don't poll if we already have confirmed price (unless forecasts pending)
-        if self._has_confirmed_price and not self._forecasts_pending:
+        # Don't poll if we already have confirmed price
+        if self._has_confirmed_price:
             return False
-
-        # If forecasts pending, check rate limit backoff before retrying
-        if self._forecasts_pending and rate_limit_until and now < rate_limit_until:
-            return False
-
-        # If forecasts pending but not rate limited, allow retry
-        if self._forecasts_pending:
-            return True
 
         # Use CDF strategy for confirmatory polling
         if self._current_interval_start is None:
@@ -170,7 +153,7 @@ class SmartPollingManager:
             or we already have confirmed price.
 
         """
-        if self._has_confirmed_price and not self._forecasts_pending:
+        if self._has_confirmed_price:
             return None
 
         if self._current_interval_start is None:
@@ -222,14 +205,6 @@ class SmartPollingManager:
         elif self._first_interval_after_startup:
             _LOGGER.debug("Skipping observation on first interval after startup")
 
-    def set_forecasts_pending(self) -> None:
-        """Mark forecasts as pending retry."""
-        self._forecasts_pending = True
-
-    def clear_forecasts_pending(self) -> None:
-        """Clear forecasts pending flag."""
-        self._forecasts_pending = False
-
     def update_budget(self, rate_limit_info: RateLimitInfo) -> None:
         """Update the poll budget based on new rate limit info.
 
@@ -272,11 +247,6 @@ class SmartPollingManager:
         return self._has_confirmed_price
 
     @property
-    def forecasts_pending(self) -> bool:
-        """Return whether forecasts are pending retry."""
-        return self._forecasts_pending
-
-    @property
     def poll_count_this_interval(self) -> int:
         """Return the number of polls this interval."""
         return self._poll_count_this_interval
@@ -300,7 +270,6 @@ class SmartPollingManager:
         return PollingState(
             current_interval_start=self._current_interval_start,
             has_confirmed_price=self._has_confirmed_price,
-            forecasts_pending=self._forecasts_pending,
             poll_count_this_interval=self._poll_count_this_interval,
             first_interval_after_startup=self._first_interval_after_startup,
             last_estimate_elapsed=self._last_estimate_elapsed,

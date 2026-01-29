@@ -135,6 +135,12 @@ class AmberApiClient:
             if not _is_site_list(response.data):
                 msg = "Unexpected response format from get_sites"
                 raise AmberApiError(msg, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+            # Debug: Override interval length for testing different site configurations
+            if override := os.environ.get("AMBER_OVERRIDE_INTERVAL"):
+                for site in response.data:
+                    site.interval_length = int(override)
+
             return response.data
         except ApiException as err:
             status = err.status or HTTPStatus.INTERNAL_SERVER_ERROR
@@ -175,6 +181,10 @@ class AmberApiClient:
             remaining = self._rate_limiter.remaining_seconds()
             _LOGGER.debug("Rate limit backoff: %.0f seconds remaining", remaining)
             raise RateLimitedError
+
+        # Debug: Override resolution for testing different site configurations
+        if override := os.environ.get("AMBER_OVERRIDE_INTERVAL"):
+            resolution = int(override)
 
         try:
             response = await self._hass.async_add_executor_job(

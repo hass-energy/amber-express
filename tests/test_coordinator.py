@@ -348,46 +348,6 @@ class TestAmberDataCoordinator:
         ):
             await coordinator._fetch_amber_data()
 
-    async def test_fetch_forecasts_success(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts success."""
-        interval = make_forecast_interval(per_kwh=26.0)
-        wrapped = Interval(actual_instance=interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(return_value=mock_response)):
-            result = await coordinator._fetch_forecasts(30)
-            assert result is not None
-
-    async def test_fetch_forecasts_429(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts handles 429 with rate limit and API status tracking."""
-        err = ApiException(status=429)
-        err.headers = make_rate_limit_headers(reset=60)
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
-            result = await coordinator._fetch_forecasts(30)
-            assert result is None
-            # Should trigger rate limiter (60 + 2 buffer = 62)
-            assert coordinator._rate_limiter.is_limited() is True
-            assert coordinator._rate_limiter.current_backoff == 62
-            # Should record API status
-            assert coordinator.get_api_status() == 429
-
-    async def test_fetch_forecasts_other_error(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts handles other API errors."""
-        with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=ApiException(status=500))
-        ):
-            result = await coordinator._fetch_forecasts(30)
-            assert result is None
-
-    async def test_fetch_forecasts_api_error(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts handles API error."""
-        with patch.object(
-            coordinator._api_client,
-            "fetch_current_prices",
-            new=AsyncMock(side_effect=AmberApiError("Error", 500)),
-        ):
-            result = await coordinator._fetch_forecasts(30)
-            assert result is None
-
     def test_log_price_data(self, coordinator: AmberDataCoordinator) -> None:
         """Test _log_price_data."""
         data = {
@@ -405,28 +365,11 @@ class TestAmberDataCoordinator:
         coordinator.current_data = {CHANNEL_GENERAL: {ATTR_SPIKE_STATUS: None}}
         assert coordinator.is_price_spike() is False
 
-    async def test_fetch_amber_data_retry_forecasts_success(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data retries forecasts and succeeds."""
-        coordinator._polling_manager.on_confirmed_received()
-        coordinator._polling_manager.set_forecasts_pending()
-
-        mock_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25, ATTR_FORECASTS: []}}
-
-        with (
-            patch.object(coordinator, "_fetch_forecasts", new=AsyncMock(return_value=mock_data)),
-            patch.object(coordinator, "_update_from_sources"),
-            patch.object(coordinator, "async_set_updated_data"),
-        ):
-            await coordinator._fetch_amber_data()
-
-            assert coordinator._polling_manager.forecasts_pending is False
-            assert coordinator._data_sources.polling_data == mock_data
-
-    async def test_fetch_amber_data_confirmed_price_with_forecasts(
+    async def test_fetch_amber_data_confirmed_price_updates_sensors(
         self,
         hass: HomeAssistant,
     ) -> None:
-        """Test _fetch_amber_data with confirmed price fetches forecasts."""
+        """Test _fetch_amber_data with confirmed price updates sensors and stops polling."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="Test",
@@ -449,21 +392,17 @@ class TestAmberDataCoordinator:
         # Create a confirmed interval (estimate=False) using real SDK object
         interval = make_current_interval(per_kwh=25.0, estimate=False)
         wrapped = wrap_interval(interval)
-        mock_forecast_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.26, ATTR_FORECASTS: []}}
         mock_response = wrap_api_response([wrapped])
 
-        with (
-            patch.object(
-                coordinator._api_client._hass,
-                "async_add_executor_job",
-                new=AsyncMock(return_value=mock_response),
-            ),
-            patch.object(coordinator, "_fetch_forecasts", new=AsyncMock(return_value=mock_forecast_data)),
+        with patch.object(
+            coordinator._api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
         ):
             await coordinator._fetch_amber_data()
 
             assert coordinator._polling_manager.has_confirmed_price is True
-            assert coordinator._polling_manager.forecasts_pending is False
+            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
 
     async def test_fetch_amber_data_estimated_not_wait(
         self,
@@ -537,63 +476,6 @@ class TestAmberDataCoordinator:
             assert coordinator._rate_limiter.current_backoff == 0
             assert coordinator._rate_limiter.is_limited() is False
 
-    async def test_fetch_amber_data_confirmed_price_forecasts_fail_subsequent_poll(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test _fetch_amber_data with confirmed price on subsequent poll but forecasts fail."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_seconds": 300,
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        # Simulate that first poll already happened (estimate received)
-        # This makes the next poll a "subsequent" poll that would need separate forecast fetch
-        coordinator._polling_manager._poll_count_this_interval = 1
-        coordinator._polling_manager._current_interval_start = datetime.now(UTC)
-
-        # Create a confirmed interval (estimate=False) using real SDK object
-        interval = make_current_interval(per_kwh=25.0, estimate=False)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with (
-            patch.object(
-                coordinator._api_client._hass,
-                "async_add_executor_job",
-                new=AsyncMock(return_value=mock_response),
-            ),
-            patch.object(coordinator, "_fetch_forecasts", new=AsyncMock(return_value=None)),  # Forecasts fail
-        ):
-            await coordinator._fetch_amber_data()
-
-            assert coordinator._polling_manager.has_confirmed_price is True
-            assert coordinator._polling_manager.forecasts_pending is True  # Should be pending since fetch failed
-
-    async def test_fetch_forecasts_other_error_records_api_status(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_forecasts records API status for non-429 errors."""
-        with patch.object(
-            coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=ApiException(status=500))
-        ):
-            result = await coordinator._fetch_forecasts(30)
-            assert result is None
-            assert coordinator.get_api_status() == 500
-            # Should NOT trigger rate limiter for non-429
-            assert coordinator._rate_limiter.is_limited() is False
-
     async def test_fetch_amber_data_first_poll_fetches_with_forecasts(
         self,
         hass: HomeAssistant,
@@ -631,11 +513,11 @@ class TestAmberDataCoordinator:
             # Verify first poll updated data
             assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
 
-    async def test_fetch_amber_data_subsequent_estimate_ignored(
+    async def test_fetch_amber_data_subsequent_estimate_updates_sensors(
         self,
         hass: HomeAssistant,
     ) -> None:
-        """Test subsequent estimate polls are ignored (don't update data)."""
+        """Test subsequent estimate polls update sensors with new data."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="Test",
@@ -672,53 +554,8 @@ class TestAmberDataCoordinator:
         ):
             await coordinator._fetch_amber_data()
 
-            # Data should NOT be updated - still has original price and forecasts
-            assert coordinator._data_sources.polling_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.20
-            assert coordinator._data_sources.polling_data[CHANNEL_GENERAL][ATTR_FORECASTS] == [{"time": "test"}]
-
-    async def test_fetch_amber_data_first_poll_confirmed_no_separate_forecast_fetch(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test first poll with confirmed price doesn't need separate forecast fetch."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_seconds": 300,
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        # Create a confirmed interval using real SDK object
-        interval = make_current_interval(per_kwh=25.0, estimate=False)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with (
-            patch.object(
-                coordinator._api_client._hass,
-                "async_add_executor_job",
-                new=AsyncMock(return_value=mock_response),
-            ),
-            patch.object(coordinator, "_fetch_forecasts", new=AsyncMock()) as mock_fetch_forecasts,
-        ):
-            await coordinator._fetch_amber_data()
-
-            # _fetch_forecasts should NOT be called on first poll (already has forecasts)
-            mock_fetch_forecasts.assert_not_called()
-            assert coordinator._polling_manager.has_confirmed_price is True
-            # Should NOT have forecasts_pending since first poll already fetched them
-            assert coordinator._polling_manager.forecasts_pending is False
+            # Data SHOULD be updated - new price from subsequent poll
+            assert coordinator._data_sources.polling_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
 
 
 class TestCoordinatorLifecycle:
