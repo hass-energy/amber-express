@@ -21,10 +21,6 @@ class IntervalObservation(TypedDict, total=False):
     weight: float  # Contribution weight (defaults to 1.0)
 
 
-# Minimum points required for a valid CDF
-MIN_CDF_POINTS = 2
-
-
 def build_cdf(
     observations: list[IntervalObservation],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -35,19 +31,14 @@ def build_cdf(
     as a uniform distribution and weighting by the observation's weight field.
 
     Args:
-        observations: List of interval observations. Each observation may have
-            an optional 'weight' field (defaults to 1.0) that determines its
-            contribution to the CDF relative to other observations.
+        observations: List of interval observations with non-zero width.
+            Each observation may have an optional 'weight' field (defaults
+            to 1.0) that determines its contribution to the CDF.
 
     Returns:
         Tuple of (times array, cumulative probability array) defining the CDF.
-        Returns empty arrays if observations is empty or has insufficient points.
 
     """
-    if not observations:
-        empty = np.array([], dtype=np.float64)
-        return empty, empty
-
     # Extract starts, ends, and weights as numpy arrays
     starts = np.array([obs["start"] for obs in observations], dtype=np.float64)
     ends = np.array([obs["end"] for obs in observations], dtype=np.float64)
@@ -56,10 +47,6 @@ def build_cdf(
 
     # Collect all unique endpoints and sort to form time grid
     time_grid = np.unique(np.concatenate([starts, ends]))
-
-    if len(time_grid) < MIN_CDF_POINTS:
-        empty = np.array([], dtype=np.float64)
-        return empty, empty
 
     # Compute individual CDFs for all observations and take weighted average
     individual_cdfs = np.clip((time_grid - starts[:, np.newaxis]) / (ends - starts)[:, np.newaxis], 0.0, 1.0)
@@ -91,7 +78,7 @@ def compute_poll_times(
         List of poll times in seconds from interval start.
 
     """
-    if len(cdf_times) < MIN_CDF_POINTS or k <= 0:
+    if k <= 0:
         return []
 
     # Quantile positions for k polls
