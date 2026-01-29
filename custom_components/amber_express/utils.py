@@ -2,7 +2,7 @@
 
 from homeassistant.util import dt as dt_util
 
-PRICE_DECIMAL_PLACES = 2
+PRICE_DECIMAL_PLACES = 4
 
 
 def cents_to_dollars(cents: float | None) -> float | None:
