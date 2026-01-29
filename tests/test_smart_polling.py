@@ -123,8 +123,9 @@ class TestShouldPoll:
         """Test that polling uses CDF scheduled times after first poll."""
         manager = SmartPollingManager(5)
         # remaining=10 gives us 5 polls after the buffer of 5 is subtracted
-        # With k=5 and reset=300, uniform_polls_needed = ceil(300/30) = 10
-        # Since k=5 <= 10, uses pure uniform: polls at 50, 100, 150, 200, 250
+        # 1 poll reserved for interval end (300s), leaving 4 CDF polls
+        # With cdf_budget=4 and reset=300, uniform_polls_needed = ceil(300/30) = 10
+        # Since 4 <= 10, uses pure uniform: 4 polls at 60, 120, 180, 240 + forced at 300
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 10,
@@ -137,17 +138,20 @@ class TestShouldPoll:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # First poll starts the interval
-            result1 = manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            result1 = manager.should_poll(has_data=True)
             assert result1 is True
 
-            # 5 seconds later - before first scheduled poll at 50s
+            # Update budget after first poll
+            manager.update_budget(rate_limit_info)
+
+            # 5 seconds later - before first scheduled poll at 60s
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
-            result2 = manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            result2 = manager.should_poll(has_data=True)
             assert result2 is False  # Not yet time
 
-            # 50 seconds - first scheduled poll (uniform: 50, 100, 150, 200, 250)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 50, tzinfo=UTC)
-            result3 = manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            # 60 seconds - first scheduled poll
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
+            result3 = manager.should_poll(has_data=True)
             assert result3 is True  # Time to poll
 
 
@@ -286,13 +290,16 @@ class TestGetCDFStats:
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            manager.should_poll(has_data=True)
+            manager.update_budget(rate_limit_info)
 
         stats = manager.get_cdf_stats()
 
         assert stats.observation_count == 100  # Cold start real observations
         assert stats.confirmatory_poll_count == 0
+        # k=4 total: 3 CDF polls + 1 forced at interval end = 4 total
         assert len(stats.scheduled_polls) == 4
+        assert stats.scheduled_polls[-1] == 300.0
 
 
 class TestPollingState:
@@ -346,30 +353,33 @@ class TestRateLimitBasedPolling:
         result = manager._calculate_polls_per_interval({**base_info, "remaining": 1})
         assert result == 0
 
-    def test_should_poll_uses_rate_limit_info(self) -> None:
-        """Test that should_poll uses rate limit info for k calculation."""
+    def test_update_budget_uses_rate_limit_info(self) -> None:
+        """Test that update_budget uses rate limit info for k calculation."""
         manager = SmartPollingManager(5)
         buffer = manager.RATE_LIMIT_BUFFER
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
-            # First poll with 45 remaining
-            result = manager.should_poll(
-                has_data=True,
-                rate_limit_info={
+            # Trigger new interval
+            result = manager.should_poll(has_data=True)
+            assert result is True
+
+            # Update budget with 45 remaining
+            manager.update_budget(
+                {
                     "limit": 50,
                     "remaining": 45,
                     "reset_seconds": 300,
                     "window_seconds": 300,
                     "policy": "50;w=300",
-                },
+                }
             )
-            assert result is True
 
-            # Should have scheduled 40 polls (k = remaining - buffer)
+            # k=40 total: 39 CDF polls + 1 forced at interval end = 40 total
             stats = manager.get_cdf_stats()
             assert len(stats.scheduled_polls) == 45 - buffer
+            assert stats.scheduled_polls[-1] == 300.0
 
     def test_update_budget_dynamically_adjusts_schedule(self) -> None:
         """Test that update_budget dynamically adjusts the schedule mid-interval."""
@@ -379,16 +389,18 @@ class TestRateLimitBasedPolling:
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
-            # Start interval with 45 remaining (40 after buffer)
-            manager.should_poll(
-                has_data=True,
-                rate_limit_info={
+            # Trigger new interval
+            manager.should_poll(has_data=True)
+
+            # k=40 total: 39 CDF polls + 1 forced at interval end = 40 total
+            manager.update_budget(
+                {
                     "limit": 50,
                     "remaining": 45,
                     "reset_seconds": 300,
                     "window_seconds": 300,
                     "policy": "50;w=300",
-                },
+                }
             )
             assert len(manager.get_cdf_stats().scheduled_polls) == 45 - buffer
 
@@ -398,7 +410,7 @@ class TestRateLimitBasedPolling:
                 {"limit": 50, "remaining": 15, "reset_seconds": 285, "window_seconds": 300, "policy": "50;w=300"}
             )
 
-            # Schedule should now have 10 polls
+            # k=10 total: 9 CDF polls + 1 forced at interval end = 10 total
             assert len(manager.get_cdf_stats().scheduled_polls) == 15 - buffer
 
 
@@ -439,7 +451,8 @@ class TestGetNextPollDelay:
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            manager.should_poll(has_data=True)
+            manager.update_budget(rate_limit_info)
 
             # Get first scheduled poll time from CDF stats
             first_poll = manager.get_cdf_stats().scheduled_polls[0]
@@ -563,27 +576,29 @@ class TestCheckNewInterval:
             result = manager.check_new_interval(has_data=True)
             assert result is False
 
-    def test_check_new_interval_with_rate_limit_info(self) -> None:
-        """Test check_new_interval uses rate limit info for k."""
+    def test_update_budget_after_new_interval(self) -> None:
+        """Test update_budget computes schedule after new interval."""
         manager = SmartPollingManager(5)
         buffer = manager.RATE_LIMIT_BUFFER
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
-            # remaining=15 gives us 10 polls after buffer
-            result = manager.check_new_interval(
-                has_data=True,
-                rate_limit_info={
+            # Start new interval
+            result = manager.check_new_interval(has_data=True)
+            assert result is True
+
+            # Update budget with remaining=15 gives us 10 polls after buffer
+            manager.update_budget(
+                {
                     "limit": 50,
                     "remaining": 15,
                     "reset_seconds": 300,
                     "window_seconds": 300,
                     "policy": "50;w=300",
-                },
+                }
             )
-            assert result is True
 
-            # Should have scheduled 10 polls (15 - buffer)
+            # k=10 total: 9 CDF polls + 1 forced at interval end = 10 total
             stats = manager.get_cdf_stats()
             assert len(stats.scheduled_polls) == 15 - buffer

@@ -245,10 +245,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _on_interval_check(self, _now: object) -> None:
         """Check for new interval and start sub-second polling chain."""
         # Check if this is a new interval
-        if not self._polling_manager.check_new_interval(
-            has_data=bool(self.current_data),
-            rate_limit_info=self._api_client.rate_limit_info,
-        ):
+        if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
             return
 
         # New interval - cancel any pending poll from previous interval

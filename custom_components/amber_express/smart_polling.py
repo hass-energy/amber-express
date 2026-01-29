@@ -82,17 +82,11 @@ class SmartPollingManager:
         """
         return max(0, rate_limit_info["remaining"] - self.RATE_LIMIT_BUFFER)
 
-    def check_new_interval(
-        self,
-        *,
-        has_data: bool,
-        rate_limit_info: RateLimitInfo | None = None,
-    ) -> bool:
+    def check_new_interval(self, *, has_data: bool) -> bool:
         """Check if we've entered a new interval and reset state if so.
 
         Args:
             has_data: Whether we have any existing data (for first-run detection)
-            rate_limit_info: Current rate limit quota info (for calculating k)
 
         Returns:
             True if this is a new interval (should poll immediately), False otherwise
@@ -112,14 +106,7 @@ class SmartPollingManager:
         self._poll_count_this_interval = 0
         self._last_estimate_elapsed = None
 
-        # Calculate optimal k and reset_seconds from rate limit info
-        polls_per_interval = None
-        reset_seconds = None
-        if rate_limit_info:
-            polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
-            reset_seconds = rate_limit_info["reset_seconds"]
-
-        self._cdf_strategy.start_interval(polls_per_interval, reset_seconds)
+        self._cdf_strategy.reset_for_new_interval()
 
         if is_first_run:
             _LOGGER.debug("First poll - fetching initial data")
@@ -127,11 +114,9 @@ class SmartPollingManager:
             # Clear the first-interval flag now that we're in a real new interval
             self._first_interval_after_startup = False
             _LOGGER.debug(
-                "New %d-minute interval started: %s (k=%d, scheduled polls: %s)",
+                "New %d-minute interval started: %s",
                 self._interval_length,
                 current_interval,
-                len(self._cdf_strategy.scheduled_polls),
-                [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
             )
 
         return True
@@ -141,21 +126,19 @@ class SmartPollingManager:
         *,
         has_data: bool,
         rate_limit_until: datetime | None = None,
-        rate_limit_info: RateLimitInfo | None = None,
     ) -> bool:
         """Determine if we should poll using smart CDF-based polling.
 
         Args:
             has_data: Whether we have any existing data (for first-run detection)
             rate_limit_until: When rate limit expires (None if not limited)
-            rate_limit_info: Current rate limit quota info (for calculating k)
 
         Returns:
             True if we should poll now, False otherwise
 
         """
         # Check for new interval first
-        if self.check_new_interval(has_data=has_data, rate_limit_info=rate_limit_info):
+        if self.check_new_interval(has_data=has_data):
             return True  # Always poll at start of new interval for estimate
 
         now = datetime.now(UTC)
@@ -269,12 +252,14 @@ class SmartPollingManager:
             polls_per_interval,
             elapsed,
             rate_limit_info["reset_seconds"],
+            self._interval_length * 60,
         )
 
         if self._cdf_strategy.scheduled_polls != old_schedule:
             reset_seconds = rate_limit_info["reset_seconds"]
             _LOGGER.debug(
-                "Budget updated: k=%d, reset=%.1fs (%+.0fs), schedule: %s",
+                "Poll schedule: remaining=%d, k=%d, reset=%.1fs (%+.0fs), polls: %s",
+                rate_limit_info["remaining"],
                 polls_per_interval,
                 elapsed + reset_seconds,
                 reset_seconds,

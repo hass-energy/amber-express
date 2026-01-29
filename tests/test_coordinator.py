@@ -875,13 +875,16 @@ class TestCoordinatorLifecycle:
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.update_budget(rate_limit_info)
 
         stats = coordinator.get_cdf_polling_stats()
 
         assert stats.observation_count == 100  # Cold start
         assert stats.confirmatory_poll_count == 0
+        # k=4 total: 3 CDF polls + 1 forced poll at interval end = 4 total
         assert len(stats.scheduled_polls) == 4
+        assert stats.scheduled_polls[-1] == 300.0  # Forced poll at interval end
 
     def test_get_rate_limit_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_rate_limit_info returns api client info."""
@@ -965,7 +968,8 @@ class TestCoordinatorLifecycle:
         # Set up interval so we have a next poll delay
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
+            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.update_budget(rate_limit_info)
 
         with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
             mock_call_later.return_value = MagicMock()

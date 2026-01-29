@@ -23,7 +23,7 @@ def test_cold_start_initializes_with_real_observations() -> None:
 def test_cold_start_schedule_produces_valid_poll_times() -> None:
     """Test cold start produces valid poll times from the CDF."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # With k=4 polls, should get 4 poll times from the learned CDF
     assert len(strategy.scheduled_polls) == 4
@@ -79,7 +79,7 @@ def test_should_poll_returns_true_at_scheduled_time() -> None:
     # Use explicit observations for deterministic test
     observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # With uniform [15, 45], first poll is at 21s
     assert not strategy.should_poll_for_confirmed(20.0)
@@ -92,7 +92,7 @@ def test_should_poll_advances_after_increment() -> None:
     # Use explicit observations for deterministic test
     observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # First poll at 21s
     assert strategy.should_poll_for_confirmed(21.0)
@@ -107,7 +107,7 @@ def test_should_poll_advances_after_increment() -> None:
 def test_should_poll_returns_false_after_all_polls_used() -> None:
     """Test that should_poll returns False after all scheduled polls are used."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval()
+    strategy.update_budget(4, 0, 0, 0)
 
     # Use all 4 polls
     for _ in range(4):
@@ -121,7 +121,7 @@ def test_get_next_poll_delay_returns_time_until_next_poll() -> None:
     """Test that get_next_poll_delay returns correct delay."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 30.0}]
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # With single interval [10, 30] and k=4, polls at [14, 18, 22, 26]
     # At elapsed=10s, next poll is at 14s, so delay = 4s
@@ -140,7 +140,7 @@ def test_get_next_poll_delay_returns_time_until_next_poll() -> None:
 def test_get_next_poll_delay_returns_none_after_all_polls() -> None:
     """Test that get_next_poll_delay returns None when no polls remain."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval()
+    strategy.update_budget(4, 0, 0, 0)
 
     # Use all 4 polls
     for _ in range(4):
@@ -154,7 +154,7 @@ def test_get_next_poll_delay_sub_second_precision() -> None:
     """Test that get_next_poll_delay handles sub-second precision."""
     observations: list[IntervalObservation] = [{"start": 25.0, "end": 26.0}]
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(polls_per_interval=4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # With narrow interval [25, 26], polls should be tightly spaced
     # At elapsed=25.1, should return sub-second delay
@@ -164,17 +164,18 @@ def test_get_next_poll_delay_sub_second_precision() -> None:
     assert delay >= 0
 
 
-def test_start_interval_resets_poll_state() -> None:
-    """Test that start_interval resets the poll index."""
+def test_reset_for_new_interval_resets_poll_state() -> None:
+    """Test that reset_for_new_interval resets the poll index and count."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # Advance past first poll
     strategy.increment_confirmatory_poll()
     assert strategy.confirmatory_poll_count == 1
 
     # Reset for new interval
-    strategy.start_interval(4)
+    strategy.reset_for_new_interval()
+    strategy.update_budget(4, 0, 0, 0)
 
     # Should be back to first poll
     assert strategy.confirmatory_poll_count == 0
@@ -185,7 +186,7 @@ def test_get_stats_returns_correct_values() -> None:
     """Test that get_stats returns correct diagnostic values."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     stats = strategy.get_stats()
 
@@ -201,7 +202,7 @@ def test_cdf_with_single_interval() -> None:
     """Test CDF construction with a single interval."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 30.0}]
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # With single interval [10, 30] and k=4:
     # Quantiles at [0.2, 0.4, 0.6, 0.8] map to [14, 18, 22, 26]
@@ -216,7 +217,7 @@ def test_cdf_with_two_non_overlapping_intervals() -> None:
         {"start": 30.0, "end": 40.0},
     ]
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # Two equal-weight intervals of length 10
     # Each contributes 0.5 to total probability
@@ -234,7 +235,7 @@ def test_cdf_with_overlapping_intervals() -> None:
         {"start": 20.0, "end": 40.0},
     ]
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # Intervals overlap from 20-30
     # [10, 20) has density from first only: 1/(2*20) = 0.025
@@ -287,18 +288,18 @@ def test_observation_window_size(
         assert len(strategy.observations) == expected_count
 
 
-def test_start_interval_with_custom_polls_per_interval() -> None:
-    """Test that start_interval accepts custom polls_per_interval."""
+def test_update_budget_with_different_poll_counts() -> None:
+    """Test that update_budget accepts different polls_per_interval values."""
     # Use explicit observations for deterministic test
     observations: list[IntervalObservation] = [{"start": 15.0, "end": 45.0}] * 100
     strategy = CDFPollingStrategy(observations)
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # Initial is 4 polls
     assert len(strategy.scheduled_polls) == 4
 
-    # Start new interval with 2 polls
-    strategy.start_interval(polls_per_interval=2)
+    # Update to 2 polls
+    strategy.update_budget(2, 0, 0, 0)
     assert len(strategy.scheduled_polls) == 2
 
     # Verify schedule changed (2 polls = quantiles at 1/3 and 2/3)
@@ -307,42 +308,29 @@ def test_start_interval_with_custom_polls_per_interval() -> None:
     assert strategy.scheduled_polls == [25.0, 35.0]
 
 
-def test_start_interval_zero_budget_produces_empty_schedule() -> None:
+def test_update_budget_zero_produces_empty_schedule() -> None:
     """Test that zero polls_per_interval produces an empty schedule."""
     strategy = CDFPollingStrategy()
 
     # Zero budget = no polls
-    strategy.start_interval(polls_per_interval=0)
+    strategy.update_budget(0, 0, 0, 0)
     assert len(strategy.scheduled_polls) == 0
 
     # Can use any positive value
-    strategy.start_interval(polls_per_interval=50)
+    strategy.update_budget(50, 0, 0, 0)
     assert len(strategy.scheduled_polls) == 50
-
-
-def test_start_interval_none_preserves_previous() -> None:
-    """Test that passing None preserves the previous polls_per_interval."""
-    strategy = CDFPollingStrategy()
-
-    # Set to 2 polls
-    strategy.start_interval(polls_per_interval=2)
-    assert len(strategy.scheduled_polls) == 2
-
-    # Start new interval with None - should keep 2
-    strategy.start_interval(polls_per_interval=None)
-    assert len(strategy.scheduled_polls) == 2
 
 
 def test_update_budget_recomputes_schedule() -> None:
     """Test that update_budget recomputes the schedule mid-interval."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval(4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # Start with 4 polls
     assert len(strategy.scheduled_polls) == 4
 
     # Update budget to 2 polls at 10 seconds elapsed, reset in 290s
-    strategy.update_budget(polls_per_interval=2, elapsed_seconds=10.0, reset_seconds=290)
+    strategy.update_budget(polls_per_interval=2, elapsed_seconds=10.0, reset_seconds=290, interval_seconds=0)
 
     # Should now have 2 scheduled polls
     assert len(strategy.scheduled_polls) == 2
@@ -359,11 +347,11 @@ def test_update_budget_uses_conditional_cdf() -> None:
     strategy = CDFPollingStrategy(observations)
 
     # With uniform [15, 45] schedule: [21, 27, 33, 39] (evenly spaced in [15, 45])
-    strategy.start_interval(polls_per_interval=4)
+    strategy.update_budget(4, 0, 0, 0)
     assert strategy.scheduled_polls == [21.0, 27.0, 33.0, 39.0]
 
     # Update at 25 seconds - now we condition on T > 25, reset in 275s
-    strategy.update_budget(polls_per_interval=4, elapsed_seconds=25.0, reset_seconds=275)
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=25.0, reset_seconds=275, interval_seconds=0)
 
     # All polls should be > 25s (conditional sampling)
     assert all(t > 25.0 for t in strategy.scheduled_polls)
@@ -377,7 +365,7 @@ def test_update_budget_uses_conditional_cdf() -> None:
 def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
     """Test that conditional sampling concentrates polls in remaining probability mass."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval(polls_per_interval=35)
+    strategy.update_budget(35, 0, 0, 0)
 
     # Original schedule spans within [15, 45] interval
     original = strategy.scheduled_polls.copy()
@@ -388,7 +376,7 @@ def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
     # Update at 30 seconds - half the probability mass is now gone, reset in 270s
     # With k=35, reset=270: uniform_polls_needed = ceil(270/30) = 9
     # Blends targeted [15,45] with uniform [30, 300]
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=30.0, reset_seconds=270)
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=30.0, reset_seconds=270, interval_seconds=0)
 
     # New schedule should be after elapsed time (30s)
     new_schedule = strategy.scheduled_polls
@@ -405,12 +393,12 @@ def test_update_budget_all_mass_in_past() -> None:
     falls back to pure uniform distribution from elapsed to reset time.
     """
     strategy = CDFPollingStrategy()
-    strategy.start_interval(polls_per_interval=4)
+    strategy.update_budget(4, 0, 0, 0)
 
     # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
     # With k=4 and reset=250, uniform_polls_needed = ceil(250/30) = 9
     # Since k=4 <= 9, we use pure uniform from 50 to 300 (50+250)
-    strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0, reset_seconds=250)
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0, reset_seconds=250, interval_seconds=0)
 
     # Falls back to uniform: polls at 50 + [1/5, 2/5, 3/5, 4/5] * 250 = [100, 150, 200, 250]
     assert strategy.scheduled_polls == [100.0, 150.0, 200.0, 250.0]
@@ -431,7 +419,7 @@ def test_empty_observations_list() -> None:
 def test_increment_poll_beyond_scheduled() -> None:
     """Test incrementing poll when all polls are already used."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval(polls_per_interval=2)
+    strategy.update_budget(2, 0, 0, 0)
 
     assert len(strategy.scheduled_polls) == 2
 
@@ -542,13 +530,13 @@ def test_record_observation_same_start_end() -> None:
 def test_update_budget_pure_uniform_when_low_k() -> None:
     """Test that low k (below uniform_polls_needed) uses pure uniform distribution."""
     strategy = CDFPollingStrategy()
-    strategy.start_interval(polls_per_interval=5)
+    strategy.update_budget(5, 0, 0, 0)
 
     # With k=5, reset=100: uniform_polls_needed = ceil(100/30) = 4
     # k=5 > 4, so we get blended (not pure uniform)
     # But with k=3, reset=100: uniform_polls_needed = 4
     # k=3 <= 4, so we use pure uniform
-    strategy.update_budget(polls_per_interval=3, elapsed_seconds=10.0, reset_seconds=100)
+    strategy.update_budget(polls_per_interval=3, elapsed_seconds=10.0, reset_seconds=100, interval_seconds=0)
 
     # With pure uniform from 10 to 110, polls at quantiles 1/4, 2/4, 3/4
     # t = 10 + p * 100, so approximately [35, 60, 85]
@@ -571,8 +559,8 @@ def test_update_budget_blends_uniform_with_targeted() -> None:
     # With k=35, reset=150: uniform_polls_needed = ceil(150/30) = 5
     # uniform_weight = 100 * 5 / (35 - 5) = 500 / 30 ≈ 16.67
     # This means uniform has about 16.67% of the weight relative to 100 observations
-    strategy.start_interval(polls_per_interval=35)
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=150)
+    strategy.update_budget(35, 0, 0, 0)
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=10.0, reset_seconds=150, interval_seconds=0)
 
     # Polls should be after elapsed (10s)
     assert all(t > 10.0 for t in strategy.scheduled_polls)

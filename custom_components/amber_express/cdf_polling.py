@@ -71,34 +71,17 @@ class CDFPollingStrategy:
         self._cdf_times: NDArray[np.float64] | None = None
         self._cdf_probs: NDArray[np.float64] | None = None
 
-    def start_interval(
-        self,
-        polls_per_interval: int | None = None,
-        reset_seconds: int | None = None,
-    ) -> None:
-        """Reset state for a new interval.
-
-        Args:
-            polls_per_interval: Number of confirmatory polls to schedule.
-                If None, uses the previous value (or default on first call).
-            reset_seconds: Seconds until rate limit quota resets.
-                If provided, enables uniform distribution blending.
-
-        """
+    def reset_for_new_interval(self) -> None:
+        """Reset state for a new interval (no schedule computation)."""
         self._next_poll_index = 0
         self._confirmatory_poll_count = 0
-
-        # Update polls per interval if provided
-        if polls_per_interval is not None:
-            self._polls_per_interval = polls_per_interval
-            # Recompute schedule with new k and optional reset info
-            self._recompute_schedule(reset_seconds=reset_seconds)
 
     def update_budget(
         self,
         polls_per_interval: int,
         elapsed_seconds: float,
         reset_seconds: int,
+        interval_seconds: int,
     ) -> None:
         """Update the poll budget mid-interval based on new rate limit info.
 
@@ -112,12 +95,14 @@ class CDFPollingStrategy:
             polls_per_interval: New number of confirmatory polls (from remaining quota)
             elapsed_seconds: Current elapsed time in the interval
             reset_seconds: Seconds until rate limit quota resets
+            interval_seconds: Length of the interval in seconds
 
         """
         self._polls_per_interval = polls_per_interval
         self._recompute_schedule(
             condition_on_elapsed=elapsed_seconds,
             reset_seconds=reset_seconds,
+            interval_seconds=interval_seconds,
         )
         # All scheduled polls are in the future, start from index 0
         self._next_poll_index = 0
@@ -236,47 +221,79 @@ class CDFPollingStrategy:
         self,
         condition_on_elapsed: float | None = None,
         reset_seconds: int | None = None,
+        interval_seconds: int | None = None,
     ) -> None:
         """Recompute poll schedule using pure algorithm functions.
 
         Always blends targeted CDF with uniform distribution when reset_seconds
         is available. Weights are based on a minimum sample rate target.
-        """
-        if not self._observations:
-            self._scheduled_polls = []
-            return
 
+        Injects forced polls at boundary times (reserving budget for them):
+        - Next interval start (interval_seconds)
+        - Rate limit reset time (elapsed + reset_seconds)
+        """
+        elapsed = condition_on_elapsed or 0.0
+
+        # Calculate forced polls first to reserve budget for them
+        forced_polls: list[float] = []
+
+        # Poll at next interval start
+        if interval_seconds is not None and interval_seconds > elapsed:
+            forced_polls.append(float(interval_seconds))
+
+        # Poll at rate limit reset time
         if reset_seconds is not None and reset_seconds > 0:
+            reset_time = elapsed + reset_seconds
+            # Only add if it's before the next interval (otherwise interval poll covers it)
+            if interval_seconds is None or reset_time < interval_seconds:
+                forced_polls.append(reset_time)
+
+        # Reserve budget for forced polls
+        cdf_budget = max(0, self._polls_per_interval - len(forced_polls))
+
+        if not self._observations or cdf_budget == 0:
+            self._scheduled_polls = []
+        elif reset_seconds is not None and reset_seconds > 0:
             # Calculate polls needed for minimum sample rate
             uniform_polls_needed = ceil(reset_seconds / self.MIN_SAMPLE_INTERVAL)
-            uniform_start = condition_on_elapsed or 0.0
-            uniform_end = uniform_start + reset_seconds
+            uniform_end = elapsed + reset_seconds
 
-            if self._polls_per_interval <= uniform_polls_needed:
+            if cdf_budget <= uniform_polls_needed:
                 # Pure uniform - not enough budget for targeted sampling
-                cdf_times, cdf_probs = build_cdf([{"start": uniform_start, "end": uniform_end}])
+                cdf_times, cdf_probs = build_cdf([{"start": elapsed, "end": uniform_end}])
             else:
                 # Blend: weight uniform based on reserved polls for minimum sample rate
                 total_obs_weight = len(self._observations)
                 # Scale so uniform represents uniform_polls_needed / k of total mass
-                uniform_weight = (
-                    total_obs_weight * uniform_polls_needed / (self._polls_per_interval - uniform_polls_needed)
-                )
+                uniform_weight = total_obs_weight * uniform_polls_needed / (cdf_budget - uniform_polls_needed)
                 augmented: list[IntervalObservation] = [
                     *self._observations,
-                    {"start": uniform_start, "end": uniform_end, "weight": uniform_weight},
+                    {"start": elapsed, "end": uniform_end, "weight": uniform_weight},
                 ]
                 cdf_times, cdf_probs = build_cdf(augmented)
+
+            if len(cdf_times) == 0:
+                self._scheduled_polls = []
+            else:
+                self._scheduled_polls = sample_quantiles(
+                    cdf_times,
+                    cdf_probs,
+                    cdf_budget,
+                    condition_above=condition_on_elapsed,
+                )
         else:
             cdf_times, cdf_probs = self._build_cdf()
+            if len(cdf_times) == 0:
+                self._scheduled_polls = []
+            else:
+                self._scheduled_polls = sample_quantiles(
+                    cdf_times,
+                    cdf_probs,
+                    cdf_budget,
+                    condition_above=condition_on_elapsed,
+                )
 
-        if len(cdf_times) == 0:
-            self._scheduled_polls = []
-            return
-
-        self._scheduled_polls = sample_quantiles(
-            cdf_times,
-            cdf_probs,
-            self._polls_per_interval,
-            condition_above=condition_on_elapsed,
-        )
+        # Merge forced polls into schedule (deduplicate and sort)
+        if forced_polls:
+            all_polls = sorted(set(self._scheduled_polls + forced_polls))
+            self._scheduled_polls = all_polls
