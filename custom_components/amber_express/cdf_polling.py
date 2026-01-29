@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
 
+from .cdf_algorithm import IntervalObservation, build_cdf, compute_blend_weight, compute_poll_times
 from .cdf_cold_start import COLD_START_OBSERVATIONS
 
-
-class IntervalObservation(TypedDict):
-    """An observed interval where the confirmed price became available."""
-
-    start: float  # Last poll time that returned estimate
-    end: float  # First poll time that returned confirmed
+# Re-export for backwards compatibility
+__all__ = ["CDFPollingStats", "CDFPollingStrategy", "IntervalObservation"]
 
 
 @dataclass
@@ -31,21 +27,15 @@ class CDFPollingStats:
 
 
 class CDFPollingStrategy:
-    """Statistical algorithm that learns optimal poll times from historical observations.
+    """Stateful wrapper that manages observations and polling state.
 
     Responsibilities:
-    - Maintaining a rolling window of interval observations [start, end]
-    - Building an empirical Cumulative Distribution Function (CDF) from observations
-    - Computing optimal poll times via inverse CDF sampling
+    - Maintaining a rolling window of interval observations
+    - Caching the CDF to avoid recomputation
     - Tracking scheduled polls and which have been executed
-    - Supporting mid-interval budget updates with conditional probability
+    - Providing a simple interface for the coordinator
 
-    The CDF represents "probability that confirmed price arrived by time t". Given
-    k polls to schedule, we place them at times where F(t) = 1/(k+1), 2/(k+1), etc.
-    This minimizes expected detection delay under the learned distribution.
-
-    This class is a pure algorithm with no dependencies on Home Assistant or the
-    Amber API. It only knows about time intervals and probability distributions.
+    The actual CDF algorithm is implemented in cdf_algorithm.py as pure functions.
 
     Cold start: Uses real observations from historical data until real-time
     data is collected.
@@ -53,10 +43,8 @@ class CDFPollingStrategy:
 
     # Configuration constants
     WINDOW_SIZE = 100  # Rolling window of observations (N)
-    MIN_CDF_POINTS = 2  # Minimum points required for a valid CDF
 
-    # Uniform blending thresholds as fractions of quota: blend targeted CDF with
-    # uniform distribution based on remaining poll budget (k) to spread polls when low
+    # Uniform blending thresholds as fractions of quota
     UNIFORM_BLEND_FRACTION_HIGH = 0.3  # Pure targeted CDF when k >= quota * this
     UNIFORM_BLEND_FRACTION_LOW = 0.2  # Pure uniform distribution when k <= quota * this
 
@@ -101,7 +89,7 @@ class CDFPollingStrategy:
         if polls_per_interval is not None:
             self._polls_per_interval = polls_per_interval
             # Recompute schedule with new k
-            self._compute_poll_schedule()
+            self._recompute_schedule()
 
     def update_budget(
         self,
@@ -127,7 +115,7 @@ class CDFPollingStrategy:
         """
         self._polls_per_interval = polls_per_interval
         self._quota = quota
-        self._compute_poll_schedule(
+        self._recompute_schedule(
             condition_on_elapsed=elapsed_seconds,
             reset_seconds=reset_seconds,
         )
@@ -144,7 +132,6 @@ class CDFPollingStrategy:
         """
         # Ensure valid interval (start < end)
         if start >= end:
-            # Invalid observation, skip
             return
 
         observation: IntervalObservation = {"start": start, "end": end}
@@ -159,7 +146,7 @@ class CDFPollingStrategy:
         self._cdf_probs = None
 
         # Recompute poll schedule for future intervals
-        self._compute_poll_schedule()
+        self._recompute_schedule()
 
     def should_poll_for_confirmed(self, elapsed_seconds: float) -> bool:
         """Check if we should poll for confirmed price given elapsed time.
@@ -232,165 +219,47 @@ class CDFPollingStrategy:
             last_observation=self._observations[-1] if self._observations else None,
         )
 
-    def _compute_poll_schedule(
+    def _build_cdf(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Build CDF from observations, using cache if available."""
+        if self._cdf_times is not None and self._cdf_probs is not None:
+            return self._cdf_times, self._cdf_probs
+
+        cdf_times, cdf_probs = build_cdf(self._observations)
+
+        # Cache the result
+        self._cdf_times = cdf_times
+        self._cdf_probs = cdf_probs
+
+        return cdf_times, cdf_probs
+
+    def _recompute_schedule(
         self,
         condition_on_elapsed: float | None = None,
         reset_seconds: int | None = None,
     ) -> None:
-        """Compute optimal poll times using inverse CDF sampling with quantile blending.
-
-        When poll budget (k) is low, blends targeted poll times with uniform
-        distribution to spread polls evenly. Uses quantile blending: each poll
-        time is interpolated between targeted and uniform positions.
-
-        Args:
-            condition_on_elapsed: If provided, compute conditional schedule given
-                that the event hasn't occurred by this time. Uses P(T | T > t).
-            reset_seconds: Seconds until rate limit resets. Used for uniform
-                distribution endpoint when blending.
-
-        """
+        """Recompute poll schedule using pure algorithm functions."""
         if not self._observations:
             self._scheduled_polls = []
             return
 
-        # Build the CDF (uses cache if available)
         cdf_times, cdf_probs = self._build_cdf()
 
-        if len(cdf_times) < self.MIN_CDF_POINTS:
+        if len(cdf_times) == 0:
             self._scheduled_polls = []
             return
 
-        # Compute poll times via inverse CDF
-        k = self._polls_per_interval
+        blend_weight = compute_blend_weight(
+            self._polls_per_interval,
+            self._quota,
+            fraction_high=self.UNIFORM_BLEND_FRACTION_HIGH,
+            fraction_low=self.UNIFORM_BLEND_FRACTION_LOW,
+        )
 
-        # Compute blend weight early - we may need pure uniform fallback
-        w = self._compute_blend_weight(k)
-        uniform_start = condition_on_elapsed if condition_on_elapsed else 0.0
-
-        # Quantile positions for k polls
-        j_values = np.arange(1, k + 1)
-        uniform_probs = j_values / (k + 1)
-
-        if condition_on_elapsed is not None and condition_on_elapsed > 0:
-            # Conditional sampling: we know T > elapsed, so sample from P(T | T > t)
-            # F_conditional(x) = (F(x) - F(t)) / (1 - F(t))
-            # To sample, we need F^-1(F(t) + p * (1 - F(t)))
-            f_elapsed = float(np.interp(condition_on_elapsed, cdf_times, cdf_probs))
-
-            if f_elapsed >= 1.0:
-                # All probability mass is before elapsed - use pure uniform if blending enabled
-                if w < 1.0 and reset_seconds is not None:
-                    uniform_end = uniform_start + reset_seconds
-                    self._scheduled_polls = (uniform_start + uniform_probs * (uniform_end - uniform_start)).tolist()
-                else:
-                    self._scheduled_polls = []
-                return
-
-            # Map uniform [0,1] targets to conditional targets
-            remaining_mass = 1.0 - f_elapsed
-            target_probabilities = f_elapsed + uniform_probs * remaining_mass
-        else:
-            # Unconditional sampling
-            target_probabilities = uniform_probs
-
-        # Compute targeted poll times from inverse CDF
-        # For inverse CDF, we interpolate with x=probs, y=times
-        targeted_polls = np.interp(target_probabilities, cdf_probs, cdf_times)
-
-        if w >= 1.0 or reset_seconds is None:
-            # Pure targeted CDF (no blending needed)
-            self._scheduled_polls = targeted_polls.tolist()
-        else:
-            # Blend targeted with uniform distribution
-            # Uniform spans from elapsed to reset time
-            uniform_end = uniform_start + reset_seconds
-            uniform_times = uniform_start + uniform_probs * (uniform_end - uniform_start)
-            blended = w * targeted_polls + (1 - w) * uniform_times
-            self._scheduled_polls = blended.tolist()
-
-    def _build_cdf(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Build piecewise linear CDF from interval observations.
-
-        Returns:
-            Tuple of (times array, cumulative probability array) defining the CDF.
-
-        """
-        # Return cached CDF if available
-        if self._cdf_times is not None and self._cdf_probs is not None:
-            return self._cdf_times, self._cdf_probs
-
-        if not self._observations:
-            empty = np.array([], dtype=np.float64)
-            return empty, empty
-
-        n = len(self._observations)
-
-        # Extract starts and ends as numpy arrays
-        starts = np.array([obs["start"] for obs in self._observations], dtype=np.float64)
-        ends = np.array([obs["end"] for obs in self._observations], dtype=np.float64)
-
-        # Collect all unique endpoints and sort to form time grid
-        time_grid = np.unique(np.concatenate([starts, ends]))
-
-        if len(time_grid) < self.MIN_CDF_POINTS:
-            empty = np.array([], dtype=np.float64)
-            return empty, empty
-
-        # For each segment [t_i, t_{i+1}), check which intervals contain the segment start
-        segment_starts = time_grid[:-1]
-
-        # Boolean mask: covers[i, j] = True if observation j covers segment i
-        covers = (starts <= segment_starts[:, np.newaxis]) & (segment_starts[:, np.newaxis] < ends)
-
-        # Compute density for each observation: 1 / (n * (end - start))
-        densities = 1.0 / (n * (ends - starts))
-
-        # Compute slope for each segment: sum of densities for covering observations
-        slopes = np.sum(covers * densities, axis=1)
-
-        # Compute segment lengths
-        segment_lengths = time_grid[1:] - time_grid[:-1]
-
-        # Integrate: cumulative sum of slope * length
-        cumulative = np.concatenate([[0.0], np.cumsum(slopes * segment_lengths)])
-
-        # Normalize so CDF ends at 1.0
-        if cumulative[-1] > 0:
-            cumulative = cumulative / cumulative[-1]
-
-        # Cache the result
-        self._cdf_times = time_grid
-        self._cdf_probs = cumulative
-
-        return time_grid, cumulative
-
-    def _compute_blend_weight(self, k: int) -> float:
-        """Compute weight for blending targeted CDF vs uniform distribution.
-
-        Uses clamped linear interpolation between K_LOW and K_HIGH, which are
-        computed dynamically from the rate limit quota.
-
-        At k >= K_HIGH (60% of quota): returns 1.0 (pure targeted CDF)
-        At k <= K_LOW (20% of quota): returns 0.0 (pure uniform distribution)
-        In between: linear interpolation
-
-        Args:
-            k: Number of polls remaining (poll budget)
-
-        Returns:
-            Weight in [0.0, 1.0] for targeted CDF contribution
-
-        """
-        # Before first update_budget call, use pure targeted CDF (no blending)
-        if self._quota is None:
-            return 1.0
-
-        k_high = int(self._quota * self.UNIFORM_BLEND_FRACTION_HIGH)
-        k_low = int(self._quota * self.UNIFORM_BLEND_FRACTION_LOW)
-
-        if k >= k_high:
-            return 1.0
-        if k <= k_low:
-            return 0.0
-        return (k - k_low) / (k_high - k_low)
+        self._scheduled_polls = compute_poll_times(
+            cdf_times,
+            cdf_probs,
+            self._polls_per_interval,
+            condition_on_elapsed=condition_on_elapsed,
+            reset_seconds=reset_seconds,
+            blend_weight=blend_weight,
+        )

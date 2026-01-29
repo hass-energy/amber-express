@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from custom_components.amber_express.cdf_algorithm import build_cdf, compute_blend_weight
 from custom_components.amber_express.cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
 
 
@@ -453,43 +454,30 @@ def test_get_stats_with_empty_observations() -> None:
     assert stats.last_observation is None
 
 
-def test_compute_poll_schedule_insufficient_cdf_points() -> None:
-    """Test _compute_poll_schedule with insufficient CDF points."""
-    # Single point observation creates only 2 time_grid points
-    # but with a single observation, CDF is still valid
-    # We need an edge case where time_grid ends up < 2
-    observations: list[IntervalObservation] = [{"start": 10.0, "end": 10.0}]
-    strategy = CDFPollingStrategy(observations)
-
-    # This observation has start == end, so it's invalid and won't produce valid CDF
-    # Wait - record_observation skips start >= end, so let's try another approach
-    # Start fresh with empty and manually set observations
-    strategy._observations = []
-    strategy._compute_poll_schedule()
+def test_recompute_schedule_with_empty_observations() -> None:
+    """Test schedule recomputation with empty observations."""
+    strategy = CDFPollingStrategy([])
+    strategy._polls_per_interval = 4
+    strategy._recompute_schedule()
 
     assert strategy._scheduled_polls == []
 
 
 def test_build_cdf_empty_observations() -> None:
-    """Test _build_cdf returns empty arrays with no observations."""
-    strategy = CDFPollingStrategy([])
-
-    cdf_times, cdf_probs = strategy._build_cdf()
+    """Test build_cdf returns empty arrays with no observations."""
+    cdf_times, cdf_probs = build_cdf([])
 
     assert len(cdf_times) == 0
     assert len(cdf_probs) == 0
 
 
-def test_build_cdf_single_point_time_grid() -> None:
-    """Test _build_cdf handles case where time_grid has only one point."""
-    # Create an observation where start and end collapse to same point
-    strategy = CDFPollingStrategy()
-    # Manually set a degenerate observation that passed validation
-    strategy._observations = [{"start": 10.0, "end": 10.0001}]
+def test_build_cdf_single_observation() -> None:
+    """Test build_cdf with a single narrow observation."""
+    observations: list[IntervalObservation] = [{"start": 10.0, "end": 10.0001}]
 
-    cdf_times, cdf_probs = strategy._build_cdf()
+    cdf_times, cdf_probs = build_cdf(observations)
 
-    # Should still produce valid CDF with at least 2 points
+    # Should produce valid CDF with at least 2 points
     assert len(cdf_times) >= 2
     assert len(cdf_probs) >= 2
 
@@ -511,41 +499,34 @@ def test_record_observation_same_start_end() -> None:
 
 def test_compute_blend_weight_at_k_high() -> None:
     """Test blend weight is 1.0 when k >= K_HIGH."""
-    strategy = CDFPollingStrategy()
-    strategy._quota = 50  # K_HIGH = 0.6 * 50 = 30
-
-    # At or above K_HIGH (30), weight should be 1.0 (pure targeted)
-    assert strategy._compute_blend_weight(30) == 1.0
-    assert strategy._compute_blend_weight(50) == 1.0
-    assert strategy._compute_blend_weight(100) == 1.0
+    # With quota=50 and fraction_high=0.3: K_HIGH = 15
+    # At or above K_HIGH, weight should be 1.0 (pure targeted)
+    assert compute_blend_weight(15, quota=50, fraction_high=0.3, fraction_low=0.2) == 1.0
+    assert compute_blend_weight(50, quota=50, fraction_high=0.3, fraction_low=0.2) == 1.0
+    assert compute_blend_weight(100, quota=50, fraction_high=0.3, fraction_low=0.2) == 1.0
 
 
 def test_compute_blend_weight_at_k_low() -> None:
     """Test blend weight is 0.0 when k <= K_LOW."""
-    strategy = CDFPollingStrategy()
-    strategy._quota = 50  # K_LOW = 0.2 * 50 = 10
-
-    # At or below K_LOW (10), weight should be 0.0 (pure uniform)
-    assert strategy._compute_blend_weight(10) == 0.0
-    assert strategy._compute_blend_weight(5) == 0.0
-    assert strategy._compute_blend_weight(0) == 0.0
+    # With quota=50 and fraction_low=0.2: K_LOW = 10
+    # At or below K_LOW, weight should be 0.0 (pure uniform)
+    assert compute_blend_weight(10, quota=50, fraction_high=0.3, fraction_low=0.2) == 0.0
+    assert compute_blend_weight(5, quota=50, fraction_high=0.3, fraction_low=0.2) == 0.0
+    assert compute_blend_weight(0, quota=50, fraction_high=0.3, fraction_low=0.2) == 0.0
 
 
 def test_compute_blend_weight_linear_interpolation() -> None:
     """Test blend weight interpolates linearly between K_LOW and K_HIGH."""
-    strategy = CDFPollingStrategy()
-    # With UNIFORM_BLEND_FRACTION_HIGH=0.3 and UNIFORM_BLEND_FRACTION_LOW=0.2:
-    # K_HIGH = 0.3 * 100 = 30, K_LOW = 0.2 * 100 = 20
-    strategy._quota = 100
-
+    # With quota=100, fraction_high=0.3, fraction_low=0.2:
+    # K_HIGH = 30, K_LOW = 20
     # k=25 is midpoint between 20 and 30
-    assert strategy._compute_blend_weight(25) == 0.5
+    assert compute_blend_weight(25, quota=100, fraction_high=0.3, fraction_low=0.2) == 0.5
 
     # k=22 is 2/10 of the way (22-20)/(30-20) = 0.2
-    assert abs(strategy._compute_blend_weight(22) - 0.2) < 0.01
+    assert abs(compute_blend_weight(22, quota=100, fraction_high=0.3, fraction_low=0.2) - 0.2) < 0.01
 
     # k=28 is 8/10 of the way (28-20)/(30-20) = 0.8
-    assert abs(strategy._compute_blend_weight(28) - 0.8) < 0.01
+    assert abs(compute_blend_weight(28, quota=100, fraction_high=0.3, fraction_low=0.2) - 0.8) < 0.01
 
 
 def test_update_budget_pure_targeted_at_high_k() -> None:
