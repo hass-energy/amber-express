@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
+import numpy as np
+from numpy.typing import NDArray
+
 from .cdf_cold_start import COLD_START_OBSERVATIONS
 
 
@@ -79,6 +82,10 @@ class CDFPollingStrategy:
         self._polls_per_interval = 0
         self._quota: int | None = None
 
+        # Cached CDF arrays (computed lazily)
+        self._cdf_times: NDArray[np.float64] | None = None
+        self._cdf_probs: NDArray[np.float64] | None = None
+
     def start_interval(self, polls_per_interval: int | None = None) -> None:
         """Reset state for a new interval.
 
@@ -146,6 +153,10 @@ class CDFPollingStrategy:
         # Maintain rolling window
         if len(self._observations) > self.WINDOW_SIZE:
             self._observations = self._observations[-self.WINDOW_SIZE :]
+
+        # Invalidate cached CDF
+        self._cdf_times = None
+        self._cdf_probs = None
 
         # Recompute poll schedule for future intervals
         self._compute_poll_schedule()
@@ -243,10 +254,10 @@ class CDFPollingStrategy:
             self._scheduled_polls = []
             return
 
-        # Build the CDF
-        cdf_points = self._build_cdf()
+        # Build the CDF (uses cache if available)
+        cdf_times, cdf_probs = self._build_cdf()
 
-        if len(cdf_points) < self.MIN_CDF_POINTS:
+        if len(cdf_times) < self.MIN_CDF_POINTS:
             self._scheduled_polls = []
             return
 
@@ -257,170 +268,102 @@ class CDFPollingStrategy:
         w = self._compute_blend_weight(k)
         uniform_start = condition_on_elapsed if condition_on_elapsed else 0.0
 
+        # Quantile positions for k polls
+        j_values = np.arange(1, k + 1)
+        uniform_probs = j_values / (k + 1)
+
         if condition_on_elapsed is not None and condition_on_elapsed > 0:
             # Conditional sampling: we know T > elapsed, so sample from P(T | T > t)
             # F_conditional(x) = (F(x) - F(t)) / (1 - F(t))
             # To sample, we need F^-1(F(t) + p * (1 - F(t)))
-            f_elapsed = self._cdf_at(condition_on_elapsed, cdf_points)
+            f_elapsed = float(np.interp(condition_on_elapsed, cdf_times, cdf_probs))
 
             if f_elapsed >= 1.0:
                 # All probability mass is before elapsed - use pure uniform if blending enabled
                 if w < 1.0 and reset_seconds is not None:
                     uniform_end = uniform_start + reset_seconds
-                    uniform_probs = [j / (k + 1) for j in range(1, k + 1)]
-                    self._scheduled_polls = [uniform_start + p * (uniform_end - uniform_start) for p in uniform_probs]
+                    self._scheduled_polls = (uniform_start + uniform_probs * (uniform_end - uniform_start)).tolist()
                 else:
                     self._scheduled_polls = []
                 return
 
             # Map uniform [0,1] targets to conditional targets
             remaining_mass = 1.0 - f_elapsed
-            target_probabilities = [f_elapsed + (j / (k + 1)) * remaining_mass for j in range(1, k + 1)]
+            target_probabilities = f_elapsed + uniform_probs * remaining_mass
         else:
             # Unconditional sampling
-            target_probabilities = [j / (k + 1) for j in range(1, k + 1)]
+            target_probabilities = uniform_probs
 
-        # Compute targeted poll times from CDF
-        targeted_polls = [self._inverse_cdf(p, cdf_points) for p in target_probabilities]
+        # Compute targeted poll times from inverse CDF
+        # For inverse CDF, we interpolate with x=probs, y=times
+        targeted_polls = np.interp(target_probabilities, cdf_probs, cdf_times)
 
         if w >= 1.0 or reset_seconds is None:
             # Pure targeted CDF (no blending needed)
-            self._scheduled_polls = targeted_polls
+            self._scheduled_polls = targeted_polls.tolist()
         else:
             # Blend targeted with uniform distribution
             # Uniform spans from elapsed to reset time
             uniform_end = uniform_start + reset_seconds
+            uniform_times = uniform_start + uniform_probs * (uniform_end - uniform_start)
+            blended = w * targeted_polls + (1 - w) * uniform_times
+            self._scheduled_polls = blended.tolist()
 
-            # For uniform CDF, quantile p maps to: start + p * (end - start)
-            # But we need to use the same probability space as targeted
-            # The target_probabilities are already in [0,1] for the conditional case
-            # For uniform blending, we use simple linear interpolation in [0,1]
-            uniform_probs = [j / (k + 1) for j in range(1, k + 1)]
-
-            self._scheduled_polls = []
-            for i, t_targeted in enumerate(targeted_polls):
-                p_uniform = uniform_probs[i]
-                t_uniform = uniform_start + p_uniform * (uniform_end - uniform_start)
-                t_blended = w * t_targeted + (1 - w) * t_uniform
-                self._scheduled_polls.append(t_blended)
-
-    def _build_cdf(self) -> list[tuple[float, float]]:
+    def _build_cdf(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Build piecewise linear CDF from interval observations.
 
         Returns:
-            List of (time, cumulative_probability) points defining the CDF.
+            Tuple of (times array, cumulative probability array) defining the CDF.
 
         """
+        # Return cached CDF if available
+        if self._cdf_times is not None and self._cdf_probs is not None:
+            return self._cdf_times, self._cdf_probs
+
         if not self._observations:
-            return []
+            empty = np.array([], dtype=np.float64)
+            return empty, empty
 
         n = len(self._observations)
 
-        # Collect all unique endpoints
-        endpoints: set[float] = set()
-        for obs in self._observations:
-            endpoints.add(obs["start"])
-            endpoints.add(obs["end"])
+        # Extract starts and ends as numpy arrays
+        starts = np.array([obs["start"] for obs in self._observations], dtype=np.float64)
+        ends = np.array([obs["end"] for obs in self._observations], dtype=np.float64)
 
-        # Sort to form time grid
-        time_grid = sorted(endpoints)
+        # Collect all unique endpoints and sort to form time grid
+        time_grid = np.unique(np.concatenate([starts, ends]))
 
         if len(time_grid) < self.MIN_CDF_POINTS:
-            return []
+            empty = np.array([], dtype=np.float64)
+            return empty, empty
 
-        # For each segment, compute the CDF slope (sum of contributing densities)
-        # Each interval [a_i, b_i] contributes density 1/(N * (b_i - a_i)) when t in [a_i, b_i)
-        cdf_points: list[tuple[float, float]] = [(time_grid[0], 0.0)]
-        cumulative = 0.0
+        # For each segment [t_i, t_{i+1}), check which intervals contain the segment start
+        segment_starts = time_grid[:-1]
 
-        for i in range(len(time_grid) - 1):
-            t_start = time_grid[i]
-            t_end = time_grid[i + 1]
-            segment_length = t_end - t_start
+        # Boolean mask: covers[i, j] = True if observation j covers segment i
+        covers = (starts <= segment_starts[:, np.newaxis]) & (segment_starts[:, np.newaxis] < ends)
 
-            # Compute slope: sum of densities from intervals covering this segment
-            slope = 0.0
-            for obs in self._observations:
-                a, b = obs["start"], obs["end"]
-                if a <= t_start < b:
-                    # This interval contributes to this segment
-                    slope += 1.0 / (n * (b - a))
+        # Compute density for each observation: 1 / (n * (end - start))
+        densities = 1.0 / (n * (ends - starts))
 
-            # Integrate: add slope * segment_length to cumulative
-            cumulative += slope * segment_length
-            cdf_points.append((t_end, cumulative))
+        # Compute slope for each segment: sum of densities for covering observations
+        slopes = np.sum(covers * densities, axis=1)
+
+        # Compute segment lengths
+        segment_lengths = time_grid[1:] - time_grid[:-1]
+
+        # Integrate: cumulative sum of slope * length
+        cumulative = np.concatenate([[0.0], np.cumsum(slopes * segment_lengths)])
 
         # Normalize so CDF ends at 1.0
-        if cumulative > 0:
-            cdf_points = [(t, p / cumulative) for t, p in cdf_points]
+        if cumulative[-1] > 0:
+            cumulative = cumulative / cumulative[-1]
 
-        return cdf_points
+        # Cache the result
+        self._cdf_times = time_grid
+        self._cdf_probs = cumulative
 
-    def _cdf_at(self, t: float, cdf_points: list[tuple[float, float]]) -> float:
-        """Compute CDF value F(t) at a given time via linear interpolation.
-
-        Args:
-            t: Time to evaluate CDF at
-            cdf_points: List of (time, cumulative_probability) points
-
-        Returns:
-            F(t) - the cumulative probability at time t
-
-        """
-        if not cdf_points:
-            return 0.0
-
-        # Before first point
-        if t <= cdf_points[0][0]:
-            return cdf_points[0][1]
-
-        # After last point
-        if t >= cdf_points[-1][0]:
-            return cdf_points[-1][1]
-
-        # Find segment containing t and interpolate
-        # CDF is contiguous so a matching segment always exists when t is in range
-        for i in range(len(cdf_points) - 1):
-            t0, p0 = cdf_points[i]
-            t1, p1 = cdf_points[i + 1]
-
-            if t0 <= t <= t1:
-                fraction = (t - t0) / (t1 - t0)
-                return p0 + fraction * (p1 - p0)
-
-        return cdf_points[-1][1]
-
-    def _inverse_cdf(self, target_p: float, cdf_points: list[tuple[float, float]]) -> float:
-        """Compute inverse CDF (quantile function) via linear interpolation.
-
-        Args:
-            target_p: Target probability in [0, 1]
-            cdf_points: List of (time, cumulative_probability) points
-
-        Returns:
-            Time t such that F(t) = target_p
-
-        """
-        if not cdf_points:
-            return 0.0
-
-        # Handle edge cases
-        if target_p <= cdf_points[0][1]:
-            return cdf_points[0][0]
-        if target_p >= cdf_points[-1][1]:
-            return cdf_points[-1][0]
-
-        # Find segment containing target_p
-        # CDF is strictly increasing so a matching segment always exists
-        for i in range(len(cdf_points) - 1):
-            t0, p0 = cdf_points[i]
-            t1, p1 = cdf_points[i + 1]
-
-            if p0 <= target_p <= p1:
-                fraction = (target_p - p0) / (p1 - p0)
-                return t0 + fraction * (t1 - t0)
-
-        return cdf_points[-1][0]
+        return time_grid, cumulative
 
     def _compute_blend_weight(self, k: int) -> float:
         """Compute weight for blending targeted CDF vs uniform distribution.

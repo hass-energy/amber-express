@@ -175,6 +175,7 @@ dependencies = [
     { name = "amberelectric" },
     { name = "homeassistant" },
     { name = "http-sf" },
+    { name = "numpy" },
 ]
 
 [package.dev-dependencies]
@@ -193,6 +194,7 @@ requires-dist = [
     { name = "amberelectric", specifier = ">=2.0.12" },
     { name = "homeassistant", specifier = ">=2026.1.1" },
     { name = "http-sf", specifier = ">=1.1.1" },
+    { name = "numpy", specifier = ">=2.2.0" },
 ]
 
 [package.metadata.requires-dev]

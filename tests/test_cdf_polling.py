@@ -453,78 +453,6 @@ def test_get_stats_with_empty_observations() -> None:
     assert stats.last_observation is None
 
 
-def test_cdf_at_edge_cases() -> None:
-    """Test CDF evaluation at boundary conditions."""
-    observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
-
-    # Access internal method for edge case testing
-    cdf_points = strategy._build_cdf()
-
-    # Before first point
-    assert strategy._cdf_at(-5.0, cdf_points) == 0.0
-    # After last point
-    assert strategy._cdf_at(100.0, cdf_points) == 1.0
-    # At exact first point
-    assert strategy._cdf_at(10.0, cdf_points) == 0.0
-    # At exact last point
-    assert strategy._cdf_at(20.0, cdf_points) == 1.0
-    # Empty cdf_points
-    assert strategy._cdf_at(15.0, []) == 0.0
-
-
-def test_inverse_cdf_edge_cases() -> None:
-    """Test inverse CDF at boundary conditions."""
-    observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
-    strategy = CDFPollingStrategy(observations)
-
-    cdf_points = strategy._build_cdf()
-
-    # Below first probability
-    assert strategy._inverse_cdf(-0.1, cdf_points) == 10.0
-    # Above last probability
-    assert strategy._inverse_cdf(1.5, cdf_points) == 20.0
-    # Exactly at 0
-    assert strategy._inverse_cdf(0.0, cdf_points) == 10.0
-    # Exactly at 1
-    assert strategy._inverse_cdf(1.0, cdf_points) == 20.0
-    # Empty cdf_points
-    assert strategy._inverse_cdf(0.5, []) == 0.0
-
-
-def test_cdf_segment_with_zero_width() -> None:
-    """Test CDF interpolation when t1 == t0 (degenerate segment)."""
-    # Create observations that result in a point with t1 == t0
-    # This can happen with identical start points
-    observations: list[IntervalObservation] = [
-        {"start": 10.0, "end": 10.001},  # Very narrow interval
-    ]
-    strategy = CDFPollingStrategy(observations)
-
-    cdf_points = strategy._build_cdf()
-
-    # Should handle interpolation without division by zero
-    result = strategy._cdf_at(10.0, cdf_points)
-    assert result >= 0.0  # Valid result
-
-
-def test_inverse_cdf_flat_segment() -> None:
-    """Test inverse CDF when p1 == p0 (flat segment)."""
-    observations: list[IntervalObservation] = [
-        {"start": 10.0, "end": 20.0},
-        {"start": 30.0, "end": 40.0},
-    ]
-    strategy = CDFPollingStrategy(observations)
-
-    cdf_points = strategy._build_cdf()
-
-    # The CDF has a flat region between 20 and 30 (p stays at 0.5)
-    # Finding quantile in flat region should return the start of segment
-    # This exercises the p1 == p0 branch in _inverse_cdf
-    result = strategy._inverse_cdf(0.5, cdf_points)
-    assert result == 20.0  # First point where p = 0.5
-
-
 def test_compute_poll_schedule_insufficient_cdf_points() -> None:
     """Test _compute_poll_schedule with insufficient CDF points."""
     # Single point observation creates only 2 time_grid points
@@ -543,12 +471,13 @@ def test_compute_poll_schedule_insufficient_cdf_points() -> None:
 
 
 def test_build_cdf_empty_observations() -> None:
-    """Test _build_cdf returns empty list with no observations."""
+    """Test _build_cdf returns empty arrays with no observations."""
     strategy = CDFPollingStrategy([])
 
-    cdf_points = strategy._build_cdf()
+    cdf_times, cdf_probs = strategy._build_cdf()
 
-    assert cdf_points == []
+    assert len(cdf_times) == 0
+    assert len(cdf_probs) == 0
 
 
 def test_build_cdf_single_point_time_grid() -> None:
@@ -558,47 +487,11 @@ def test_build_cdf_single_point_time_grid() -> None:
     # Manually set a degenerate observation that passed validation
     strategy._observations = [{"start": 10.0, "end": 10.0001}]
 
-    cdf_points = strategy._build_cdf()
+    cdf_times, cdf_probs = strategy._build_cdf()
 
     # Should still produce valid CDF with at least 2 points
-    assert len(cdf_points) >= 2
-
-
-def test_cdf_at_interpolation_same_point() -> None:
-    """Test _cdf_at when t falls exactly at a point where t0 == t1."""
-    strategy = CDFPollingStrategy()
-
-    # Create CDF points with a zero-width segment
-    cdf_points = [(10.0, 0.0), (10.0, 0.5), (20.0, 1.0)]
-
-    # Query at the duplicate point
-    result = strategy._cdf_at(10.0, cdf_points)
-    # Should return the first matching probability
-    assert result in {0.0, 0.5}
-
-
-def test_cdf_at_falls_through_all_segments() -> None:
-    """Test _cdf_at fallback when t doesn't match any segment."""
-    strategy = CDFPollingStrategy()
-
-    # Create CDF points
-    cdf_points = [(10.0, 0.0), (20.0, 0.5), (30.0, 1.0)]
-
-    # Query at a point that should be handled by "After last point" check
-    result = strategy._cdf_at(35.0, cdf_points)
-    assert result == 1.0
-
-
-def test_inverse_cdf_falls_through_all_segments() -> None:
-    """Test _inverse_cdf fallback when target_p doesn't match any segment."""
-    strategy = CDFPollingStrategy()
-
-    # Create CDF points with gaps
-    cdf_points = [(10.0, 0.0), (20.0, 0.5), (30.0, 1.0)]
-
-    # This should be handled by edge case checks
-    result = strategy._inverse_cdf(1.0, cdf_points)
-    assert result == 30.0
+    assert len(cdf_times) >= 2
+    assert len(cdf_probs) >= 2
 
 
 def test_record_observation_same_start_end() -> None:
@@ -611,127 +504,6 @@ def test_record_observation_same_start_end() -> None:
 
     # Should still have only 1 observation
     assert len(strategy.observations) == 1
-
-
-def test_cdf_at_zero_width_segment() -> None:
-    """Test _cdf_at with a zero-width segment in CDF (t1 == t0)."""
-    strategy = CDFPollingStrategy()
-
-    # Manually create CDF with a zero-width segment
-    # Query at t=15 which is between the first zero-width segment and the next
-    # The loop will iterate: first segment is (10.0, 10.0), check t0 <= 15 <= t1 = 10 <= 15 <= 10 = False
-    # So it won't match the first segment, will check second segment
-    cdf_points = [(10.0, 0.0), (10.0, 0.5), (20.0, 1.0)]
-
-    # Query at t=15 - should find it in the second segment (10.0, 20.0)
-    result = strategy._cdf_at(15.0, cdf_points)
-    assert 0.5 <= result <= 1.0
-
-
-def test_cdf_at_zero_width_segment_hit_branch() -> None:
-    """Test _cdf_at hits the t1 == t0 branch directly."""
-    strategy = CDFPollingStrategy()
-
-    # Create a CDF with a zero-width segment in the middle
-    # First we need t0 <= t <= t1 where t0 == t1
-    # At t=15, check segment (15.0, 15.0): 15 <= 15 <= 15 = True, and t1 == t0
-    cdf_points = [(10.0, 0.0), (15.0, 0.3), (15.0, 0.5), (20.0, 1.0)]
-
-    # Query at t=15 - hits the zero-width segment
-    result = strategy._cdf_at(15.0, cdf_points)
-    # Should return p0 = 0.3 because t1 == t0
-    assert result == 0.3
-
-
-def test_cdf_at_fallback_when_loop_exhausted() -> None:
-    """Test _cdf_at fallback when for loop doesn't find a matching segment."""
-    strategy = CDFPollingStrategy()
-
-    # Create CDF where t is in a gap that the loop doesn't catch
-    # This is a degenerate case - normally shouldn't happen
-    cdf_points: list[tuple[float, float]] = [(10.0, 0.0), (15.0, 0.5)]
-
-    # Query at t=12 - should be caught by the loop
-    result = strategy._cdf_at(12.0, cdf_points)
-    assert result >= 0.0
-
-
-def test_inverse_cdf_flat_probability_segment() -> None:
-    """Test _inverse_cdf with a flat probability segment (p1 == p0)."""
-    strategy = CDFPollingStrategy()
-
-    # Create CDF with a flat segment (same probability at different times)
-    # This represents a gap in the distribution
-    cdf_points = [(10.0, 0.0), (15.0, 0.5), (20.0, 0.5), (25.0, 1.0)]
-
-    # Query at p=0.5 which is a flat segment
-    result = strategy._inverse_cdf(0.5, cdf_points)
-    # Should return t0 of the flat segment
-    assert result == 15.0
-
-
-def test_inverse_cdf_hit_flat_segment_branch() -> None:
-    """Test _inverse_cdf hits the p1 == p0 branch directly."""
-    strategy = CDFPollingStrategy()
-
-    # Create CDF where we query a probability in a flat segment (p0 == p1)
-    # At p=0.5, segment (15.0, 0.5) to (20.0, 0.5): p0 <= 0.5 <= p1 = 0.5 <= 0.5 <= 0.5 = True
-    cdf_points = [(10.0, 0.0), (15.0, 0.5), (20.0, 0.5), (25.0, 1.0)]
-
-    # Query at p=0.5 - should hit the flat segment and return t0
-    result = strategy._inverse_cdf(0.5, cdf_points)
-    # Should return t0 = 15.0 because p1 == p0
-    assert result == 15.0
-
-
-def test_inverse_cdf_fallback_when_loop_exhausted() -> None:
-    """Test _inverse_cdf fallback when for loop doesn't find a matching segment."""
-    strategy = CDFPollingStrategy()
-
-    # Create a simple CDF
-    cdf_points = [(10.0, 0.0), (20.0, 1.0)]
-
-    # Query at p=0.5 - should be found in the loop
-    result = strategy._inverse_cdf(0.5, cdf_points)
-    assert 10.0 <= result <= 20.0
-
-
-def test_cdf_at_loop_fallback_with_non_contiguous_cdf() -> None:
-    """Test _cdf_at fallback with a non-contiguous CDF (gaps between segments).
-
-    This is a synthetic edge case - real CDFs are contiguous.
-    Creates a CDF with gaps where t doesn't fall in any segment.
-    """
-    strategy = CDFPollingStrategy()
-
-    # Create non-contiguous CDF: [10, 12] then gap then [15, 20]
-    # t=13 falls in the gap
-    cdf_points = [(10.0, 0.0), (12.0, 0.3), (15.0, 0.5), (20.0, 1.0)]
-
-    # Query at t=13.5 - falls between segments
-    # Loop checks: 10 <= 13.5 <= 12? No. 12 <= 13.5 <= 15? Yes! This returns.
-    # So this won't hit the fallback.
-    # We need segments that truly have gaps where no segment contains t
-    # Actually, the segments are contiguous by the way we define them (each pair forms a segment)
-    # So the loop covers (10,12), (12,15), (15,20) - no gaps
-    result = strategy._cdf_at(13.5, cdf_points)
-    assert 0.3 <= result <= 0.5
-
-
-def test_inverse_cdf_loop_fallback_with_gaps() -> None:
-    """Test _inverse_cdf fallback with gaps in probability space.
-
-    Creates a CDF where target_p falls between segment probabilities.
-    """
-    strategy = CDFPollingStrategy()
-
-    # Create CDF: (10, 0.0) -> (15, 0.3) -> (20, 0.8) -> (25, 1.0)
-    # Segments have p ranges: [0, 0.3], [0.3, 0.8], [0.8, 1.0]
-    cdf_points = [(10.0, 0.0), (15.0, 0.3), (20.0, 0.8), (25.0, 1.0)]
-
-    # Query at p=0.5 - falls in second segment [0.3, 0.8]
-    result = strategy._inverse_cdf(0.5, cdf_points)
-    assert 15.0 <= result <= 20.0
 
 
 # Tests for uniform blending behavior
