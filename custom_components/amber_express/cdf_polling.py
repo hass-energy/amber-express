@@ -269,12 +269,12 @@ class CDFPollingStrategy:
 
         blend_weight = self._compute_blend_weight()
 
-        if blend_weight <= 0 and reset_seconds is not None:
+        if blend_weight <= 0 and reset_seconds is not None and reset_seconds > 0:
             # Pure uniform distribution - use only the synthetic observation
             uniform_start = condition_on_elapsed or 0.0
             uniform_end = uniform_start + reset_seconds
             cdf_times, cdf_probs = build_cdf([{"start": uniform_start, "end": uniform_end}])
-        elif blend_weight < 1.0 and reset_seconds is not None:
+        elif blend_weight < 1.0 and reset_seconds is not None and reset_seconds > 0:
             # Blend by adding synthetic uniform observation with proportional weight
             uniform_start = condition_on_elapsed or 0.0
             uniform_end = uniform_start + reset_seconds

@@ -272,9 +272,9 @@ class SmartPollingManager:
 
         if self._cdf_strategy.scheduled_polls != old_schedule:
             _LOGGER.debug(
-                "Budget updated: k=%d, reset=%ds, schedule: %s",
+                "Budget updated: k=%d, reset=%.1fs, schedule: %s",
                 polls_per_interval,
-                rate_limit_info["reset_seconds"],
+                elapsed + rate_limit_info["reset_seconds"],
                 [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
             )
 
