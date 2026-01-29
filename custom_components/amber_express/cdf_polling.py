@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from .cdf_algorithm import IntervalObservation, build_cdf, compute_blend_weight, compute_poll_times
+from .cdf_algorithm import IntervalObservation, build_cdf, compute_poll_times
 from .cdf_cold_start import COLD_START_OBSERVATIONS
 
 # Re-export for backwards compatibility
@@ -232,34 +232,69 @@ class CDFPollingStrategy:
 
         return cdf_times, cdf_probs
 
+    def _compute_blend_weight(self) -> float:
+        """Compute weight for blending targeted CDF vs uniform distribution.
+
+        Returns:
+            Weight in [0.0, 1.0] for targeted CDF contribution.
+            1.0 = pure targeted CDF, 0.0 = pure uniform distribution.
+
+        """
+        if self._quota is None:
+            return 1.0
+
+        k = self._polls_per_interval
+        k_high = int(self._quota * self.UNIFORM_BLEND_FRACTION_HIGH)
+        k_low = int(self._quota * self.UNIFORM_BLEND_FRACTION_LOW)
+
+        if k >= k_high:
+            return 1.0
+        if k <= k_low:
+            return 0.0
+        return (k - k_low) / (k_high - k_low)
+
     def _recompute_schedule(
         self,
         condition_on_elapsed: float | None = None,
         reset_seconds: int | None = None,
     ) -> None:
-        """Recompute poll schedule using pure algorithm functions."""
+        """Recompute poll schedule using pure algorithm functions.
+
+        When poll budget is low, blends the targeted CDF with a uniform distribution
+        by adding a synthetic uniform observation with appropriate weight.
+        """
         if not self._observations:
             self._scheduled_polls = []
             return
 
-        cdf_times, cdf_probs = self._build_cdf()
+        blend_weight = self._compute_blend_weight()
+
+        if blend_weight <= 0 and reset_seconds is not None:
+            # Pure uniform distribution - use only the synthetic observation
+            uniform_start = condition_on_elapsed or 0.0
+            uniform_end = uniform_start + reset_seconds
+            cdf_times, cdf_probs = build_cdf([{"start": uniform_start, "end": uniform_end}])
+        elif blend_weight < 1.0 and reset_seconds is not None:
+            # Blend by adding synthetic uniform observation with proportional weight
+            uniform_start = condition_on_elapsed or 0.0
+            uniform_end = uniform_start + reset_seconds
+            total_targeted_weight = sum(obs.get("weight", 1.0) for obs in self._observations)
+            uniform_weight = total_targeted_weight * (1 - blend_weight) / blend_weight
+            augmented: list[IntervalObservation] = [
+                *self._observations,
+                {"start": uniform_start, "end": uniform_end, "weight": uniform_weight},
+            ]
+            cdf_times, cdf_probs = build_cdf(augmented)
+        else:
+            cdf_times, cdf_probs = self._build_cdf()
 
         if len(cdf_times) == 0:
             self._scheduled_polls = []
             return
-
-        blend_weight = compute_blend_weight(
-            self._polls_per_interval,
-            self._quota,
-            fraction_high=self.UNIFORM_BLEND_FRACTION_HIGH,
-            fraction_low=self.UNIFORM_BLEND_FRACTION_LOW,
-        )
 
         self._scheduled_polls = compute_poll_times(
             cdf_times,
             cdf_probs,
             self._polls_per_interval,
             condition_on_elapsed=condition_on_elapsed,
-            reset_seconds=reset_seconds,
-            blend_weight=blend_weight,
         )

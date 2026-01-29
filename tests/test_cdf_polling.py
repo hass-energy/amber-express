@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
-from custom_components.amber_express.cdf_algorithm import build_cdf, compute_blend_weight
+from custom_components.amber_express.cdf_algorithm import build_cdf
 from custom_components.amber_express.cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
 
 
@@ -496,8 +497,6 @@ def test_build_cdf_with_weights() -> None:
     cdf_times, cdf_probs = build_cdf(observations)
 
     # CDF should reach 0.75 at t=20 (end of obs1) and 1.0 at t=40
-    import numpy as np
-
     prob_at_20 = float(np.interp(20.0, cdf_times, cdf_probs))
     prob_at_40 = float(np.interp(40.0, cdf_times, cdf_probs))
 
@@ -516,8 +515,6 @@ def test_build_cdf_weights_default_to_one() -> None:
     cdf_times, cdf_probs = build_cdf(observations)
 
     # Both should contribute equally (50% each)
-    import numpy as np
-
     prob_at_20 = float(np.interp(20.0, cdf_times, cdf_probs))
     prob_at_40 = float(np.interp(40.0, cdf_times, cdf_probs))
 
@@ -542,34 +539,49 @@ def test_record_observation_same_start_end() -> None:
 
 def test_compute_blend_weight_at_k_high() -> None:
     """Test blend weight is 1.0 when k >= K_HIGH."""
-    # With quota=50 and fraction_high=0.3: K_HIGH = 15
-    # At or above K_HIGH, weight should be 1.0 (pure targeted)
-    assert compute_blend_weight(15, quota=50, fraction_high=0.3, fraction_low=0.2) == 1.0
-    assert compute_blend_weight(50, quota=50, fraction_high=0.3, fraction_low=0.2) == 1.0
-    assert compute_blend_weight(100, quota=50, fraction_high=0.3, fraction_low=0.2) == 1.0
+    strategy = CDFPollingStrategy()
+    strategy._quota = 50  # K_HIGH = 0.3 * 50 = 15
+
+    # At or above K_HIGH (15), weight should be 1.0 (pure targeted)
+    strategy._polls_per_interval = 15
+    assert strategy._compute_blend_weight() == 1.0
+    strategy._polls_per_interval = 50
+    assert strategy._compute_blend_weight() == 1.0
+    strategy._polls_per_interval = 100
+    assert strategy._compute_blend_weight() == 1.0
 
 
 def test_compute_blend_weight_at_k_low() -> None:
     """Test blend weight is 0.0 when k <= K_LOW."""
-    # With quota=50 and fraction_low=0.2: K_LOW = 10
-    # At or below K_LOW, weight should be 0.0 (pure uniform)
-    assert compute_blend_weight(10, quota=50, fraction_high=0.3, fraction_low=0.2) == 0.0
-    assert compute_blend_weight(5, quota=50, fraction_high=0.3, fraction_low=0.2) == 0.0
-    assert compute_blend_weight(0, quota=50, fraction_high=0.3, fraction_low=0.2) == 0.0
+    strategy = CDFPollingStrategy()
+    strategy._quota = 50  # K_LOW = 0.2 * 50 = 10
+
+    # At or below K_LOW (10), weight should be 0.0 (pure uniform)
+    strategy._polls_per_interval = 10
+    assert strategy._compute_blend_weight() == 0.0
+    strategy._polls_per_interval = 5
+    assert strategy._compute_blend_weight() == 0.0
+    strategy._polls_per_interval = 0
+    assert strategy._compute_blend_weight() == 0.0
 
 
 def test_compute_blend_weight_linear_interpolation() -> None:
     """Test blend weight interpolates linearly between K_LOW and K_HIGH."""
-    # With quota=100, fraction_high=0.3, fraction_low=0.2:
-    # K_HIGH = 30, K_LOW = 20
+    strategy = CDFPollingStrategy()
+    # With quota=100: K_HIGH = 0.3 * 100 = 30, K_LOW = 0.2 * 100 = 20
+    strategy._quota = 100
+
     # k=25 is midpoint between 20 and 30
-    assert compute_blend_weight(25, quota=100, fraction_high=0.3, fraction_low=0.2) == 0.5
+    strategy._polls_per_interval = 25
+    assert strategy._compute_blend_weight() == 0.5
 
     # k=22 is 2/10 of the way (22-20)/(30-20) = 0.2
-    assert abs(compute_blend_weight(22, quota=100, fraction_high=0.3, fraction_low=0.2) - 0.2) < 0.01
+    strategy._polls_per_interval = 22
+    assert abs(strategy._compute_blend_weight() - 0.2) < 0.01
 
     # k=28 is 8/10 of the way (28-20)/(30-20) = 0.8
-    assert abs(compute_blend_weight(28, quota=100, fraction_high=0.3, fraction_low=0.2) - 0.8) < 0.01
+    strategy._polls_per_interval = 28
+    assert abs(strategy._compute_blend_weight() - 0.8) < 0.01
 
 
 def test_update_budget_pure_targeted_at_high_k() -> None:
