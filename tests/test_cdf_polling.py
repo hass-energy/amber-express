@@ -482,6 +482,49 @@ def test_build_cdf_single_observation() -> None:
     assert len(cdf_probs) >= 2
 
 
+def test_build_cdf_with_weights() -> None:
+    """Test build_cdf respects observation weights."""
+    # Two observations with equal intervals but different weights
+    # obs1: [10, 20] with weight 3
+    # obs2: [30, 40] with weight 1
+    # Total weight = 4, so obs1 contributes 75% and obs2 contributes 25%
+    observations: list[IntervalObservation] = [
+        {"start": 10.0, "end": 20.0, "weight": 3.0},
+        {"start": 30.0, "end": 40.0, "weight": 1.0},
+    ]
+
+    cdf_times, cdf_probs = build_cdf(observations)
+
+    # CDF should reach 0.75 at t=20 (end of obs1) and 1.0 at t=40
+    import numpy as np
+
+    prob_at_20 = float(np.interp(20.0, cdf_times, cdf_probs))
+    prob_at_40 = float(np.interp(40.0, cdf_times, cdf_probs))
+
+    assert abs(prob_at_20 - 0.75) < 0.01
+    assert abs(prob_at_40 - 1.0) < 0.01
+
+
+def test_build_cdf_weights_default_to_one() -> None:
+    """Test that observations without weight field default to weight 1.0."""
+    # Mix of weighted and unweighted observations
+    observations: list[IntervalObservation] = [
+        {"start": 10.0, "end": 20.0},  # No weight, defaults to 1.0
+        {"start": 30.0, "end": 40.0, "weight": 1.0},  # Explicit weight 1.0
+    ]
+
+    cdf_times, cdf_probs = build_cdf(observations)
+
+    # Both should contribute equally (50% each)
+    import numpy as np
+
+    prob_at_20 = float(np.interp(20.0, cdf_times, cdf_probs))
+    prob_at_40 = float(np.interp(40.0, cdf_times, cdf_probs))
+
+    assert abs(prob_at_20 - 0.5) < 0.01
+    assert abs(prob_at_40 - 1.0) < 0.01
+
+
 def test_record_observation_same_start_end() -> None:
     """Test that recording observation with start == end is ignored."""
     observations: list[IntervalObservation] = [{"start": 10.0, "end": 20.0}]
