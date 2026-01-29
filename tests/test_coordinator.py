@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from amberelectric.models import Interval
 from amberelectric.models.channel_type import ChannelType
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
@@ -39,14 +38,7 @@ from custom_components.amber_express.const import (
 from custom_components.amber_express.coordinator import AmberDataCoordinator
 from custom_components.amber_express.smart_polling import SmartPollingManager
 from custom_components.amber_express.types import RateLimitInfo
-from tests.conftest import (
-    make_current_interval,
-    make_forecast_interval,
-    make_rate_limit_headers,
-    make_site,
-    wrap_api_response,
-    wrap_interval,
-)
+from tests.conftest import make_current_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
 
 
 def create_mock_subentry_for_coordinator(

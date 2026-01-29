@@ -86,8 +86,10 @@ class TestShouldPoll:
         # With cdf_budget=4 and reset=300, uniform_polls_needed = ceil(300/30) = 10
         # Since 4 <= 10, uses pure uniform: 4 polls at 60, 120, 180, 240 + forced at 300
 
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime, \
-             patch("custom_components.amber_express.cdf_polling.datetime") as mock_cdf_datetime:
+        with (
+            patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime,
+            patch("custom_components.amber_express.cdf_polling.datetime") as mock_cdf_datetime,
+        ):
             base_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             mock_datetime.now.return_value = base_time
             mock_cdf_datetime.now.return_value = base_time
@@ -343,7 +345,13 @@ class TestRateLimitBasedPolling:
             # Time passes, budget shrinks to 15 (10 after buffer)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
             manager.update_budget(
-                {"limit": 50, "remaining": 15, "reset_at": datetime.now(UTC) + timedelta(seconds=285), "window_seconds": 300, "policy": "50;w=300"}
+                {
+                    "limit": 50,
+                    "remaining": 15,
+                    "reset_at": datetime.now(UTC) + timedelta(seconds=285),
+                    "window_seconds": 300,
+                    "policy": "50;w=300",
+                }
             )
 
             # k=10 total: 9 CDF polls + 1 forced at interval end = 10 total
@@ -482,7 +490,13 @@ class TestUpdateBudgetEdgeCases:
 
         # Should not crash
         manager.update_budget(
-            {"limit": 50, "remaining": 10, "reset_at": datetime.now(UTC) + timedelta(seconds=300), "window_seconds": 300, "policy": "50;w=300"}
+            {
+                "limit": 50,
+                "remaining": 10,
+                "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+                "window_seconds": 300,
+                "policy": "50;w=300",
+            }
         )
 
 
