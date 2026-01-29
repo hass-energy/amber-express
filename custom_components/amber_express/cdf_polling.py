@@ -272,26 +272,20 @@ class CDFPollingStrategy:
                 ]
                 cdf_times, cdf_probs = build_cdf(augmented)
 
-            if len(cdf_times) == 0:
-                self._scheduled_polls = []
-            else:
-                self._scheduled_polls = sample_quantiles(
-                    cdf_times,
-                    cdf_probs,
-                    cdf_budget,
-                    condition_above=condition_on_elapsed,
-                )
+            self._scheduled_polls = sample_quantiles(
+                cdf_times,
+                cdf_probs,
+                cdf_budget,
+                condition_above=condition_on_elapsed,
+            )
         else:
             cdf_times, cdf_probs = self._build_cdf()
-            if len(cdf_times) == 0:
-                self._scheduled_polls = []
-            else:
-                self._scheduled_polls = sample_quantiles(
-                    cdf_times,
-                    cdf_probs,
-                    cdf_budget,
-                    condition_above=condition_on_elapsed,
-                )
+            self._scheduled_polls = sample_quantiles(
+                cdf_times,
+                cdf_probs,
+                cdf_budget,
+                condition_above=condition_on_elapsed,
+            )
 
         # Merge forced polls into schedule (deduplicate and sort)
         if forced_polls:

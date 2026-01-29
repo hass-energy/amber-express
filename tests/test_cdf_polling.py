@@ -524,6 +524,21 @@ def test_record_observation_same_start_end() -> None:
     assert len(strategy.observations) == 1
 
 
+def test_record_observation_grows_when_under_window_size() -> None:
+    """Test that recording grows observation count when under WINDOW_SIZE."""
+    # Start with 5 observations (under WINDOW_SIZE of 100)
+    observations: list[IntervalObservation] = [{"start": float(i), "end": float(i + 1)} for i in range(5)]
+    strategy = CDFPollingStrategy(observations)
+
+    assert len(strategy.observations) == 5
+
+    # Record a valid observation - should grow to 6
+    strategy.record_observation(start=10.0, end=15.0)
+
+    assert len(strategy.observations) == 6
+    assert strategy.observations[-1] == {"start": 10.0, "end": 15.0}
+
+
 # Tests for sample-rate-based uniform blending
 
 
@@ -568,3 +583,16 @@ def test_update_budget_blends_uniform_with_targeted() -> None:
     # Some polls should extend beyond the targeted distribution [15, 45]
     # due to uniform influence (from 10 to 10+150=160)
     assert any(t > 45.0 for t in strategy.scheduled_polls)
+
+
+def test_update_budget_includes_reset_time_as_forced_poll() -> None:
+    """Test that reset time is included as a forced poll when before next interval."""
+    strategy = CDFPollingStrategy()
+    strategy.update_budget(4, 0, 0, 0)
+
+    # Set elapsed=10, reset in 50s (at t=60), next interval at t=120
+    # Reset time (60) < interval (120), so reset should be added as forced poll
+    strategy.update_budget(polls_per_interval=4, elapsed_seconds=10.0, reset_seconds=50, interval_seconds=120)
+
+    # Reset time (10 + 50 = 60) should be in the schedule
+    assert 60.0 in strategy.scheduled_polls
