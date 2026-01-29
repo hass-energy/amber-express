@@ -71,12 +71,18 @@ class CDFPollingStrategy:
         self._cdf_times: NDArray[np.float64] | None = None
         self._cdf_probs: NDArray[np.float64] | None = None
 
-    def start_interval(self, polls_per_interval: int | None = None) -> None:
+    def start_interval(
+        self,
+        polls_per_interval: int | None = None,
+        reset_seconds: int | None = None,
+    ) -> None:
         """Reset state for a new interval.
 
         Args:
             polls_per_interval: Number of confirmatory polls to schedule.
                 If None, uses the previous value (or default on first call).
+            reset_seconds: Seconds until rate limit quota resets.
+                If provided, enables uniform distribution blending.
 
         """
         self._next_poll_index = 0
@@ -85,8 +91,8 @@ class CDFPollingStrategy:
         # Update polls per interval if provided
         if polls_per_interval is not None:
             self._polls_per_interval = polls_per_interval
-            # Recompute schedule with new k
-            self._recompute_schedule()
+            # Recompute schedule with new k and optional reset info
+            self._recompute_schedule(reset_seconds=reset_seconds)
 
     def update_budget(
         self,

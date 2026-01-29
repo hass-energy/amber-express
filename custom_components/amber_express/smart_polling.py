@@ -112,12 +112,14 @@ class SmartPollingManager:
         self._poll_count_this_interval = 0
         self._last_estimate_elapsed = None
 
-        # Calculate optimal k from rate limit info
+        # Calculate optimal k and reset_seconds from rate limit info
         polls_per_interval = None
+        reset_seconds = None
         if rate_limit_info:
             polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
+            reset_seconds = rate_limit_info["reset_seconds"]
 
-        self._cdf_strategy.start_interval(polls_per_interval)
+        self._cdf_strategy.start_interval(polls_per_interval, reset_seconds)
 
         if is_first_run:
             _LOGGER.debug("First poll - fetching initial data")

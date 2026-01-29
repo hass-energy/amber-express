@@ -123,6 +123,8 @@ class TestShouldPoll:
         """Test that polling uses CDF scheduled times after first poll."""
         manager = SmartPollingManager(5)
         # remaining=10 gives us 5 polls after the buffer of 5 is subtracted
+        # With k=5 and reset=300, uniform_polls_needed = ceil(300/30) = 10
+        # Since k=5 <= 10, uses pure uniform: polls at 50, 100, 150, 200, 250
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 10,
@@ -138,13 +140,13 @@ class TestShouldPoll:
             result1 = manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
             assert result1 is True
 
-            # 5 seconds later - before first scheduled poll at 21s
+            # 5 seconds later - before first scheduled poll at 50s
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
             result2 = manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
             assert result2 is False  # Not yet time
 
-            # 21 seconds - first scheduled poll (cold start: 21, 27, 33, 39)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 21, tzinfo=UTC)
+            # 50 seconds - first scheduled poll (uniform: 50, 100, 150, 200, 250)
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 50, tzinfo=UTC)
             result3 = manager.should_poll(has_data=True, rate_limit_info=rate_limit_info)
             assert result3 is True  # Time to poll
 
