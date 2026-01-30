@@ -8,5 +8,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/hass-energy/amber-express/issues",
   "requirements": ["amberelectric>=2.0.12", "http-sf>=1.1.1", "numpy>=2.2.0"],
-  "version": "0.2.0rc1"
+  "version": "0.2.0rc3"
 }
