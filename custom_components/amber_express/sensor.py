@@ -325,6 +325,7 @@ class AmberPriceSensor(AmberBaseSensor):
                     value += demand_window_price
                 forecast_list.append({"time": time_value, "value": value})
         attrs["forecast"] = forecast_list
+        attrs["interpolation_mode"] = "previous"
 
         return {k: v for k, v in attrs.items() if v is not None}
 
