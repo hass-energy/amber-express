@@ -457,12 +457,19 @@ def test_get_stats_with_empty_observations() -> None:
 
 
 def test_recompute_schedule_with_empty_observations() -> None:
-    """Test schedule recomputation with empty observations."""
+    """Test schedule recomputation with empty observations only includes forced polls."""
     strategy = CDFPollingStrategy([])
     strategy._polls_per_interval = 4
-    strategy._recompute_schedule()
+    strategy._recompute_schedule(
+        condition_on_elapsed=0.0,
+        reset_at=_reset_at(300),
+        interval_seconds=300,
+    )
 
-    assert strategy._scheduled_polls == []
+    # With empty observations, no CDF-based polls are scheduled,
+    # but forced polls at boundaries are still included
+    assert len(strategy._scheduled_polls) == 2
+    assert strategy._scheduled_polls[-1] == 300.0  # interval boundary
 
 
 def test_build_cdf_empty_observations() -> None:

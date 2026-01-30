@@ -843,7 +843,7 @@ class TestAmberPollingStatsSensor:
 
         attrs = sensor.extra_state_attributes
 
-        assert attrs["scheduled_polls"] == [21.0, 27.0, 33.0, 39.0]
+        assert attrs["poll_schedule"] == [21.0, 27.0, 33.0, 39.0]
         assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
         assert attrs["observation_count"] == 100
         assert attrs["last_estimate_elapsed"] == 15.0
@@ -878,7 +878,7 @@ class TestAmberPollingStatsSensor:
         attrs = sensor.extra_state_attributes
 
         # Should still have base attributes
-        assert attrs["scheduled_polls"] == [21.0, 27.0]
+        assert attrs["poll_schedule"] == [21.0, 27.0]
         assert attrs["poll_count"] == 1
         assert attrs["observation_count"] == 0
         # Should not have elapsed attributes

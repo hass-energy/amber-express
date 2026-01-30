@@ -192,10 +192,9 @@ class SmartPollingManager:
                     end=confirmed_elapsed,
                 )
                 _LOGGER.debug(
-                    "Recorded observation [%.1fs, %.1fs], next polls: %s",
+                    "Recorded observation [%.1fs, %.1fs]",
                     self._last_estimate_elapsed,
                     confirmed_elapsed,
-                    [f"{t:.1f}s" for t in self._cdf_strategy.scheduled_polls],
                 )
             else:
                 _LOGGER.debug(
