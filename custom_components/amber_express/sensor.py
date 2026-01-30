@@ -324,6 +324,7 @@ class AmberPriceSensor(AmberBaseSensor):
                 if value is not None and self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
                     value += demand_window_price
                 forecast_list.append({"time": time_value, "value": value})
+        attrs["interpolation_mode"] = "previous"
         attrs["forecast"] = forecast_list
 
         return {k: v for k, v in attrs.items() if v is not None}
