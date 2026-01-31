@@ -186,6 +186,12 @@ class CDFPollingStrategy:
         """Get the currently scheduled poll times."""
         return self._scheduled_polls.copy()
 
+    def get_next_poll_seconds(self) -> float | None:
+        """Get the next scheduled poll time in seconds from interval start."""
+        if self._next_poll_index >= len(self._scheduled_polls):
+            return None
+        return self._scheduled_polls[self._next_poll_index]
+
     @property
     def observations(self) -> list[IntervalObservation]:
         """Get the current observations (for persistence)."""

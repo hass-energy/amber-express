@@ -98,6 +98,7 @@ class TestShouldPoll:
             rate_limit_info: RateLimitInfo = {
                 "limit": 50,
                 "remaining": 10,
+                "reset_seconds": 300,
                 "reset_at": base_time + timedelta(seconds=300),
                 "window_seconds": 300,
                 "policy": "50;w=300",
@@ -223,6 +224,7 @@ class TestGetCDFStats:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 9,
+            "reset_seconds": 300,
             "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
@@ -273,6 +275,7 @@ class TestRateLimitBasedPolling:
         base_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 45,
+            "reset_seconds": 300,
             "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
@@ -308,6 +311,7 @@ class TestRateLimitBasedPolling:
                 {
                     "limit": 50,
                     "remaining": 45,
+                    "reset_seconds": 300,
                     "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                     "window_seconds": 300,
                     "policy": "50;w=300",
@@ -335,6 +339,7 @@ class TestRateLimitBasedPolling:
                 {
                     "limit": 50,
                     "remaining": 45,
+                    "reset_seconds": 300,
                     "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                     "window_seconds": 300,
                     "policy": "50;w=300",
@@ -348,6 +353,7 @@ class TestRateLimitBasedPolling:
                 {
                     "limit": 50,
                     "remaining": 15,
+                    "reset_seconds": 285,
                     "reset_at": datetime.now(UTC) + timedelta(seconds=285),
                     "window_seconds": 300,
                     "policy": "50;w=300",
@@ -388,6 +394,7 @@ class TestGetNextPollDelay:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 9,
+            "reset_seconds": 300,
             "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
@@ -493,6 +500,7 @@ class TestUpdateBudgetEdgeCases:
             {
                 "limit": 50,
                 "remaining": 10,
+                "reset_seconds": 300,
                 "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                 "window_seconds": 300,
                 "policy": "50;w=300",
@@ -543,6 +551,7 @@ class TestCheckNewInterval:
                 {
                     "limit": 50,
                     "remaining": 15,
+                    "reset_seconds": 300,
                     "reset_at": datetime.now(UTC) + timedelta(seconds=300),
                     "window_seconds": 300,
                     "policy": "50;w=300",

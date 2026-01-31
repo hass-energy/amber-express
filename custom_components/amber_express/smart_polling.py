@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 
 from .cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
@@ -162,6 +162,22 @@ class SmartPollingManager:
         now = datetime.now(UTC)
         elapsed = (now - self._current_interval_start).total_seconds()
         return self._cdf_strategy.get_next_poll_delay(elapsed)
+
+    def get_next_poll_time(self) -> datetime | None:
+        """Get the absolute timestamp of the next scheduled poll."""
+        if self._current_interval_start is None:
+            return None
+
+        # If we have confirmed price or no more polls scheduled, next poll is at next interval
+        if self._has_confirmed_price:
+            return self._current_interval_start + timedelta(minutes=self._interval_length)
+
+        next_poll_seconds = self._cdf_strategy.get_next_poll_seconds()
+        if next_poll_seconds is None:
+            # No more polls scheduled this interval, next poll is at next interval
+            return self._current_interval_start + timedelta(minutes=self._interval_length)
+
+        return self._current_interval_start + timedelta(seconds=next_poll_seconds)
 
     def on_poll_started(self) -> None:
         """Record that a poll has started."""

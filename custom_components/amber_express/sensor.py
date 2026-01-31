@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
@@ -167,6 +168,33 @@ def _add_site_sensors(
         # Confirmation lag sensor
         entities.append(
             AmberConfirmationLagSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
+        # Rate limit remaining sensor (disabled by default)
+        entities.append(
+            AmberRateLimitRemainingSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
+        # Rate limit reset sensor (disabled by default)
+        entities.append(
+            AmberRateLimitResetSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
+        # Next poll sensor (disabled by default)
+        entities.append(
+            AmberNextPollSensor(
                 coordinator=coordinator,
                 entry=entry,
                 subentry=subentry,
@@ -531,22 +559,6 @@ class AmberPollingStatsSensor(AmberBaseSensor):
             return stats.last_observation["end"]
         return None
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return polling statistics as attributes."""
-        stats = self.coordinator.get_cdf_polling_stats()
-        attrs: dict[str, Any] = {
-            "poll_schedule": [round(t, 1) for t in stats.scheduled_polls],
-            "poll_count": stats.confirmatory_poll_count + 1,
-            "observation_count": stats.observation_count,
-        }
-
-        if stats.last_observation is not None:
-            attrs["last_estimate_elapsed"] = round(stats.last_observation["start"], 1)
-            attrs["last_confirmed_elapsed"] = round(stats.last_observation["end"], 1)
-
-        return attrs
-
 
 class AmberConfirmationLagSensor(AmberBaseSensor):
     """Sensor for time gap between estimate poll and confirmed poll.
@@ -621,4 +633,87 @@ class AmberApiStatusSensor(AmberBaseSensor):
             "rate_limit_reset_at": rate_limit.get("reset_at").isoformat() if rate_limit.get("reset_at") else None,
             "rate_limit_window_seconds": rate_limit.get("window_seconds"),
             "rate_limit_policy": rate_limit.get("policy"),
+        }
+
+
+class AmberRateLimitRemainingSensor(AmberBaseSensor):
+    """Sensor for remaining API requests in the current rate limit window."""
+
+    _attr_native_unit_of_measurement = "requests"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the rate limit remaining sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_rate_limit_remaining"
+        self._attr_translation_key = "rate_limit_remaining"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the remaining API requests."""
+        rate_limit = self.coordinator.get_rate_limit_info()
+        return rate_limit.get("remaining")
+
+
+class AmberRateLimitResetSensor(AmberBaseSensor):
+    """Sensor for when the rate limit window resets."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the rate limit reset sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_rate_limit_reset"
+        self._attr_translation_key = "rate_limit_reset"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the timestamp when rate limit resets."""
+        rate_limit = self.coordinator.get_rate_limit_info()
+        return rate_limit.get("reset_at")
+
+
+class AmberNextPollSensor(AmberBaseSensor):
+    """Sensor for when the next API poll will occur."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the next poll sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_next_poll"
+        self._attr_translation_key = "next_poll"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the timestamp of the next scheduled poll."""
+        return self.coordinator.get_next_poll_time()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return poll schedule as attributes."""
+        stats = self.coordinator.get_cdf_polling_stats()
+        return {
+            "poll_schedule": [round(t, 1) for t in stats.scheduled_polls],
+            "poll_count": stats.confirmatory_poll_count + 1,
         }

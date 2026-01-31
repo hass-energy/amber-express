@@ -36,8 +36,11 @@ from custom_components.amber_express.sensor import (
     AmberApiStatusSensor,
     AmberConfirmationLagSensor,
     AmberDetailedPriceSensor,
+    AmberNextPollSensor,
     AmberPollingStatsSensor,
     AmberPriceSensor,
+    AmberRateLimitRemainingSensor,
+    AmberRateLimitResetSensor,
     AmberRenewablesSensor,
     AmberSiteSensor,
     async_setup_entry,
@@ -671,8 +674,9 @@ class TestAsyncSetupEntry:
 
         # With general and feed_in enabled, we should have:
         # 2 channels x 2 sensors (price, detailed price) = 4
-        # + renewables + site + polling_stats + api_status + confirmation_lag = 9
-        assert len(added_entities) == 9
+        # + renewables + site + polling_stats + api_status + confirmation_lag
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 12
+        assert len(added_entities) == 12
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -711,8 +715,9 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only general channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag = 7
-        assert len(added_entities) == 7
+        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
+        assert len(added_entities) == 10
 
     async def test_setup_entry_controlled_load_channel(
         self,
@@ -751,8 +756,9 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only controlled load channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag = 7
-        assert len(added_entities) == 7
+        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
+        assert len(added_entities) == 10
 
 
 class TestAmberPollingStatsSensor:
@@ -814,76 +820,6 @@ class TestAmberPollingStatsSensor:
         )
 
         assert sensor.native_value is None
-
-    def test_polling_stats_sensor_extra_state_attributes(
-        self,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test polling stats sensor extra attributes."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
-
-        coordinator = MagicMock()
-        coordinator.get_cdf_polling_stats = MagicMock(
-            return_value=CDFPollingStats(
-                observation_count=100,
-                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
-                next_poll_index=2,
-                confirmatory_poll_count=2,
-                polls_per_interval=4,
-                last_observation={"start": 15.0, "end": 27.5},
-            )
-        )
-
-        sensor = AmberPollingStatsSensor(
-            coordinator=coordinator,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        attrs = sensor.extra_state_attributes
-
-        assert attrs["poll_schedule"] == [21.0, 27.0, 33.0, 39.0]
-        assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
-        assert attrs["observation_count"] == 100
-        assert attrs["last_estimate_elapsed"] == 15.0
-        assert attrs["last_confirmed_elapsed"] == 27.5
-
-    def test_polling_stats_sensor_attributes_no_observation(
-        self,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test polling stats sensor attributes when no observation."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
-
-        coordinator = MagicMock()
-        coordinator.get_cdf_polling_stats = MagicMock(
-            return_value=CDFPollingStats(
-                observation_count=0,
-                scheduled_polls=[21.0, 27.0],
-                next_poll_index=0,
-                confirmatory_poll_count=0,
-                polls_per_interval=2,
-                last_observation=None,
-            )
-        )
-
-        sensor = AmberPollingStatsSensor(
-            coordinator=coordinator,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        attrs = sensor.extra_state_attributes
-
-        # Should still have base attributes
-        assert attrs["poll_schedule"] == [21.0, 27.0]
-        assert attrs["poll_count"] == 1
-        assert attrs["observation_count"] == 0
-        # Should not have elapsed attributes
-        assert "last_estimate_elapsed" not in attrs
-        assert "last_confirmed_elapsed" not in attrs
 
 
 class TestAmberConfirmationLagSensor:
@@ -1131,3 +1067,263 @@ class TestAmberApiStatusSensor:
         assert AmberApiStatusSensor._get_http_status_label(500) == "Internal Server Error"
         assert AmberApiStatusSensor._get_http_status_label(502) == "Bad Gateway"
         assert AmberApiStatusSensor._get_http_status_label(503) == "Service Unavailable"
+
+
+class TestAmberRateLimitRemainingSensor:
+    """Tests for AmberRateLimitRemainingSensor."""
+
+    def test_rate_limit_remaining_sensor_init(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit remaining sensor initialization."""
+        sensor = AmberRateLimitRemainingSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_rate_limit_remaining"
+        assert sensor._attr_translation_key == "rate_limit_remaining"
+        assert sensor._attr_native_unit_of_measurement == "requests"
+
+    def test_rate_limit_remaining_sensor_is_diagnostic(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit remaining sensor is a diagnostic entity."""
+        from homeassistant.const import EntityCategory  # noqa: PLC0415
+
+        sensor = AmberRateLimitRemainingSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_rate_limit_remaining_sensor_disabled_by_default(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit remaining sensor is disabled by default."""
+        sensor = AmberRateLimitRemainingSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_registry_enabled_default is False
+
+    def test_rate_limit_remaining_sensor_native_value(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit remaining sensor returns correct value."""
+        sensor = AmberRateLimitRemainingSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == 45
+
+    def test_rate_limit_remaining_sensor_no_data(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit remaining sensor with no rate limit data."""
+        coordinator = MagicMock()
+        coordinator.get_rate_limit_info = MagicMock(return_value={})
+
+        sensor = AmberRateLimitRemainingSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
+
+
+class TestAmberRateLimitResetSensor:
+    """Tests for AmberRateLimitResetSensor."""
+
+    def test_rate_limit_reset_sensor_init(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit reset sensor initialization."""
+        from homeassistant.components.sensor import SensorDeviceClass  # noqa: PLC0415
+
+        sensor = AmberRateLimitResetSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_rate_limit_reset"
+        assert sensor._attr_translation_key == "rate_limit_reset"
+        assert sensor._attr_device_class == SensorDeviceClass.TIMESTAMP
+
+    def test_rate_limit_reset_sensor_is_diagnostic(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit reset sensor is a diagnostic entity."""
+        from homeassistant.const import EntityCategory  # noqa: PLC0415
+
+        sensor = AmberRateLimitResetSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_rate_limit_reset_sensor_disabled_by_default(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit reset sensor is disabled by default."""
+        sensor = AmberRateLimitResetSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_registry_enabled_default is False
+
+    def test_rate_limit_reset_sensor_native_value(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit reset sensor returns datetime value."""
+        sensor = AmberRateLimitResetSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        # Should return a datetime object
+        assert isinstance(sensor.native_value, datetime)
+
+    def test_rate_limit_reset_sensor_no_data(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test rate limit reset sensor with no rate limit data."""
+        coordinator = MagicMock()
+        coordinator.get_rate_limit_info = MagicMock(return_value={})
+
+        sensor = AmberRateLimitResetSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
+
+
+class TestAmberNextPollSensor:
+    """Tests for AmberNextPollSensor."""
+
+    def test_next_poll_sensor_init(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test next poll sensor initialization."""
+        from homeassistant.components.sensor import SensorDeviceClass  # noqa: PLC0415
+
+        sensor = AmberNextPollSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_next_poll"
+        assert sensor._attr_translation_key == "next_poll"
+        assert sensor._attr_device_class == SensorDeviceClass.TIMESTAMP
+
+    def test_next_poll_sensor_is_diagnostic(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test next poll sensor is a diagnostic entity."""
+        from homeassistant.const import EntityCategory  # noqa: PLC0415
+
+        sensor = AmberNextPollSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_next_poll_sensor_disabled_by_default(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test next poll sensor is disabled by default."""
+        sensor = AmberNextPollSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_entity_registry_enabled_default is False
+
+    def test_next_poll_sensor_extra_state_attributes(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test next poll sensor extra attributes."""
+        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+
+        coordinator = MagicMock()
+        coordinator.get_cdf_polling_stats = MagicMock(
+            return_value=CDFPollingStats(
+                observation_count=100,
+                scheduled_polls=[21.0, 27.0, 33.0, 39.0],
+                next_poll_index=2,
+                confirmatory_poll_count=2,
+                polls_per_interval=4,
+                last_observation={"start": 15.0, "end": 27.5},
+            )
+        )
+        coordinator.get_next_poll_time = MagicMock(return_value=None)
+
+        sensor = AmberNextPollSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        attrs = sensor.extra_state_attributes
+
+        assert attrs["poll_schedule"] == [21.0, 27.0, 33.0, 39.0]
+        assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
