@@ -14,16 +14,6 @@ def cents_to_dollars(cents: float | None) -> float | None:
     return round(cents / 100, PRICE_DECIMAL_PLACES)
 
 
-def to_local_iso(iso_string: str | None) -> str | None:
-    """Convert an ISO timestamp string to local timezone."""
-    if iso_string is None:
-        return None
-    dt = dt_util.parse_datetime(iso_string)
-    if dt is None:
-        return iso_string
-    return dt_util.as_local(dt).isoformat()
-
-
 def to_local_iso_minute(iso_string: str | None) -> str | None:
     """Convert an ISO timestamp to local timezone, rounded to the nearest minute."""
     if iso_string is None:
