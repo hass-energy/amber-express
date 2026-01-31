@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from custom_components.amber_express.cdf_algorithm import build_cdf
-from custom_components.amber_express.cdf_cold_start import COLD_START_OBSERVATIONS
+from custom_components.amber_express.cdf_cold_start import get_cold_start_observations
 from custom_components.amber_express.cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
 
 
@@ -19,7 +19,7 @@ def _reset_at(seconds: float) -> datetime:
 
 def test_initializes_with_provided_observations() -> None:
     """Test that strategy uses provided observations."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
 
     assert len(strategy.observations) == 100
     # Verify observations have valid start < end structure
@@ -30,7 +30,7 @@ def test_initializes_with_provided_observations() -> None:
 
 def test_cold_start_schedule_produces_valid_poll_times() -> None:
     """Test cold start produces valid poll times from the CDF."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # With k=4 polls, should get 4 poll times from the learned CDF
@@ -56,7 +56,7 @@ def test_preloaded_observations_override_cold_start() -> None:
 
 def test_record_observation_adds_to_rolling_window() -> None:
     """Test that recording observations maintains rolling window."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     initial_count = len(strategy.observations)
 
     # Add a new observation
@@ -114,7 +114,7 @@ def test_should_poll_advances_after_increment() -> None:
 
 def test_should_poll_returns_false_after_all_polls_used() -> None:
     """Test that should_poll returns False after all scheduled polls are used."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # Use all 4 polls
@@ -147,7 +147,7 @@ def test_get_next_poll_delay_returns_time_until_next_poll() -> None:
 
 def test_get_next_poll_delay_returns_none_after_all_polls() -> None:
     """Test that get_next_poll_delay returns None when no polls remain."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # Use all 4 polls
@@ -174,7 +174,7 @@ def test_get_next_poll_delay_sub_second_precision() -> None:
 
 def test_reset_for_new_interval_resets_poll_state() -> None:
     """Test that reset_for_new_interval resets the poll index and count."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # Advance past first poll
@@ -263,7 +263,7 @@ def test_cdf_with_overlapping_intervals() -> None:
 
 def test_observations_are_copied_not_referenced() -> None:
     """Test that observations property returns a copy."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     obs1 = strategy.observations
     obs2 = strategy.observations
 
@@ -275,7 +275,7 @@ def test_observations_are_copied_not_referenced() -> None:
 @pytest.mark.parametrize(
     ("observations", "expected_count"),
     [
-        (list(COLD_START_OBSERVATIONS), 100),  # Cold start from storage
+        (get_cold_start_observations(), 100),  # Cold start from storage
         ([{"start": 10.0, "end": 20.0}], 1),
         ([{"start": i, "end": i + 10} for i in range(150)], 100),  # Truncated to 100
     ],
@@ -311,7 +311,7 @@ def test_update_budget_with_different_poll_counts() -> None:
 
 def test_update_budget_zero_produces_empty_schedule() -> None:
     """Test that zero polls_per_interval produces an empty schedule."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
 
     # Zero budget = no polls
     strategy.update_budget(0, 0, _reset_at(0), 0)
@@ -324,7 +324,7 @@ def test_update_budget_zero_produces_empty_schedule() -> None:
 
 def test_update_budget_recomputes_schedule() -> None:
     """Test that update_budget recomputes the schedule mid-interval."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # Start with 4 polls
@@ -365,7 +365,7 @@ def test_update_budget_uses_conditional_cdf() -> None:
 
 def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
     """Test that conditional sampling concentrates polls in remaining probability mass."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(35, 0, _reset_at(0), 0)
 
     # Original schedule spans within [15, 45] interval
@@ -393,7 +393,7 @@ def test_update_budget_all_mass_in_past() -> None:
     When targeted CDF mass is all in the past but k is low enough for blending,
     falls back to pure uniform distribution from elapsed to reset time.
     """
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
@@ -423,7 +423,7 @@ def test_empty_observations_list() -> None:
 
 def test_increment_poll_beyond_scheduled() -> None:
     """Test incrementing poll when all polls are already used."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(2, 0, _reset_at(0), 0)
 
     assert len(strategy.scheduled_polls) == 2
@@ -556,7 +556,7 @@ def test_record_observation_grows_when_under_window_size() -> None:
 
 def test_update_budget_pure_uniform_when_low_k() -> None:
     """Test that low k (below uniform_polls_needed) uses pure uniform distribution."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(5, 0, _reset_at(0), 0)
 
     # With k=5, reset=100: uniform_polls_needed = ceil(100/30) = 4
@@ -599,7 +599,7 @@ def test_update_budget_blends_uniform_with_targeted() -> None:
 
 def test_update_budget_includes_reset_time_as_forced_poll() -> None:
     """Test that reset time is included as a forced poll when before next interval."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
     # Set elapsed=10, reset in 50s (at t=60), next interval at t=120
@@ -613,7 +613,7 @@ def test_update_budget_includes_reset_time_as_forced_poll() -> None:
 
 def test_update_budget_always_includes_reset_as_forced_poll() -> None:
     """Test that reset time is always included as a forced poll."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
 
     # Reset in 50 seconds, should be added to schedule
     strategy.update_budget(
@@ -633,7 +633,7 @@ def test_update_budget_always_includes_reset_as_forced_poll() -> None:
 
 def test_update_budget_reset_not_added_when_past_interval() -> None:
     """Test that reset poll is not added if it would be after interval end."""
-    strategy = CDFPollingStrategy(list(COLD_START_OBSERVATIONS))
+    strategy = CDFPollingStrategy(get_cold_start_observations())
 
     # Scenario: near end of interval, reset would be after interval ends
     strategy.update_budget(

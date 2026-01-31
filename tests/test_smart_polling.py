@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from custom_components.amber_express.cdf_cold_start import COLD_START_OBSERVATIONS
+from custom_components.amber_express.cdf_cold_start import get_cold_start_observations
 from custom_components.amber_express.cdf_polling import IntervalObservation
 from custom_components.amber_express.smart_polling import PollingState, SmartPollingManager
 from custom_components.amber_express.types import RateLimitInfo
@@ -14,7 +14,7 @@ class TestSmartPollingManagerInit:
 
     def test_initial_state(self) -> None:
         """Test initial state after construction."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         state = manager.get_state()
 
         assert state.current_interval_start is None
@@ -25,7 +25,7 @@ class TestSmartPollingManagerInit:
 
     def test_initial_properties(self) -> None:
         """Test initial property values."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         assert manager.has_confirmed_price is False
         assert manager.poll_count_this_interval == 0
@@ -37,7 +37,7 @@ class TestShouldPoll:
 
     def test_first_run_always_polls(self) -> None:
         """Test that first run (no data) always polls."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         result = manager.should_poll(has_data=False)
 
@@ -45,7 +45,7 @@ class TestShouldPoll:
 
     def test_new_interval_always_polls(self) -> None:
         """Test that new interval always triggers polling."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -64,7 +64,7 @@ class TestShouldPoll:
 
     def test_confirmed_price_stops_polling(self) -> None:
         """Test that confirmed price stops polling."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -81,7 +81,7 @@ class TestShouldPoll:
 
     def test_cdf_scheduled_polling_after_first_poll(self) -> None:
         """Test that polling uses CDF scheduled times after first poll."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         # remaining=10 gives us 5 polls after the buffer of 5 is subtracted
         # 1 poll reserved for interval end (300s), leaving 4 CDF polls
         # With cdf_budget=4 and reset=300, uniform_polls_needed = ceil(300/30) = 10
@@ -127,7 +127,7 @@ class TestPollLifecycle:
 
     def test_on_poll_started_increments_count(self) -> None:
         """Test that on_poll_started increments poll count."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         assert manager.poll_count_this_interval == 0
 
@@ -139,7 +139,7 @@ class TestPollLifecycle:
 
     def test_on_estimate_received_records_elapsed(self) -> None:
         """Test that on_estimate_received records elapsed time."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -156,7 +156,7 @@ class TestPollLifecycle:
 
     def test_on_confirmed_received_sets_flag(self) -> None:
         """Test that on_confirmed_received sets has_confirmed_price."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         assert manager.has_confirmed_price is False
 
@@ -174,7 +174,7 @@ class TestIntervalReset:
 
     def test_new_interval_resets_state(self) -> None:
         """Test that moving to a new interval resets all state."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             # Start first interval
@@ -198,7 +198,7 @@ class TestIntervalReset:
 
     def test_first_interval_flag_clears_on_second_interval(self) -> None:
         """Test that first_interval_after_startup clears on second interval."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         assert manager.first_interval_after_startup is True
 
@@ -219,7 +219,7 @@ class TestGetCDFStats:
 
     def test_returns_cdf_strategy_stats(self) -> None:
         """Test that get_cdf_stats returns stats from CDF strategy."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         # remaining=9 gives us 4 polls after the buffer of 5 is subtracted
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
@@ -268,7 +268,7 @@ class TestRateLimitBasedPolling:
 
     def test_calculate_polls_subtracts_buffer(self) -> None:
         """Test k equals remaining minus buffer from rate limit info."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         buffer = manager.RATE_LIMIT_BUFFER  # Currently 5
 
         base_info: RateLimitInfo = {
@@ -294,7 +294,7 @@ class TestRateLimitBasedPolling:
 
     def test_update_budget_uses_rate_limit_info(self) -> None:
         """Test that update_budget uses rate limit info for k calculation."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         buffer = manager.RATE_LIMIT_BUFFER
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
@@ -322,7 +322,7 @@ class TestRateLimitBasedPolling:
 
     def test_update_budget_dynamically_adjusts_schedule(self) -> None:
         """Test that update_budget dynamically adjusts the schedule mid-interval."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         buffer = manager.RATE_LIMIT_BUFFER
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
@@ -364,7 +364,7 @@ class TestGetNextPollDelay:
 
     def test_get_next_poll_delay_when_confirmed(self) -> None:
         """Test delay returns None when confirmed price received."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -376,7 +376,7 @@ class TestGetNextPollDelay:
 
     def test_get_next_poll_delay_no_interval(self) -> None:
         """Test delay returns None before interval starts."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         # No interval started yet
         delay = manager.get_next_poll_delay()
@@ -384,7 +384,7 @@ class TestGetNextPollDelay:
 
     def test_get_next_poll_delay_returns_seconds(self) -> None:
         """Test delay returns seconds until next poll."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         # remaining=9 gives us 4 polls after buffer of 5
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
@@ -414,7 +414,7 @@ class TestObservationsProperty:
 
     def test_observations_returns_copy(self) -> None:
         """Test observations property returns a copy."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         obs1 = manager.observations
         obs2 = manager.observations
@@ -440,7 +440,7 @@ class TestObservationRecording:
 
     def test_confirmed_without_estimate_skips_observation(self) -> None:
         """Test confirmed without prior estimate doesn't record observation."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -459,7 +459,7 @@ class TestObservationRecording:
 
     def test_confirmed_with_estimate_records_observation(self) -> None:
         """Test confirmed with prior estimate records observation."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -487,7 +487,7 @@ class TestUpdateBudgetEdgeCases:
 
     def test_update_budget_no_interval(self) -> None:
         """Test update_budget before interval starts."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         # Should not crash
         manager.update_budget(
@@ -506,7 +506,7 @@ class TestCheckNewInterval:
 
     def test_check_new_interval_first_call(self) -> None:
         """Test check_new_interval on first call."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -516,7 +516,7 @@ class TestCheckNewInterval:
 
     def test_check_new_interval_same_interval(self) -> None:
         """Test check_new_interval returns False for same interval."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
@@ -529,7 +529,7 @@ class TestCheckNewInterval:
 
     def test_update_budget_after_new_interval(self) -> None:
         """Test update_budget computes schedule after new interval."""
-        manager = SmartPollingManager(5, list(COLD_START_OBSERVATIONS))
+        manager = SmartPollingManager(5, get_cold_start_observations())
         buffer = manager.RATE_LIMIT_BUFFER
 
         with patch("custom_components.amber_express.smart_polling.datetime") as mock_datetime:

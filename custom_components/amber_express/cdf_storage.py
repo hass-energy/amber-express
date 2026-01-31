@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from homeassistant.helpers.storage import Store
 
-from .cdf_cold_start import COLD_START_OBSERVATIONS
+from .cdf_cold_start import get_cold_start_observations
 from .cdf_polling import IntervalObservation
 from .const import DOMAIN
 
@@ -53,8 +53,8 @@ class CDFObservationStore:
         """
         data = await self._store.async_load()
         if data is None:
-            return list(COLD_START_OBSERVATIONS)
-        return data.get("observations", list(COLD_START_OBSERVATIONS))
+            return get_cold_start_observations()
+        return data.get("observations", get_cold_start_observations())
 
     async def async_save(self, observations: list[IntervalObservation]) -> None:
         """Save observations to storage.
