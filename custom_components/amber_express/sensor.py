@@ -559,22 +559,6 @@ class AmberPollingStatsSensor(AmberBaseSensor):
             return stats.last_observation["end"]
         return None
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return polling statistics as attributes."""
-        stats = self.coordinator.get_cdf_polling_stats()
-        attrs: dict[str, Any] = {
-            "poll_schedule": [round(t, 1) for t in stats.scheduled_polls],
-            "poll_count": stats.confirmatory_poll_count + 1,
-            "observation_count": stats.observation_count,
-        }
-
-        if stats.last_observation is not None:
-            attrs["last_estimate_elapsed"] = round(stats.last_observation["start"], 1)
-            attrs["last_confirmed_elapsed"] = round(stats.last_observation["end"], 1)
-
-        return attrs
-
 
 class AmberConfirmationLagSensor(AmberBaseSensor):
     """Sensor for time gap between estimate poll and confirmed poll.
@@ -724,3 +708,12 @@ class AmberNextPollSensor(AmberBaseSensor):
     def native_value(self) -> datetime | None:
         """Return the timestamp of the next scheduled poll."""
         return self.coordinator.get_next_poll_time()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return poll schedule as attributes."""
+        stats = self.coordinator.get_cdf_polling_stats()
+        return {
+            "poll_schedule": [round(t, 1) for t in stats.scheduled_polls],
+            "poll_count": stats.confirmatory_poll_count + 1,
+        }
