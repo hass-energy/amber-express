@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .cdf_polling import IntervalObservation
 
-# 100 real observations for cold start CDF
-COLD_START_OBSERVATIONS: list[IntervalObservation] = [
+# 100 real observations for cold start CDF (private, use function to get a copy)
+_COLD_START_OBSERVATIONS: tuple[IntervalObservation, ...] = (
     {"start": 24.8, "end": 25.7},
     {"start": 25.5, "end": 26.4},
     {"start": 15.9, "end": 17.1},
@@ -115,4 +115,9 @@ COLD_START_OBSERVATIONS: list[IntervalObservation] = [
     {"start": 19.3, "end": 19.8},
     {"start": 23.9, "end": 24.2},
     {"start": 17.2, "end": 18.6},
-]
+)
+
+
+def get_cold_start_observations() -> list[IntervalObservation]:
+    """Return a fresh copy of cold start observations."""
+    return list(_COLD_START_OBSERVATIONS)

@@ -42,13 +42,13 @@ class SmartPollingManager:
     def __init__(
         self,
         interval_length: int,
-        observations: list[IntervalObservation] | None = None,
+        observations: list[IntervalObservation],
     ) -> None:
         """Initialize the polling manager.
 
         Args:
             interval_length: Site interval length in minutes (5 or 30)
-            observations: Optional pre-loaded observations from storage
+            observations: Pre-loaded observations (from storage or cold start)
 
         """
         self._interval_length = interval_length

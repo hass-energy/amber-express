@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from .api_client import AmberApiClient, AmberApiError, RateLimitedError
 from .cdf_polling import CDFPollingStats, IntervalObservation
+from .cdf_storage import CDFObservationStore
 from .const import (
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
@@ -73,7 +74,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         entry: ConfigEntry,
         subentry: ConfigSubentry,
         *,
-        observations: list[IntervalObservation] | None = None,
+        cdf_store: CDFObservationStore,
+        observations: list[IntervalObservation],
     ) -> None:
         """Initialize the coordinator.
 
@@ -81,7 +83,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             hass: Home Assistant instance.
             entry: Main config entry (contains API token).
             subentry: Site subentry (contains site-specific config).
-            observations: Optional pre-loaded observations.
+            cdf_store: Store for persisting CDF observations.
+            observations: Pre-loaded observations (from storage or cold start).
 
         """
         super().__init__(
@@ -108,8 +111,11 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         pricing_mode = self._get_subentry_option(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
         self._interval_processor = IntervalProcessor(pricing_mode)
 
+        # Store for persisting CDF observations
+        self._cdf_store = cdf_store
+
         # Store observations for polling manager creation in start()
-        self._observations = observations
+        self._observations: list[IntervalObservation] = observations
 
         # Polling manager is created in start() after site info is fetched
         self._polling_manager: SmartPollingManager
@@ -363,6 +369,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Confirmed price: update and stop polling
         if is_estimate is False:
             self._polling_manager.on_confirmed_received()
+
+            # Persist updated observations
+            await self._cdf_store.async_save(self._polling_manager.observations)
+
             self._data_sources.update_polling(data)
             _LOGGER.info("Confirmed price received, stopping polling for this interval")
         # Estimated price: update sensors (unless waiting for confirmed on first poll)

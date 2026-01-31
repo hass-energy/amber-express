@@ -15,6 +15,8 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.amber_express.api_client import AmberApiError
+from custom_components.amber_express.cdf_cold_start import get_cold_start_observations
+from custom_components.amber_express.cdf_storage import CDFObservationStore
 from custom_components.amber_express.const import (
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
@@ -39,6 +41,14 @@ from custom_components.amber_express.coordinator import AmberDataCoordinator
 from custom_components.amber_express.smart_polling import SmartPollingManager
 from custom_components.amber_express.types import RateLimitInfo
 from tests.conftest import make_current_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
+
+
+def create_mock_cdf_store() -> MagicMock:
+    """Create a mock CDFObservationStore for testing."""
+    store = MagicMock(spec=CDFObservationStore)
+    store.async_load = AsyncMock(return_value=get_cold_start_observations())
+    store.async_save = AsyncMock()
+    return store
 
 
 def create_mock_subentry_for_coordinator(
@@ -72,9 +82,12 @@ class TestAmberDataCoordinator:
     ) -> AmberDataCoordinator:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
-        coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coord = AmberDataCoordinator(
+            hass, mock_config_entry, mock_subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
         # Create polling manager and set site for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5)
+        coord._polling_manager = SmartPollingManager(5, get_cold_start_observations())
         coord._site = make_site(site_id=coord.site_id, interval_length=5)
         coord._api_client._rate_limit_info = {
             "remaining": 45,
@@ -370,8 +383,11 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
@@ -409,8 +425,11 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
@@ -481,8 +500,11 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
@@ -518,8 +540,11 @@ class TestAmberDataCoordinator:
         )
         entry.add_to_hass(hass)
         subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        coordinator = AmberDataCoordinator(hass, entry, subentry)
-        coordinator._polling_manager = SmartPollingManager(5)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
         coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
         coordinator._api_client._rate_limit_info = {
             "remaining": 45,
@@ -559,9 +584,12 @@ class TestCoordinatorLifecycle:
     ) -> AmberDataCoordinator:
         """Create a coordinator for testing."""
         mock_config_entry.add_to_hass(hass)
-        coord = AmberDataCoordinator(hass, mock_config_entry, mock_subentry)
+        mock_cdf_store = create_mock_cdf_store()
+        coord = AmberDataCoordinator(
+            hass, mock_config_entry, mock_subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
         # Create polling manager and set site for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5)
+        coord._polling_manager = SmartPollingManager(5, get_cold_start_observations())
         coord._site = make_site(site_id=coord.site_id, interval_length=5)
         coord._api_client._rate_limit_info = {
             "remaining": 45,
