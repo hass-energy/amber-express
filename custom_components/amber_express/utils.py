@@ -1,5 +1,7 @@
 """Utility functions for Amber Express."""
 
+from datetime import timedelta
+
 from homeassistant.util import dt as dt_util
 
 PRICE_DECIMAL_PLACES = 4
@@ -20,3 +22,15 @@ def to_local_iso(iso_string: str | None) -> str | None:
     if dt is None:
         return iso_string
     return dt_util.as_local(dt).isoformat()
+
+
+def to_local_iso_minute(iso_string: str | None) -> str | None:
+    """Convert an ISO timestamp to local timezone, rounded to the nearest minute."""
+    if iso_string is None:
+        return None
+    dt = dt_util.parse_datetime(iso_string)
+    if dt is None:
+        return iso_string
+    local_dt = dt_util.as_local(dt)
+    rounded = (local_dt + timedelta(seconds=30)).replace(second=0, microsecond=0)
+    return rounded.isoformat()

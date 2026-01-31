@@ -176,8 +176,19 @@ class TestAmberPriceSensor:
         )
 
         attrs = sensor.extra_state_attributes
-        assert attrs[ATTR_START_TIME] == "2024-01-01T10:00:00+00:00"
-        assert attrs[ATTR_END_TIME] == "2024-01-01T10:05:00+00:00"
+        # Times are converted to local timezone and rounded to the minute
+        expected_start = (
+            dt_util.as_local(dt_util.parse_datetime("2024-01-01T10:00:00+00:00"))
+            .replace(second=0, microsecond=0)
+            .isoformat()
+        )
+        expected_end = (
+            dt_util.as_local(dt_util.parse_datetime("2024-01-01T10:05:00+00:00"))
+            .replace(second=0, microsecond=0)
+            .isoformat()
+        )
+        assert attrs[ATTR_START_TIME] == expected_start
+        assert attrs[ATTR_END_TIME] == expected_end
         assert attrs[ATTR_ESTIMATE] is False
         assert attrs["data_source"] == "polling"
 
@@ -290,11 +301,15 @@ class TestAmberPriceSensor:
         assert len(attrs["forecast"]) == 2
 
         # Check time/value format (default is APP mode, uses advanced_price_predicted)
-        # Times are converted to local timezone
+        # Times are converted to local timezone and rounded to the minute
         first_forecast = attrs["forecast"][0]
         assert "time" in first_forecast
         assert "value" in first_forecast
-        expected_time = dt_util.as_local(dt_util.parse_datetime("2024-01-01T10:05:00+00:00")).isoformat()
+        expected_time = (
+            dt_util.as_local(dt_util.parse_datetime("2024-01-01T10:05:00+00:00"))
+            .replace(second=0, microsecond=0)
+            .isoformat()
+        )
         assert first_forecast["time"] == expected_time
         assert first_forecast["value"] == 0.28
 

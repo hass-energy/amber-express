@@ -41,7 +41,7 @@ from .const import (
 from .coordinator import AmberDataCoordinator
 from .interval_processor import CHANNEL_TYPE_MAP
 from .types import ChannelData
-from .utils import to_local_iso
+from .utils import to_local_iso_minute
 
 if TYPE_CHECKING:
     from . import AmberConfigEntry
@@ -315,8 +315,8 @@ class AmberPriceSensor(AmberBaseSensor):
             return {}
 
         attrs: dict[str, Any] = {
-            ATTR_START_TIME: channel_data.get(ATTR_START_TIME),
-            ATTR_END_TIME: channel_data.get(ATTR_END_TIME),
+            ATTR_START_TIME: to_local_iso_minute(channel_data.get(ATTR_START_TIME)),
+            ATTR_END_TIME: to_local_iso_minute(channel_data.get(ATTR_END_TIME)),
             ATTR_ESTIMATE: channel_data.get(ATTR_ESTIMATE),
             ATTR_DESCRIPTOR: channel_data.get(ATTR_DESCRIPTOR),
             "data_source": self.coordinator.data_source,
@@ -328,7 +328,7 @@ class AmberPriceSensor(AmberBaseSensor):
         forecast_list: list[dict[str, Any]] = []
         demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
         for f in forecasts:
-            time_value = to_local_iso(f.get(ATTR_START_TIME))
+            time_value = to_local_iso_minute(f.get(ATTR_START_TIME))
             if pricing_mode == PRICING_MODE_ALL:
                 # Include all price types
                 per_kwh = self._get_price(f, ATTR_PER_KWH)
