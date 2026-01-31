@@ -697,6 +697,7 @@ class TestCoordinatorLifecycle:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 9,
+            "reset_seconds": 300,
             "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
@@ -793,6 +794,7 @@ class TestCoordinatorLifecycle:
         rate_limit_info: RateLimitInfo = {
             "limit": 50,
             "remaining": 10,
+            "reset_seconds": 300,
             "reset_at": datetime.now(UTC) + timedelta(seconds=300),
             "window_seconds": 300,
             "policy": "50;w=300",
