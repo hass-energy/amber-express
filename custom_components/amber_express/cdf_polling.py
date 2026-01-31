@@ -10,7 +10,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .cdf_algorithm import IntervalObservation, build_cdf, sample_quantiles
-from .cdf_cold_start import COLD_START_OBSERVATIONS
 
 # Re-export for backwards compatibility
 __all__ = ["CDFPollingStats", "CDFPollingStrategy", "IntervalObservation"]
@@ -39,30 +38,22 @@ class CDFPollingStrategy:
 
     The actual CDF algorithm is implemented in cdf_algorithm.py as pure functions.
 
-    Cold start: Uses real observations from historical data until real-time
-    data is collected.
+    Observations are required - cold start observations are provided by the
+    storage layer when no persisted data exists.
     """
 
     # Configuration constants
     WINDOW_SIZE = 100  # Rolling window of observations (N)
     MIN_SAMPLE_INTERVAL = 30  # Minimum seconds between uniform samples
 
-    def __init__(
-        self,
-        observations: list[IntervalObservation] | None = None,
-    ) -> None:
+    def __init__(self, observations: list[IntervalObservation]) -> None:
         """Initialize the strategy.
 
         Args:
-            observations: Optional pre-loaded observations from storage
+            observations: Pre-loaded observations (from storage or cold start)
 
         """
-        if observations is not None:
-            self._observations = observations[-self.WINDOW_SIZE :]
-        else:
-            # Cold start: use real historical observations
-            self._observations = list(COLD_START_OBSERVATIONS)
-
+        self._observations = observations[-self.WINDOW_SIZE :]
         self._scheduled_polls: list[float] = []
         self._next_poll_index = 0
         self._confirmatory_poll_count = 0
