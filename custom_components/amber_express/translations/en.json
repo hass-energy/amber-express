@@ -73,6 +73,7 @@
       "feed_in_price_detailed": { "name": "Feed In Price Detailed" },
       "general_price": { "name": "General Price" },
       "general_price_detailed": { "name": "General Price Detailed" },
+      "next_poll": { "name": "Next Poll" },
       "rate_limit_remaining": { "name": "Rate Limit Remaining" },
       "rate_limit_reset": { "name": "Rate Limit Reset" },
       "renewables": { "name": "Renewables" },

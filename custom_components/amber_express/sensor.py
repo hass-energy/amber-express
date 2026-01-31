@@ -192,6 +192,15 @@ def _add_site_sensors(
             )
         )
 
+        # Next poll sensor (disabled by default)
+        entities.append(
+            AmberNextPollSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
 
 class AmberBaseSensor(CoordinatorEntity[AmberDataCoordinator], SensorEntity):
     """Base class for Amber Express sensors."""
@@ -691,3 +700,27 @@ class AmberRateLimitResetSensor(AmberBaseSensor):
         """Return the timestamp when rate limit resets."""
         rate_limit = self.coordinator.get_rate_limit_info()
         return rate_limit.get("reset_at")
+
+
+class AmberNextPollSensor(AmberBaseSensor):
+    """Sensor for when the next API poll will occur."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the next poll sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_next_poll"
+        self._attr_translation_key = "next_poll"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the timestamp of the next scheduled poll."""
+        return self.coordinator.get_next_poll_time()

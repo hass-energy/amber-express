@@ -674,8 +674,8 @@ class TestAsyncSetupEntry:
         # With general and feed_in enabled, we should have:
         # 2 channels x 2 sensors (price, detailed price) = 4
         # + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset = 11
-        assert len(added_entities) == 11
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 12
+        assert len(added_entities) == 12
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -715,8 +715,8 @@ class TestAsyncSetupEntry:
 
         # With only general channel:
         # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset = 9
-        assert len(added_entities) == 9
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
+        assert len(added_entities) == 10
 
     async def test_setup_entry_controlled_load_channel(
         self,
@@ -756,8 +756,8 @@ class TestAsyncSetupEntry:
 
         # With only controlled load channel:
         # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset = 9
-        assert len(added_entities) == 9
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
+        assert len(added_entities) == 10
 
 
 class TestAmberPollingStatsSensor:

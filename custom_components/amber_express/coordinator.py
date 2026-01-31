@@ -500,6 +500,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get CDF polling statistics for diagnostics."""
         return self._polling_manager.get_cdf_stats()
 
+    def get_next_poll_time(self) -> datetime | None:
+        """Get the timestamp of the next scheduled poll."""
+        return self._polling_manager.get_next_poll_time()
+
     def get_api_status(self) -> int:
         """Get last API status code (200 = OK)."""
         return self._api_client.last_status
