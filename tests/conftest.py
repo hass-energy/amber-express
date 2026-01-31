@@ -366,7 +366,8 @@ def mock_coordinator_with_data(
         return {
             "limit": 50,
             "remaining": 45,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+            "reset_seconds": 180,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=180),
             "window_seconds": 300,
             "policy": "50;w=300",
         }

@@ -64,6 +64,7 @@ class RateLimitInfo(TypedDict):
 
     limit: int  # Maximum requests in window (from ratelimit-limit)
     remaining: int  # Requests remaining in current window
+    reset_seconds: int  # Seconds until quota resets (from ratelimit-reset header)
     reset_at: datetime  # When quota resets (absolute time)
     window_seconds: int  # Window size in seconds (from policy)
     policy: str  # Raw policy string (e.g., "50;w=300")

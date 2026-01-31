@@ -276,6 +276,7 @@ class AmberApiClient:
         return {
             "limit": limit,
             "remaining": int(headers_lower["ratelimit-remaining"]),
+            "reset_seconds": reset_seconds,
             "reset_at": reset_at,
             "window_seconds": window,
             "policy": policy,
