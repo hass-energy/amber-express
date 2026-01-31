@@ -1,5 +1,6 @@
 """Tests for utility functions."""
 
+from homeassistant.util import dt as dt_util
 import pytest
 
 from custom_components.amber_express.utils import to_local_iso_minute
@@ -31,14 +32,18 @@ def test_to_local_iso_minute_rounds_up_to_next_minute() -> None:
     # 10:05:30 should round to 10:06:00
     result = to_local_iso_minute("2024-01-01T10:05:30+00:00")
     assert result is not None
-    # The minute should be :06, not :05
-    assert "T" in result
-    time_part = result.split("T")[1]
-    # Extract hour:minute
-    hour_minute = time_part[:5]
-    # After timezone conversion, the minute portion should reflect rounding up
-    # The exact value depends on local timezone, but seconds should be :00
-    assert ":00" in time_part
+
+    # Parse both to compare - the result minute should be one more than truncated
+    truncated = to_local_iso_minute("2024-01-01T10:05:00+00:00")
+    assert truncated is not None
+
+    result_dt = dt_util.parse_datetime(result)
+    truncated_dt = dt_util.parse_datetime(truncated)
+    assert result_dt is not None
+    assert truncated_dt is not None
+
+    # Rounded up should be 1 minute after truncated
+    assert result_dt.minute == (truncated_dt.minute + 1) % 60
 
 
 def test_to_local_iso_minute_none_input() -> None:
