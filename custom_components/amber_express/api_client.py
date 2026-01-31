@@ -273,7 +273,7 @@ class AmberApiClient:
 
         reset_seconds = int(headers_lower["ratelimit-reset"])
         # Use server timestamp from Date header for accurate reset time calculation
-        server_time = parsedate_to_datetime(headers_lower["date"])
+        server_time = parsedate_to_datetime(headers_lower["date"]).astimezone()
         reset_at = server_time + timedelta(seconds=reset_seconds)
 
         return {
