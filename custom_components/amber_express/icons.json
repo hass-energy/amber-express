@@ -36,6 +36,15 @@
       "general_price_detailed": {
         "default": "mdi:transmission-tower"
       },
+      "next_poll": {
+        "default": "mdi:update"
+      },
+      "rate_limit_remaining": {
+        "default": "mdi:counter"
+      },
+      "rate_limit_reset": {
+        "default": "mdi:timer-sand"
+      },
       "renewables": {
         "default": "mdi:solar-power"
       },
