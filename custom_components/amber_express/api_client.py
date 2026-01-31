@@ -28,6 +28,9 @@ _LOGGER = logging.getLogger(__name__)
 # HTTP status codes
 HTTP_TOO_MANY_REQUESTS = 429
 
+# Maximum jitter in reset_at timestamp to ignore (seconds)
+RESET_AT_JITTER_TOLERANCE = 5
+
 
 # =============================================================================
 # Exceptions
@@ -132,7 +135,7 @@ class AmberApiClient:
             response = await self._hass.async_add_executor_job(self._api.get_sites_with_http_info)
             # API always returns rate limit headers
             headers = response.headers or {}
-            self._rate_limit_info = self._extract_rate_limit_info(headers)
+            self._rate_limit_info = self._extract_rate_limit_info(headers, self._rate_limit_info)
             self._last_api_status = HTTPStatus.OK
             if not _is_site_list(response.data):
                 msg = "Unexpected response format from get_sites"
@@ -199,7 +202,7 @@ class AmberApiClient:
             )
             # API always returns rate limit headers
             headers = response.headers or {}
-            self._rate_limit_info = self._extract_rate_limit_info(headers)
+            self._rate_limit_info = self._extract_rate_limit_info(headers, self._rate_limit_info)
             self._rate_limiter.record_success()
             self._last_api_status = HTTPStatus.OK
 
@@ -237,7 +240,7 @@ class AmberApiClient:
             return None
 
         try:
-            self._rate_limit_info = self._extract_rate_limit_info(headers)
+            self._rate_limit_info = self._extract_rate_limit_info(headers, self._rate_limit_info)
             return self._rate_limit_info["reset_at"]
         except (KeyError, ValueError) as err:
             _LOGGER.debug(
@@ -246,7 +249,7 @@ class AmberApiClient:
             )
             return None
 
-    def _extract_rate_limit_info(self, headers: dict[str, str]) -> RateLimitInfo:
+    def _extract_rate_limit_info(self, headers: dict[str, str], previous: RateLimitInfo) -> RateLimitInfo:
         """Extract rate limit info from IETF RateLimit headers.
 
         See: https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/
@@ -275,6 +278,12 @@ class AmberApiClient:
         # Use server timestamp from Date header for accurate reset time calculation
         server_time = parsedate_to_datetime(headers_lower["date"]).astimezone()
         reset_at = server_time + timedelta(seconds=reset_seconds)
+
+        # Reuse previous reset_at if within tolerance to avoid jitter
+        if previous.get("reset_at"):
+            delta = abs((reset_at - previous["reset_at"]).total_seconds())
+            if delta <= RESET_AT_JITTER_TOLERANCE:
+                reset_at = previous["reset_at"]
 
         return {
             "limit": limit,
