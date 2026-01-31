@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 import logging
 import os
@@ -271,7 +272,9 @@ class AmberApiClient:
             limit = int(headers_lower["ratelimit-limit"])
 
         reset_seconds = int(headers_lower["ratelimit-reset"])
-        reset_at = datetime.now().astimezone() + timedelta(seconds=reset_seconds)
+        # Use server timestamp from Date header for accurate reset time calculation
+        server_time = parsedate_to_datetime(headers_lower["date"])
+        reset_at = server_time + timedelta(seconds=reset_seconds)
 
         return {
             "limit": limit,

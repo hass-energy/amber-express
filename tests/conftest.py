@@ -4,6 +4,7 @@
 
 from collections.abc import Generator
 from datetime import UTC, date, datetime, timedelta
+from email.utils import format_datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from amberelectric.models import CurrentInterval, ForecastInterval, Interval, Site
@@ -55,9 +56,13 @@ def make_rate_limit_headers(
     remaining: int = 45,
     reset: int = 180,
     window: int = 300,
+    server_time: datetime | None = None,
 ) -> dict[str, str]:
     """Create valid rate limit headers for testing."""
+    if server_time is None:
+        server_time = datetime.now(UTC)
     return {
+        "date": format_datetime(server_time, usegmt=True),
         "ratelimit-limit": str(limit),
         "ratelimit-remaining": str(remaining),
         "ratelimit-reset": str(reset),
@@ -402,12 +407,7 @@ class MockApiResponse:
     ) -> None:
         """Initialize mock API response."""
         self.data = data
-        self.headers = headers or {
-            "ratelimit-policy": "50;w=300",
-            "ratelimit-limit": "50",
-            "ratelimit-remaining": "49",
-            "ratelimit-reset": "300",
-        }
+        self.headers = headers or make_rate_limit_headers(remaining=49, reset=300)
 
 
 def wrap_api_response(

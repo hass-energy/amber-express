@@ -1,6 +1,7 @@
 """Tests for the Amber API client."""
 
 from datetime import UTC, date, datetime, timedelta
+from email.utils import format_datetime
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,9 +27,13 @@ def _make_rate_limit_headers(
     remaining: int = 45,
     reset: int = 180,
     window: int = 300,
+    server_time: datetime | None = None,
 ) -> dict[str, str]:
     """Create valid rate limit headers for testing."""
+    if server_time is None:
+        server_time = datetime.now(UTC)
     return {
+        "date": format_datetime(server_time, usegmt=True),
         "ratelimit-limit": str(limit),
         "ratelimit-remaining": str(remaining),
         "ratelimit-reset": str(reset),
@@ -311,6 +316,7 @@ class TestRateLimitHeaderParsing:
         mock_response = MagicMock()
         mock_response.data = []
         mock_response.headers = {
+            "Date": format_datetime(datetime.now(UTC), usegmt=True),
             "RateLimit-Limit": "50",
             "RATELIMIT-REMAINING": "42",
             "RateLimit-Reset": "180",
@@ -333,6 +339,7 @@ class TestRateLimitHeaderParsing:
         mock_response = MagicMock()
         mock_response.data = []
         mock_response.headers = {
+            "date": format_datetime(datetime.now(UTC), usegmt=True),
             "ratelimit-limit": "100",  # Override
             "ratelimit-remaining": "42",
             "ratelimit-reset": "180",
