@@ -244,15 +244,14 @@ class TestAmberDataCoordinator:
             mock_update.assert_called_once()
 
     async def test_async_update_data(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _async_update_data fetches data and merges."""
-        with (
-            patch.object(coordinator, "_fetch_amber_data", new=AsyncMock()) as mock_fetch_data,
-            patch.object(coordinator, "_update_from_sources") as mock_merge,
-        ):
-            await coordinator._async_update_data()
+        """Test _async_update_data calls fetch and returns current_data."""
+        coordinator.current_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25}}
 
-            mock_fetch_data.assert_called_once()
-            mock_merge.assert_called_once()
+        with patch.object(coordinator, "_fetch_amber_data", new=AsyncMock()) as mock_fetch:
+            result = await coordinator._async_update_data()
+
+            mock_fetch.assert_called_once()
+            assert result == coordinator.current_data
 
     async def test_fetch_site_info(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_site_info returns the Site object."""
@@ -411,6 +410,8 @@ class TestAmberDataCoordinator:
 
             assert coordinator._polling_manager.has_confirmed_price is True
             assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
+            # current_data is updated (sensors see the confirmed price)
+            assert CHANNEL_GENERAL in coordinator.current_data
 
     async def test_fetch_amber_data_estimated_not_wait(
         self,
@@ -449,8 +450,51 @@ class TestAmberDataCoordinator:
         ):
             await coordinator._fetch_amber_data()
 
-            # Should update polling data
+            # Should update polling data and current_data (sensors see the estimate)
             assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
+            assert CHANNEL_GENERAL in coordinator.current_data
+
+    async def test_fetch_amber_data_estimated_wait_for_confirmed(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test _fetch_amber_data with estimate when wait_for_confirmed is True."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Test",
+            data={CONF_API_TOKEN: "test"},
+            options={},
+        )
+        entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
+
+        interval = make_current_interval(per_kwh=25.0, estimate=True)
+        wrapped = wrap_interval(interval)
+        mock_response = wrap_api_response([wrapped])
+        with patch.object(
+            coordinator._api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            await coordinator._fetch_amber_data()
+
+            # Data sources ARE updated (latest data is stored)
+            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
+            # But current_data is NOT updated (sensors don't see it yet)
+            assert coordinator.current_data == {}
 
     async def test_fetch_amber_data_no_general_data(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data with no general channel data."""

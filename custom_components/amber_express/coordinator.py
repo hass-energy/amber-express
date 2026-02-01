@@ -280,10 +280,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from Amber API using smart polling."""
         await self._fetch_amber_data()
-
-        # Merge data from polling and websocket
-        self._update_from_sources()
-
         return self.current_data
 
     async def _fetch_site_info(self) -> Site:
@@ -327,7 +323,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Record poll started
         self._polling_manager.on_poll_started()
-        is_first_poll = self._polling_manager.poll_count_this_interval == 1
 
         _LOGGER.debug(
             "Polling Amber API (poll #%d for this interval)",
@@ -366,24 +361,23 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         is_estimate = general_data.get(ATTR_ESTIMATE, True)
         wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
 
-        # Confirmed price: update and stop polling
+        # Always store latest data in data sources
+        self._data_sources.update_polling(data)
+
         if is_estimate is False:
+            # Confirmed price: push to sensors and stop polling
             self._polling_manager.on_confirmed_received()
-
-            # Persist updated observations
             await self._cdf_store.async_save(self._polling_manager.observations)
-
-            self._data_sources.update_polling(data)
+            self._update_from_sources()
             _LOGGER.info("Confirmed price received, stopping polling for this interval")
-        # Estimated price: update sensors (unless waiting for confirmed on first poll)
         else:
+            # Estimated price: only push to sensors if not waiting for confirmed
             self._polling_manager.on_estimate_received()
-
-            if is_first_poll and wait_for_confirmed:
-                _LOGGER.debug("First poll estimate received, waiting for confirmed")
-            else:
-                self._data_sources.update_polling(data)
+            if not wait_for_confirmed:
+                self._update_from_sources()
                 _LOGGER.debug("Estimate received, updating sensors")
+            else:
+                _LOGGER.debug("Estimate received, waiting for confirmed before updating sensors")
 
     def _update_from_sources(self) -> None:
         """Update current_data from the merged data sources."""
