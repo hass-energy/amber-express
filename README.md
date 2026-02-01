@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Amber Express" width="400">
+  <img src="images/logo.png" alt="Amber Express" width="500">
 </p>
 
 <p align="center">
