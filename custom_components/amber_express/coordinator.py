@@ -33,10 +33,12 @@ from .const import (
     CHANNEL_FEED_IN,
     CHANNEL_GENERAL,
     CONF_API_TOKEN,
+    CONF_CONFIRMATION_TIMEOUT,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_WAIT_FOR_CONFIRMED,
     DATA_SOURCE_POLLING,
+    DEFAULT_CONFIRMATION_TIMEOUT,
     DEFAULT_PRICING_MODE,
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
@@ -134,6 +136,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._unsub_time_change: Callable[[], None] | None = None
         self._cancel_next_poll: Callable[[], None] | None = None
 
+        # Confirmation timeout state
+        self._cancel_confirmation_timeout: Callable[[], None] | None = None
+        self._confirmation_timeout_expired: bool = False
+
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
         return self.subentry.data.get(key, default)
@@ -179,6 +185,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._cancel_next_poll()
             self._cancel_next_poll = None
 
+        # Cancel any pending confirmation timeout
+        self._cancel_pending_confirmation_timeout()
+
         # Unsubscribe from time change listener
         if self._unsub_time_change:
             self._unsub_time_change()
@@ -191,6 +200,35 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if self._cancel_next_poll:
             self._cancel_next_poll()
             self._cancel_next_poll = None
+
+    def _cancel_pending_confirmation_timeout(self) -> None:
+        """Cancel any pending confirmation timeout."""
+        if self._cancel_confirmation_timeout:
+            self._cancel_confirmation_timeout()
+            self._cancel_confirmation_timeout = None
+
+    def _schedule_confirmation_timeout(self) -> None:
+        """Schedule the confirmation timeout callback for this interval."""
+        self._cancel_pending_confirmation_timeout()
+        self._confirmation_timeout_expired = False
+
+        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
+        timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
+
+        if not wait_for_confirmed or timeout <= 0:
+            return
+
+        _LOGGER.debug("Scheduling confirmation timeout in %ds", timeout)
+        self._cancel_confirmation_timeout = async_call_later(self.hass, timeout, self._on_confirmation_timeout)
+
+    @callback
+    def _on_confirmation_timeout(self, _now: datetime) -> None:
+        """Handle confirmation timeout expiry."""
+        self._cancel_confirmation_timeout = None
+        self._confirmation_timeout_expired = True
+        _LOGGER.debug("Confirmation timeout expired, updating sensors with estimate")
+        self._update_from_sources()
+        self.async_set_updated_data(self.current_data)
 
     async def _do_scheduled_poll(self) -> None:
         """Execute the scheduled poll."""
@@ -256,6 +294,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # New interval - cancel any pending poll from previous interval
         self._cancel_pending_poll()
+
+        # New interval - schedule confirmation timeout
+        self._schedule_confirmation_timeout()
 
         # New interval - do immediate first poll
         await self.async_refresh()
@@ -365,15 +406,16 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._data_sources.update_polling(data)
 
         if is_estimate is False:
-            # Confirmed price: push to sensors and stop polling
+            # Confirmed price: cancel timeout, push to sensors and stop polling
+            self._cancel_pending_confirmation_timeout()
             self._polling_manager.on_confirmed_received()
             await self._cdf_store.async_save(self._polling_manager.observations)
             self._update_from_sources()
             _LOGGER.info("Confirmed price received, stopping polling for this interval")
         else:
-            # Estimated price: only push to sensors if not waiting for confirmed
+            # Estimated price: only push to sensors if not waiting or timeout expired
             self._polling_manager.on_estimate_received()
-            if not wait_for_confirmed:
+            if not wait_for_confirmed or self._confirmation_timeout_expired:
                 self._update_from_sources()
                 _LOGGER.debug("Estimate received, updating sensors")
             else:

@@ -35,12 +35,14 @@ CONF_SITE_NAME: Final = "site_name"
 CONF_PRICING_MODE: Final = "pricing_mode"
 CONF_ENABLE_WEBSOCKET: Final = "enable_websocket"
 CONF_WAIT_FOR_CONFIRMED: Final = "wait_for_confirmed"
+CONF_CONFIRMATION_TIMEOUT: Final = "confirmation_timeout"
 CONF_DEMAND_WINDOW_PRICE: Final = "demand_window_price"
 
 # Default options
 DEFAULT_PRICING_MODE: Final = PRICING_MODE_APP
 DEFAULT_ENABLE_WEBSOCKET: Final = True
 DEFAULT_WAIT_FOR_CONFIRMED: Final = False  # Keep polling until non-estimated price
+DEFAULT_CONFIRMATION_TIMEOUT: Final = 60  # seconds to wait for confirmed price
 DEFAULT_DEMAND_WINDOW_PRICE: Final = 0.0  # $/kWh penalty during demand window
 
 # Sensor attributes
