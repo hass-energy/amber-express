@@ -19,7 +19,7 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 ## Features
 
 - **Simple Setup**: Just like the official integration - enter your API key, select a site, and you're done
-- **Smart Polling**: Intelligent adaptive polling at the start of each 5-minute interval and stops once a confirmed price is received
+- **Smart Polling**: Get confirmed prices seconds after they're published by learning when they arrive, rather than waiting for the next fixed polling cycle
 - **WebSocket Support**: Supports real-time updates via Amber's WebSocket API (alpha feature) as a redundant data source to polling
 - **Flexible Pricing**: Choose between AEMO-based pricing (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
 - **HAEO Compatible**: Forecast sensors are fully compatible with [HAEO](https://haeo.io/) for energy optimization
@@ -65,14 +65,13 @@ Export Price: sensor.amber_express_feed_in_forecast
 
 ## Smart Polling
 
-Amber Express uses adaptive polling to minimize API calls while ensuring timely price updates:
+Amber Express learns when confirmed prices typically arrive and polls at precisely the right moment to get them immediately:
 
-1. At the start of each 5-minute interval, it polls to get the initial estimate
-2. It learns when confirmed prices typically arrive and times the next poll accordingly
-3. Once a confirmed price is received, polling stops for that interval
-4. Full forecasts are fetched after the confirmed price arrives
+1. At the start of each 5-minute interval, polls to get the initial estimate
+2. Tracks when confirmed prices historically arrive and times subsequent polls accordingly
+3. Stops polling once confirmed price is received
 
-The integration tracks when confirmed prices historically arrive and adjusts its timing automatically. This typically results in fast price updates with only a few API calls per interval rather than continuous polling.
+This adaptive approach typically delivers confirmed prices within seconds of publication, rather than waiting up to a minute for the next fixed polling cycle.
 
 ## WebSocket Support
 
@@ -80,11 +79,19 @@ The integration will (optionally) connect to Amber's WebSocket API for real-time
 
 ## Comparison with Official Integration
 
-| Feature         | Official       | Amber Express                       |
-| --------------- | -------------- | ----------------------------------- |
-| Polling         | Fixed 1-minute | Adaptive (typically 2 per interval) |
-| WebSocket       | No             | Optional (alpha)                    |
-| Pricing Options | per_kwh only   | per_kwh or advanced_price           |
+| Feature          | Official       | amber2mqtt                  | Amber Express              |
+| ---------------- | -------------- | --------------------------- | -------------------------- |
+| Polling          | Fixed 1-minute | Scheduled (you configure)   | Adaptive (learns timing)   |
+| Stops on Confirm | No             | Yes                         | Yes                        |
+| AEMO Direct      | No             | Yes                         | No                         |
+| WebSocket        | No             | No                          | Optional (alpha)           |
+| Forecast Pricing | per_kwh        | per_kwh (advanced in attrs) | per_kwh or advanced_price  |
+| Runs In          | HA directly    | Docker + MQTT               | HA directly                |
+
+Key differences:
+
+- **amber2mqtt** uses pre-configured poll schedules (you define the seconds/minutes) and requires Docker + MQTT broker. Polls AEMO directly as a secondary source. Publishes advanced_price as forecast attributes.
+- **Amber Express** learns when prices arrive and adapts automatically. Runs as a native HA integration. Lets you choose per_kwh or advanced_price for forecast sensor values.
 
 ## Credits
 
