@@ -28,12 +28,14 @@ from .api_client import RateLimitedError as ApiRateLimitedError
 from .const import (
     API_DEVELOPER_URL,
     CONF_API_TOKEN,
+    CONF_CONFIRMATION_TIMEOUT,
     CONF_DEMAND_WINDOW_PRICE,
     CONF_ENABLE_WEBSOCKET,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_WAIT_FOR_CONFIRMED,
+    DEFAULT_CONFIRMATION_TIMEOUT,
     DEFAULT_DEMAND_WINDOW_PRICE,
     DEFAULT_ENABLE_WEBSOCKET,
     DEFAULT_PRICING_MODE,
@@ -312,6 +314,7 @@ class AmberElectricLiveConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_PRICING_MODE: DEFAULT_PRICING_MODE,
                         CONF_ENABLE_WEBSOCKET: DEFAULT_ENABLE_WEBSOCKET,
                         CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
+                        CONF_CONFIRMATION_TIMEOUT: DEFAULT_CONFIRMATION_TIMEOUT,
                     },
                     "subentry_type": SUBENTRY_TYPE_SITE,
                     "title": site_name,
@@ -512,6 +515,7 @@ class AmberElectricLiveConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_PRICING_MODE: DEFAULT_PRICING_MODE,
                     CONF_ENABLE_WEBSOCKET: DEFAULT_ENABLE_WEBSOCKET,
                     CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
+                    CONF_CONFIRMATION_TIMEOUT: DEFAULT_CONFIRMATION_TIMEOUT,
                 }
                 self.hass.config_entries.async_add_subentry(
                     entry,
@@ -576,6 +580,7 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                         CONF_PRICING_MODE: DEFAULT_PRICING_MODE,
                         CONF_ENABLE_WEBSOCKET: DEFAULT_ENABLE_WEBSOCKET,
                         CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
+                        CONF_CONFIRMATION_TIMEOUT: DEFAULT_CONFIRMATION_TIMEOUT,
                     },
                     unique_id=site_id,
                 )
@@ -614,6 +619,7 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                 CONF_PRICING_MODE: user_input[CONF_PRICING_MODE],
                 CONF_ENABLE_WEBSOCKET: user_input[CONF_ENABLE_WEBSOCKET],
                 CONF_WAIT_FOR_CONFIRMED: user_input[CONF_WAIT_FOR_CONFIRMED],
+                CONF_CONFIRMATION_TIMEOUT: user_input[CONF_CONFIRMATION_TIMEOUT],
             }
             if CONF_DEMAND_WINDOW_PRICE in user_input:
                 updated_data[CONF_DEMAND_WINDOW_PRICE] = user_input[CONF_DEMAND_WINDOW_PRICE]
@@ -655,6 +661,10 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                         CONF_WAIT_FOR_CONFIRMED,
                         default=current_data.get(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED),
                     ): bool,
+                    vol.Required(
+                        CONF_CONFIRMATION_TIMEOUT,
+                        default=current_data.get(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT),
+                    ): vol.Coerce(int),
                     vol.Optional(
                         CONF_DEMAND_WINDOW_PRICE,
                         default=current_data.get(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE),

@@ -99,6 +99,7 @@
           "title": "Configure Site",
           "description": "**Site ID:** {site_id}  \n**NMI:** {nmi}  \n**Network:** {network}",
           "data": {
+            "confirmation_timeout": "Confirmation timeout (seconds)",
             "demand_window_price": "Demand Window Price ($/kWh)",
             "enable_websocket": "Enable WebSocket (Real-time updates)",
             "pricing_mode": "Pricing Mode",
@@ -106,6 +107,7 @@
             "wait_for_confirmed": "Wait for confirmed prices"
           },
           "data_description": {
+            "confirmation_timeout": "Maximum seconds to wait for confirmed price before using estimates. Set to 0 to wait indefinitely.",
             "demand_window_price": "Price to add to general channel during demand windows. Set high (e.g. $50) to prevent imports during demand periods.",
             "enable_websocket": "Enable WebSocket for real-time price updates (alpha feature)",
             "pricing_mode": "AEMO is Amber's displayed price (per_kwh). APP uses Amber's predicted price (advanced_price_predicted).",

@@ -31,6 +31,7 @@ from custom_components.amber_express.const import (
     CHANNEL_FEED_IN,
     CHANNEL_GENERAL,
     CONF_API_TOKEN,
+    CONF_CONFIRMATION_TIMEOUT,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_WAIT_FOR_CONFIRMED,
@@ -55,6 +56,7 @@ def create_mock_subentry_for_coordinator(
     site_id: str = "test",
     *,
     wait_for_confirmed: bool = False,
+    confirmation_timeout: int = 60,
 ) -> MagicMock:
     """Create a mock subentry for coordinator tests."""
     subentry = MagicMock()
@@ -69,6 +71,7 @@ def create_mock_subentry_for_coordinator(
         "network": "Ausgrid",
         "channels": [{"type": "general", "identifier": "E1"}],
         CONF_WAIT_FOR_CONFIRMED: wait_for_confirmed,
+        CONF_CONFIRMATION_TIMEOUT: confirmation_timeout,
     }
     return subentry
 
@@ -930,3 +933,221 @@ class TestCoordinatorLifecycle:
                     patch.object(coordinator, "_schedule_next_poll"),
                 ):
                     await created_coro
+
+
+class TestConfirmationTimeout:
+    """Tests for confirmation timeout behavior."""
+
+    @pytest.fixture
+    def coordinator_with_timeout(self, hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> AmberDataCoordinator:
+        """Create a coordinator with wait_for_confirmed=True and timeout=60."""
+        mock_config_entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=60)
+        mock_cdf_store = create_mock_cdf_store()
+        coord = AmberDataCoordinator(
+            hass, mock_config_entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coord._polling_manager = SmartPollingManager(5, get_cold_start_observations())
+        coord._site = make_site(site_id=coord.site_id, interval_length=5)
+        coord._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
+        return coord
+
+    def test_schedule_confirmation_timeout_schedules_timer(
+        self, coordinator_with_timeout: AmberDataCoordinator
+    ) -> None:
+        """Test _schedule_confirmation_timeout schedules a timer."""
+        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
+            mock_call_later.return_value = MagicMock()
+
+            coordinator_with_timeout._schedule_confirmation_timeout()
+
+            mock_call_later.assert_called_once()
+            args = mock_call_later.call_args
+            delay = args[0][1]
+            assert delay == 60
+
+    def test_schedule_confirmation_timeout_resets_flag(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
+        """Test _schedule_confirmation_timeout resets the expired flag."""
+        coordinator_with_timeout._confirmation_timeout_expired = True
+
+        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
+            mock_call_later.return_value = MagicMock()
+
+            coordinator_with_timeout._schedule_confirmation_timeout()
+
+            assert coordinator_with_timeout._confirmation_timeout_expired is False
+
+    def test_schedule_confirmation_timeout_skips_when_not_waiting(
+        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    ) -> None:
+        """Test _schedule_confirmation_timeout does nothing when wait_for_confirmed=False."""
+        mock_config_entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, mock_config_entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+
+        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
+            coordinator._schedule_confirmation_timeout()
+
+            mock_call_later.assert_not_called()
+
+    def test_schedule_confirmation_timeout_skips_when_timeout_zero(
+        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    ) -> None:
+        """Test _schedule_confirmation_timeout does nothing when timeout=0."""
+        mock_config_entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=0)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, mock_config_entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+
+        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
+            coordinator._schedule_confirmation_timeout()
+
+            mock_call_later.assert_not_called()
+
+    def test_on_confirmation_timeout_sets_flag_and_updates(
+        self, coordinator_with_timeout: AmberDataCoordinator
+    ) -> None:
+        """Test _on_confirmation_timeout sets flag and updates sensors."""
+        # Put some data in the data sources
+        coordinator_with_timeout._data_sources.update_polling({CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25}})
+
+        with patch.object(coordinator_with_timeout, "async_set_updated_data") as mock_update:
+            coordinator_with_timeout._on_confirmation_timeout(datetime.now(UTC))
+
+            assert coordinator_with_timeout._confirmation_timeout_expired is True
+            assert CHANNEL_GENERAL in coordinator_with_timeout.current_data
+            mock_update.assert_called_once()
+
+    def test_cancel_pending_confirmation_timeout(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
+        """Test _cancel_pending_confirmation_timeout cancels and clears callback."""
+        mock_cancel = MagicMock()
+        coordinator_with_timeout._cancel_confirmation_timeout = mock_cancel
+
+        coordinator_with_timeout._cancel_pending_confirmation_timeout()
+
+        mock_cancel.assert_called_once()
+        assert coordinator_with_timeout._cancel_confirmation_timeout is None
+
+    def test_cancel_pending_confirmation_timeout_when_none(
+        self, coordinator_with_timeout: AmberDataCoordinator
+    ) -> None:
+        """Test _cancel_pending_confirmation_timeout handles None gracefully."""
+        coordinator_with_timeout._cancel_confirmation_timeout = None
+
+        # Should not raise
+        coordinator_with_timeout._cancel_pending_confirmation_timeout()
+
+    async def test_fetch_amber_data_estimate_updates_after_timeout(self, hass: HomeAssistant) -> None:
+        """Test estimates update sensors after timeout expires."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Test",
+            data={CONF_API_TOKEN: "test"},
+            options={},
+        )
+        entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=60)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
+
+        # Simulate timeout has expired
+        coordinator._confirmation_timeout_expired = True
+
+        interval = make_current_interval(per_kwh=25.0, estimate=True)
+        wrapped = wrap_interval(interval)
+        mock_response = wrap_api_response([wrapped])
+        with patch.object(
+            coordinator._api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            await coordinator._fetch_amber_data()
+
+            # Data should be in both polling data and current_data
+            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
+            assert CHANNEL_GENERAL in coordinator.current_data
+
+    async def test_fetch_amber_data_confirmed_cancels_timeout(self, hass: HomeAssistant) -> None:
+        """Test confirmed price cancels the timeout timer."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Test",
+            data={CONF_API_TOKEN: "test"},
+            options={},
+        )
+        entry.add_to_hass(hass)
+        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=60)
+        mock_cdf_store = create_mock_cdf_store()
+        coordinator = AmberDataCoordinator(
+            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
+        )
+        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
+        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
+        coordinator._api_client._rate_limit_info = {
+            "remaining": 45,
+            "limit": 50,
+            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+            "window_seconds": 300,
+            "policy": "50;w=300",
+        }
+
+        # Set up a pending timeout
+        mock_cancel = MagicMock()
+        coordinator._cancel_confirmation_timeout = mock_cancel
+
+        interval = make_current_interval(per_kwh=25.0, estimate=False)
+        wrapped = wrap_interval(interval)
+        mock_response = wrap_api_response([wrapped])
+        with patch.object(
+            coordinator._api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            await coordinator._fetch_amber_data()
+
+            mock_cancel.assert_called_once()
+            assert coordinator._cancel_confirmation_timeout is None
+
+    async def test_on_interval_check_schedules_timeout(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
+        """Test _on_interval_check schedules confirmation timeout on new interval."""
+        with (
+            patch.object(coordinator_with_timeout._polling_manager, "check_new_interval", return_value=True),
+            patch.object(coordinator_with_timeout, "async_refresh", new=AsyncMock()),
+            patch.object(coordinator_with_timeout, "_schedule_next_poll"),
+            patch.object(coordinator_with_timeout, "_schedule_confirmation_timeout") as mock_schedule_timeout,
+        ):
+            await coordinator_with_timeout._on_interval_check(None)
+
+            mock_schedule_timeout.assert_called_once()
+
+    async def test_stop_cancels_confirmation_timeout(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
+        """Test stop() cancels pending confirmation timeout."""
+        mock_cancel = MagicMock()
+        coordinator_with_timeout._cancel_confirmation_timeout = mock_cancel
+
+        await coordinator_with_timeout.stop()
+
+        mock_cancel.assert_called_once()
+        assert coordinator_with_timeout._cancel_confirmation_timeout is None
