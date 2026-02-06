@@ -33,9 +33,14 @@ from custom_components.amber_express.const import (
 from custom_components.amber_express.sensor import (
     CHANNEL_PRICE_DETAILED_TRANSLATION_KEY,
     CHANNEL_PRICE_TRANSLATION_KEY,
+    FORECAST_SOURCE_AEMO,
+    FORECAST_SOURCE_AMBER_HIGH,
+    FORECAST_SOURCE_AMBER_LOW,
+    FORECAST_SOURCE_AMBER_PREDICTED,
     AmberApiStatusSensor,
     AmberConfirmationLagSensor,
     AmberDetailedPriceSensor,
+    AmberForecastPriceSensor,
     AmberNextPollSensor,
     AmberPollingStatsSensor,
     AmberPriceSensor,
@@ -509,6 +514,123 @@ class TestAmberDetailedPriceSensor:
         assert sensor.native_value == 0.28
 
 
+class TestAmberForecastPriceSensor:
+    """Tests for AmberForecastPriceSensor."""
+
+    def test_forecast_sensor_init(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast sensor initialization."""
+        sensor = AmberForecastPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+            forecast_source=FORECAST_SOURCE_AEMO,
+        )
+
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_{CHANNEL_GENERAL}_forecast_aemo"
+        assert sensor._attr_translation_key == "general_forecast_aemo"
+        assert sensor._attr_entity_registry_enabled_default is False
+
+    def test_forecast_sensor_native_value_aemo(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast sensor returns per_kwh for AEMO."""
+        sensor = AmberForecastPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+            forecast_source=FORECAST_SOURCE_AEMO,
+        )
+
+        assert sensor.native_value == 0.25
+
+    def test_forecast_sensor_native_value_advanced_prices(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast sensor reads advanced price variants."""
+        coordinator = MagicMock()
+        coordinator.get_channel_data = MagicMock(
+            return_value={
+                ATTR_PER_KWH: 0.25,
+                ATTR_ADVANCED_PRICE: {"low": 0.20, "predicted": 0.23, "high": 0.30},
+            }
+        )
+        coordinator.get_forecasts = MagicMock(return_value=[])
+        coordinator.data_source = "polling"
+
+        predicted_sensor = AmberForecastPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+            forecast_source=FORECAST_SOURCE_AMBER_PREDICTED,
+        )
+        low_sensor = AmberForecastPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+            forecast_source=FORECAST_SOURCE_AMBER_LOW,
+        )
+        high_sensor = AmberForecastPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+            forecast_source=FORECAST_SOURCE_AMBER_HIGH,
+        )
+
+        assert predicted_sensor.native_value == 0.23
+        assert low_sensor.native_value == 0.20
+        assert high_sensor.native_value == 0.30
+
+    def test_forecast_sensor_feed_in_aemo_negated_state(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test feed-in forecast sensor negates AEMO state."""
+        sensor = AmberForecastPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_FEED_IN,
+            forecast_source=FORECAST_SOURCE_AEMO,
+        )
+
+        assert sensor.native_value == -0.10
+
+    def test_forecast_sensor_feed_in_negates_forecast(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test feed-in forecast sensor negates forecast values."""
+        sensor = AmberForecastPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_FEED_IN,
+            forecast_source=FORECAST_SOURCE_AMBER_PREDICTED,
+        )
+
+        attrs = sensor.extra_state_attributes
+        assert attrs["forecast"][0]["value"] == -0.12
+
+
 class TestAmberRenewablesSensor:
     """Tests for AmberRenewablesSensor."""
 
@@ -689,9 +811,10 @@ class TestAsyncSetupEntry:
 
         # With general and feed_in enabled, we should have:
         # 2 channels x 2 sensors (price, detailed price) = 4
+        # 2 channels x 4 forecast sensors = 8
         # + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll = 12
-        assert len(added_entities) == 12
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 20
+        assert len(added_entities) == 20
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -730,9 +853,10 @@ class TestAsyncSetupEntry:
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
         # With only general channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
-        assert len(added_entities) == 10
+        # 1 channel x 2 sensors + 4 forecast sensors
+        # + renewables + site + polling_stats + api_status + confirmation_lag
+        # + rate_limit_remaining + rate_limit_reset + next_poll = 14
+        assert len(added_entities) == 14
 
     async def test_setup_entry_controlled_load_channel(
         self,

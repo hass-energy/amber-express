@@ -60,6 +60,35 @@ CHANNEL_PRICE_DETAILED_TRANSLATION_KEY = {
     CHANNEL_CONTROLLED_LOAD: "controlled_load_price_detailed",
 }
 
+# Forecast source identifiers
+FORECAST_SOURCE_AEMO = "aemo"
+FORECAST_SOURCE_AMBER_LOW = "amber_low"
+FORECAST_SOURCE_AMBER_PREDICTED = "amber_predicted"
+FORECAST_SOURCE_AMBER_HIGH = "amber_high"
+
+FORECAST_SOURCES = (
+    FORECAST_SOURCE_AEMO,
+    FORECAST_SOURCE_AMBER_LOW,
+    FORECAST_SOURCE_AMBER_PREDICTED,
+    FORECAST_SOURCE_AMBER_HIGH,
+)
+
+# Map channel and forecast source to translation keys
+CHANNEL_FORECAST_TRANSLATION_KEY = {
+    CHANNEL_GENERAL: {
+        FORECAST_SOURCE_AEMO: "general_forecast_aemo",
+        FORECAST_SOURCE_AMBER_LOW: "general_forecast_amber_low",
+        FORECAST_SOURCE_AMBER_PREDICTED: "general_forecast_amber_predicted",
+        FORECAST_SOURCE_AMBER_HIGH: "general_forecast_amber_high",
+    },
+    CHANNEL_FEED_IN: {
+        FORECAST_SOURCE_AEMO: "feed_in_forecast_aemo",
+        FORECAST_SOURCE_AMBER_LOW: "feed_in_forecast_amber_low",
+        FORECAST_SOURCE_AMBER_PREDICTED: "feed_in_forecast_amber_predicted",
+        FORECAST_SOURCE_AMBER_HIGH: "feed_in_forecast_amber_high",
+    },
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,  # noqa: ARG001
@@ -126,6 +155,21 @@ def _add_site_sensors(
                 channel=channel,
             )
         )
+
+        # Forecast sensors (disabled by default) for general and feed-in channels
+        if channel in {CHANNEL_GENERAL, CHANNEL_FEED_IN}:
+            entities.extend(
+                [
+                    AmberForecastPriceSensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        subentry=subentry,
+                        channel=channel,
+                        forecast_source=forecast_source,
+                    )
+                    for forecast_source in FORECAST_SOURCES
+                ]
+            )
 
     # Global sensors (always created if we have any channels)
     if available_channels:
@@ -467,6 +511,109 @@ class AmberDetailedPriceSensor(AmberBaseSensor):
 
         attrs["data_source"] = self.coordinator.data_source
         return attrs
+
+
+class AmberForecastPriceSensor(AmberBaseSensor):
+    """Sensor for forecast price by source."""
+
+    # Match official Amber integration - no MONETARY device_class
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "$/kWh"
+    _attr_suggested_display_precision = 2
+    _attr_entity_registry_enabled_default = False
+    _channel: str
+    _forecast_source: str
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+        channel: str,
+        forecast_source: str,
+    ) -> None:
+        """Initialize the forecast price sensor."""
+        super().__init__(coordinator, entry, subentry, channel)
+        self._channel = channel
+        self._forecast_source = forecast_source
+        self._attr_unique_id = f"{self._site_id}_{channel}_forecast_{forecast_source}"
+        self._attr_translation_key = CHANNEL_FORECAST_TRANSLATION_KEY[channel][forecast_source]
+
+    def _extract_advanced_price(self, advanced_price: Any) -> float | None:
+        """Extract advanced price value for the selected forecast source."""
+        if isinstance(advanced_price, dict):
+            key = {
+                FORECAST_SOURCE_AMBER_LOW: "low",
+                FORECAST_SOURCE_AMBER_PREDICTED: "predicted",
+                FORECAST_SOURCE_AMBER_HIGH: "high",
+            }.get(self._forecast_source)
+            if key is None:
+                return None
+            value = advanced_price.get(key)
+        elif isinstance(advanced_price, int | float) and self._forecast_source == FORECAST_SOURCE_AMBER_PREDICTED:
+            value = advanced_price
+        else:
+            return None
+
+        if not isinstance(value, int | float):
+            return None
+        return value
+
+    def _get_forecast_value(self, data: ChannelData) -> float | None:
+        """Return the forecast value for the selected source."""
+        if self._forecast_source == FORECAST_SOURCE_AEMO:
+            value = data.get(ATTR_PER_KWH)
+        else:
+            value = self._extract_advanced_price(data.get(ATTR_ADVANCED_PRICE))
+
+        if not isinstance(value, int | float):
+            return None
+
+        # Feed-in prices are negated (earnings shown as negative cost)
+        if self._channel == CHANNEL_FEED_IN:
+            value *= -1
+
+        # Apply demand window price for general channel
+        if self._channel == CHANNEL_GENERAL and data.get(ATTR_DEMAND_WINDOW):
+            demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
+            value += demand_window_price
+
+        return value
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current forecast price."""
+        channel_data = self.coordinator.get_channel_data(self._channel)
+        if not channel_data:
+            return None
+        return self._get_forecast_value(channel_data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return forecast attributes for the selected source."""
+        channel_data = self.coordinator.get_channel_data(self._channel)
+        if not channel_data:
+            return {}
+
+        attrs: dict[str, Any] = {
+            ATTR_START_TIME: to_local_iso_minute(channel_data.get(ATTR_START_TIME)),
+            ATTR_END_TIME: to_local_iso_minute(channel_data.get(ATTR_END_TIME)),
+            ATTR_ESTIMATE: channel_data.get(ATTR_ESTIMATE),
+            ATTR_DESCRIPTOR: channel_data.get(ATTR_DESCRIPTOR),
+            "data_source": self.coordinator.data_source,
+        }
+
+        forecasts = self.coordinator.get_forecasts(self._channel)
+        forecast_list: list[dict[str, Any]] = []
+        for forecast in forecasts:
+            time_value = to_local_iso_minute(forecast.get(ATTR_START_TIME))
+            value = self._get_forecast_value(forecast)
+            forecast_list.append({"time": time_value, "value": value})
+
+        attrs["interpolation_mode"] = "previous"
+        attrs["forecast"] = forecast_list
+
+        return {k: v for k, v in attrs.items() if v is not None}
 
 
 class AmberRenewablesSensor(AmberBaseSensor):
