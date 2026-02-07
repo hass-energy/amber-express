@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -13,8 +13,15 @@ from custom_components.amber_express.api_client import AmberApiError
 from custom_components.amber_express.config_flow import validate_api_token
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,
+    CONF_CONFIRMATION_TIMEOUT,
+    CONF_DEMAND_WINDOW_PRICE,
+    CONF_ENABLE_WEBSOCKET,
+    CONF_FORECAST_INTERVALS,
+    CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_SITE_NAME,
+    CONF_WAIT_FOR_CONFIRMED,
+    DEFAULT_FORECAST_INTERVALS,
     DOMAIN,
     SUBENTRY_TYPE_SITE,
 )
@@ -227,6 +234,26 @@ async def test_full_flow_single_site(hass: HomeAssistant, mock_amber_api: MagicM
         assert subentry.data[CONF_SITE_ID] == "01ABCDEFGHIJKLMNOPQRSTUV"
         assert subentry.data[CONF_SITE_NAME] == "My Home"
         assert subentry.title == "My Home"
+
+        await hass.config_entries.async_remove(entry.entry_id)
+
+
+async def test_full_flow_single_site_sets_default_forecast_intervals(
+    hass: HomeAssistant, mock_amber_api: MagicMock
+) -> None:
+    """Test new subentries default forecast interval count is stored."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_TOKEN: "valid_token"})
+
+    with (
+        patch("custom_components.amber_express.async_setup_entry", return_value=True),
+        patch("custom_components.amber_express.async_unload_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_SITE_NAME: "My Home"})
+
+        entry = result["result"]
+        subentry = next(iter(entry.subentries.values()))
+        assert subentry.data[CONF_FORECAST_INTERVALS] == DEFAULT_FORECAST_INTERVALS
 
         await hass.config_entries.async_remove(entry.entry_id)
 
@@ -474,3 +501,98 @@ async def test_no_sites_selected_error(hass: HomeAssistant, mock_amber_api_multi
 
     assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"base": "no_sites_selected"}
+
+
+async def test_site_subentry_reconfigure_updates_forecast_intervals(
+    hass: HomeAssistant, mock_amber_api: MagicMock
+) -> None:
+    """Test reconfiguring a site subentry updates forecast interval count."""
+    with (
+        patch("custom_components.amber_express.async_setup_entry", return_value=True),
+        patch("custom_components.amber_express.async_unload_entry", return_value=True),
+    ):
+        # Create entry with one site subentry via the normal flow
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_TOKEN: "valid_token"})
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_SITE_NAME: "My Home"})
+
+        entry = result["result"]
+        subentry = next(iter(entry.subentries.values()))
+
+        # Start a subentry reconfigure flow
+        result = await hass.config_entries.subentries.async_init(
+            (entry.entry_id, SUBENTRY_TYPE_SITE),
+            context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": subentry.subentry_id},
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "reconfigure"
+
+        # Submit existing values, changing only forecast interval count
+        user_input = {
+            CONF_SITE_NAME: subentry.data[CONF_SITE_NAME],
+            CONF_PRICING_MODE: subentry.data[CONF_PRICING_MODE],
+            CONF_ENABLE_WEBSOCKET: subentry.data[CONF_ENABLE_WEBSOCKET],
+            CONF_WAIT_FOR_CONFIRMED: subentry.data[CONF_WAIT_FOR_CONFIRMED],
+            CONF_CONFIRMATION_TIMEOUT: subentry.data[CONF_CONFIRMATION_TIMEOUT],
+            CONF_DEMAND_WINDOW_PRICE: subentry.data.get(CONF_DEMAND_WINDOW_PRICE, 0.0),
+            CONF_FORECAST_INTERVALS: 576,
+        }
+
+        result = await hass.config_entries.subentries.async_configure(result["flow_id"], user_input=user_input)
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "reconfigure_successful"
+
+        updated_subentry = entry.subentries[subentry.subentry_id]
+        assert updated_subentry.data[CONF_FORECAST_INTERVALS] == 576
+
+        await hass.config_entries.async_remove(entry.entry_id)
+
+
+@pytest.mark.parametrize(
+    ("forecast_intervals", "expected_error_field"),
+    [
+        (0, "forecast_intervals"),
+        (2049, "forecast_intervals"),
+    ],
+)
+async def test_site_subentry_reconfigure_validates_forecast_intervals(
+    hass: HomeAssistant,
+    mock_amber_api: MagicMock,
+    forecast_intervals: int,
+    expected_error_field: str,
+) -> None:
+    """Test forecast interval count validation in site subentry reconfigure."""
+    with (
+        patch("custom_components.amber_express.async_setup_entry", return_value=True),
+        patch("custom_components.amber_express.async_unload_entry", return_value=True),
+    ):
+        # Create entry with one site subentry via the normal flow
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_TOKEN: "valid_token"})
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_SITE_NAME: "My Home"})
+
+        entry = result["result"]
+        subentry = next(iter(entry.subentries.values()))
+
+        result = await hass.config_entries.subentries.async_init(
+            (entry.entry_id, SUBENTRY_TYPE_SITE),
+            context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": subentry.subentry_id},
+        )
+
+        user_input = {
+            CONF_SITE_NAME: subentry.data[CONF_SITE_NAME],
+            CONF_PRICING_MODE: subentry.data[CONF_PRICING_MODE],
+            CONF_ENABLE_WEBSOCKET: subentry.data[CONF_ENABLE_WEBSOCKET],
+            CONF_WAIT_FOR_CONFIRMED: subentry.data[CONF_WAIT_FOR_CONFIRMED],
+            CONF_CONFIRMATION_TIMEOUT: subentry.data[CONF_CONFIRMATION_TIMEOUT],
+            CONF_DEMAND_WINDOW_PRICE: subentry.data.get(CONF_DEMAND_WINDOW_PRICE, 0.0),
+            CONF_FORECAST_INTERVALS: forecast_intervals,
+        }
+
+        with pytest.raises(InvalidData) as err:
+            await hass.config_entries.subentries.async_configure(result["flow_id"], user_input=user_input)
+
+        assert err.value.path == [expected_error_field]
+        assert expected_error_field in err.value.schema_errors
+
+        await hass.config_entries.async_remove(entry.entry_id)

@@ -9,10 +9,12 @@ from custom_components.amber_express import async_setup_entry, async_unload_entr
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
+    CONF_FORECAST_INTERVALS,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_WAIT_FOR_CONFIRMED,
+    DEFAULT_FORECAST_INTERVALS,
     DEFAULT_PRICING_MODE,
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
@@ -42,6 +44,7 @@ def create_mock_subentry(
         CONF_PRICING_MODE: DEFAULT_PRICING_MODE,
         CONF_ENABLE_WEBSOCKET: websocket_enabled,
         CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
+        CONF_FORECAST_INTERVALS: DEFAULT_FORECAST_INTERVALS,
     }
     return subentry
 
