@@ -16,7 +16,8 @@ WS_HEARTBEAT_INTERVAL: Final = 30  # seconds
 WS_STALE_TIMEOUT: Final = 360  # 6 minutes - reconnect if no price update received
 
 # Forecast configuration
-FORECAST_INTERVALS: Final = 288  # 24 hours at 5-min resolution, or 48 hours at 30-min
+# Maximum value for the Amber API `/current` prices `next` parameter (documented upstream).
+MAX_FORECAST_INTERVALS: Final = 2048
 
 # Channel types
 CHANNEL_GENERAL: Final = "general"
@@ -30,6 +31,7 @@ PRICING_MODE_ALL: Final = "all"  # Includes all price types in forecasts
 
 # Config keys
 CONF_API_TOKEN: Final = "api_token"  # noqa: S105
+CONF_FORECAST_INTERVALS: Final = "forecast_intervals"
 CONF_SITE_ID: Final = "site_id"
 CONF_SITE_NAME: Final = "site_name"
 CONF_PRICING_MODE: Final = "pricing_mode"
@@ -40,6 +42,8 @@ CONF_DEMAND_WINDOW_PRICE: Final = "demand_window_price"
 
 # Default options
 DEFAULT_PRICING_MODE: Final = PRICING_MODE_APP
+# 24 hours at 5-min resolution, or 48 hours at 30-min
+DEFAULT_FORECAST_INTERVALS: Final = 288
 DEFAULT_ENABLE_WEBSOCKET: Final = True
 DEFAULT_WAIT_FOR_CONFIRMED: Final = False  # Keep polling until non-estimated price
 DEFAULT_CONFIRMATION_TIMEOUT: Final = 60  # seconds to wait for confirmed price
