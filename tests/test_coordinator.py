@@ -1280,11 +1280,12 @@ class TestHeldPriceAtBoundary:
 
     def test_held_price_shifts_forecasts_forward(
         self, hass: HomeAssistant    ) -> None:
-        """Test held price correctly shifts forecasts forward."""
+        """Test held price correctly shifts forecasts forward and holds all previous attrs."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
+                ATTR_RENEWABLES: 50.0,
                 ATTR_ESTIMATE: False,
                 ATTR_FORECASTS: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
@@ -1299,7 +1300,7 @@ class TestHeldPriceAtBoundary:
         general = coordinator.current_data[CHANNEL_GENERAL]
         assert general[ATTR_START_TIME] == "2024-01-01T10:05:00+00:00"
         assert general[ATTR_PER_KWH] == 0.25
-        assert general.get(ATTR_RENEWABLES) == 80.0
+        assert general.get(ATTR_RENEWABLES) == 50.0
         assert general[ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
         assert general[ATTR_FORECASTS][1]["start_time"] == "2024-01-01T10:10:00+00:00"
 

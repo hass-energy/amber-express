@@ -20,14 +20,15 @@ from .api_client import AmberApiClient, AmberApiError, RateLimitedError
 from .cdf_polling import CDFPollingStats, IntervalObservation
 from .cdf_storage import CDFObservationStore
 from .const import (
-    ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
+    ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
+    ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
-    ATTR_SPOT_PER_KWH,
+    ATTR_START_TIME,
     ATTR_TARIFF_BLOCK,
     ATTR_TARIFF_PERIOD,
     ATTR_TARIFF_SEASON,
@@ -59,6 +60,9 @@ _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
 # Minimum forecast entries needed to push held price (current + next interval)
 _MIN_FORECASTS_FOR_HELD = 2
+
+# Time attributes to take from the next forecast so the held entry is time-aligned
+_INTERVAL_TIME_ATTRS = (ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME)
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -310,27 +314,25 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 new_data[key] = value
 
         applied_held = False
-        for channel in (CHANNEL_GENERAL, CHANNEL_FEED_IN, CHANNEL_CONTROLLED_LOAD):
-            channel_data = self.current_data.get(channel)
+        for channel, channel_data in self.current_data.items():
+            if channel.startswith("_"):
+                continue
             if not channel_data or not isinstance(channel_data, dict):
-                if channel in self.current_data:
-                    new_data[channel] = cast("ChannelData", dict(self.current_data[channel]))
+                new_data[channel] = cast("ChannelData", dict(self.current_data[channel]))
                 continue
             forecasts = channel_data.get(ATTR_FORECASTS)
             if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
                 new_data[channel] = cast("ChannelData", dict(channel_data))
                 continue
 
-            next_entry = cast("ChannelData", dict(forecasts[1]))
-            held_per_kwh = channel_data.get(ATTR_PER_KWH)
-            if held_per_kwh is not None:
-                next_entry[ATTR_PER_KWH] = held_per_kwh
-            held_spot = channel_data.get(ATTR_SPOT_PER_KWH)
-            if held_spot is not None:
-                next_entry[ATTR_SPOT_PER_KWH] = held_spot
-            held_advanced = channel_data.get(ATTR_ADVANCED_PRICE)
-            if held_advanced is not None:
-                next_entry[ATTR_ADVANCED_PRICE] = held_advanced
+            next_entry = cast("ChannelData", dict(channel_data))
+            if ATTR_FORECASTS in next_entry:
+                del next_entry[ATTR_FORECASTS]
+            next_template = forecasts[1]
+            for attr in _INTERVAL_TIME_ATTRS:
+                val = next_template.get(attr)
+                if val is not None:
+                    next_entry[attr] = val
             next_entry[ATTR_ESTIMATE] = True
 
             new_channel = cast("ChannelData", dict(next_entry))
