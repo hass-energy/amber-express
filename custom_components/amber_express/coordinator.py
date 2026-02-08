@@ -328,7 +328,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             # sensor applies (or stops applying) the demand window surcharge
             if ATTR_DEMAND_WINDOW in next_entry:
                 channel_data[ATTR_DEMAND_WINDOW] = next_entry[ATTR_DEMAND_WINDOW]
-            else:
+            elif ATTR_DEMAND_WINDOW in channel_data:
                 del channel_data[ATTR_DEMAND_WINDOW]
             channel_data[ATTR_ESTIMATE] = True
             current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS}
