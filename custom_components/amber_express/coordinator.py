@@ -324,6 +324,12 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 val = next_entry.get(attr)
                 if val is not None:
                     channel_data[attr] = val
+            # Forward-project demand window from the next interval so the
+            # sensor applies (or stops applying) the demand window surcharge
+            if ATTR_DEMAND_WINDOW in next_entry:
+                channel_data[ATTR_DEMAND_WINDOW] = next_entry[ATTR_DEMAND_WINDOW]
+            else:
+                del channel_data[ATTR_DEMAND_WINDOW]
             channel_data[ATTR_ESTIMATE] = True
             current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS}
             channel_data[ATTR_FORECASTS] = [current_snapshot, *forecasts[2:]]
