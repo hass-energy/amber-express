@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -63,6 +63,9 @@ _MIN_FORECASTS_FOR_HELD = 2
 
 # Time attributes to take from the next forecast so the held entry is time-aligned
 _INTERVAL_TIME_ATTRS = (ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME)
+
+# Push held price this many seconds before the boundary so HAEO sees aligned data
+_PRE_BOUNDARY_LEAD_SECONDS = 1
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -148,6 +151,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Confirmation timeout state
         self._cancel_confirmation_timeout: Callable[[], None] | None = None
         self._confirmation_timeout_expired: bool = False
+
+        # Pre-boundary held price: True once we've pushed for the upcoming boundary
+        self._held_price_pushed: bool = False
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
@@ -295,19 +301,32 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._on_scheduled_poll,
         )
 
-    def _push_held_price_at_boundary(self) -> None:
+    def _seconds_until_next_boundary(self) -> float:
+        """Seconds until the next interval boundary (same logic as SmartPollingManager)."""
+        now = datetime.now(UTC)
+        length = int(self._site.interval_length)
+        current_minute = (now.minute // length) * length
+        current_start = now.replace(minute=current_minute, second=0, microsecond=0)
+        next_boundary = current_start + timedelta(minutes=length)
+        return (next_boundary - now).total_seconds()
+
+    def _push_held_price_at_boundary(self) -> bool:
         """Push a sensor update at interval boundary using previous confirmed price.
 
         Shifts the forecast list forward and holds the previous interval's price
         for the new current interval so HAEO sees time-aligned data with zero
         API latency. Only runs when wait_for_confirmed is True.
+
+        Returns:
+            True if the held price was applied and listeners were notified, False otherwise.
+
         """
         wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
         confirmation_timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
         if not wait_for_confirmed or confirmation_timeout <= 0:
-            return
+            return False
         if not self.current_data:
-            return
+            return False
 
         applied_held = False
         for channel, channel_data in self.current_data.items():
@@ -336,18 +355,30 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             applied_held = True
 
         if not applied_held:
-            return
+            return False
 
         self.async_set_updated_data(self.current_data)
         _LOGGER.debug("Pushed held price at interval boundary")
+        return True
 
     async def _on_interval_check(self, _now: object) -> None:
         """Check for new interval and start sub-second polling chain."""
-        # Check if this is a new interval
+        # Pre-boundary: push held price before the boundary crosses so HAEO sees aligned data
+        if (
+            not self._held_price_pushed
+            and self._seconds_until_next_boundary() <= _PRE_BOUNDARY_LEAD_SECONDS
+            and self._push_held_price_at_boundary()
+        ):
+            self._held_price_pushed = True
+
+        # Detect actual boundary
         if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
             return
 
-        self._push_held_price_at_boundary()
+        # Fallback: push if pre-boundary did not fire (e.g. startup race)
+        if not self._held_price_pushed:
+            self._push_held_price_at_boundary()
+        self._held_price_pushed = False
 
         # New interval - cancel any pending poll from previous interval
         self._cancel_pending_poll()
