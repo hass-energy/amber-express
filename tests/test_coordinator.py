@@ -1194,8 +1194,7 @@ class TestHeldPriceAtBoundary:
         }
         return coordinator
 
-    def test_held_price_pushed_when_wait_for_confirmed(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_pushed_when_wait_for_confirmed(self, hass: HomeAssistant) -> None:
         """Test held price is pushed at boundary when wait_for_confirmed is True."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1228,8 +1227,7 @@ class TestHeldPriceAtBoundary:
         assert forecasts[0][ATTR_PER_KWH] == 0.25
         assert forecasts[1]["start_time"] == "2024-01-01T10:10:00+00:00"
 
-    def test_held_price_not_pushed_when_not_waiting(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_not_pushed_when_not_waiting(self, hass: HomeAssistant) -> None:
         """Test held price is NOT pushed when wait_for_confirmed is False."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=False)
         coordinator.current_data = {
@@ -1248,8 +1246,7 @@ class TestHeldPriceAtBoundary:
 
             mock_update.assert_not_called()
 
-    def test_held_price_not_pushed_when_current_data_empty(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_not_pushed_when_current_data_empty(self, hass: HomeAssistant) -> None:
         """Test held price is NOT pushed when current_data is empty."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {}
@@ -1259,8 +1256,7 @@ class TestHeldPriceAtBoundary:
 
             mock_update.assert_not_called()
 
-    def test_held_price_not_pushed_when_fewer_than_two_forecasts(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_not_pushed_when_fewer_than_two_forecasts(self, hass: HomeAssistant) -> None:
         """Test held price is NOT pushed when forecast list has fewer than 2 entries."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1278,8 +1274,7 @@ class TestHeldPriceAtBoundary:
 
             mock_update.assert_not_called()
 
-    def test_held_price_shifts_forecasts_forward(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_shifts_forecasts_forward(self, hass: HomeAssistant) -> None:
         """Test held price correctly shifts forecasts forward and holds all previous attrs."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1304,8 +1299,7 @@ class TestHeldPriceAtBoundary:
         assert general[ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
         assert general[ATTR_FORECASTS][1]["start_time"] == "2024-01-01T10:10:00+00:00"
 
-    def test_held_price_preserves_all_price_fields(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_preserves_all_price_fields(self, hass: HomeAssistant) -> None:
         """Test held price preserves per_kwh, spot_per_kwh, advanced_price_predicted."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         advanced = {"low": 0.20, "predicted": 0.25, "high": 0.30}
@@ -1329,8 +1323,7 @@ class TestHeldPriceAtBoundary:
         assert general[ATTR_SPOT_PER_KWH] == 0.22
         assert general[ATTR_ADVANCED_PRICE] == advanced
 
-    def test_held_price_sets_estimate_true(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_sets_estimate_true(self, hass: HomeAssistant) -> None:
         """Test held price sets estimate=True on the new current interval."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1348,8 +1341,7 @@ class TestHeldPriceAtBoundary:
 
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is True
 
-    def test_held_price_multiple_channels(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_multiple_channels(self, hass: HomeAssistant) -> None:
         """Test held price works with general and feed_in channels."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1378,8 +1370,7 @@ class TestHeldPriceAtBoundary:
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
         assert coordinator.current_data[CHANNEL_FEED_IN][ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
 
-    def test_held_price_overwritten_when_confirmed_arrives(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_overwritten_when_confirmed_arrives(self, hass: HomeAssistant) -> None:
         """Test held price is overwritten when confirmed price is received."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1392,24 +1383,25 @@ class TestHeldPriceAtBoundary:
                 ],
             },
         }
-        coordinator._data_sources.update_polling({
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.27,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.27},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                ],
-            },
-        })
+        coordinator._data_sources.update_polling(
+            {
+                CHANNEL_GENERAL: {
+                    ATTR_PER_KWH: 0.27,
+                    ATTR_ESTIMATE: False,
+                    ATTR_FORECASTS: [
+                        {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.27},
+                        {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
+                    ],
+                },
+            }
+        )
 
         coordinator._update_from_sources()
 
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.27
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is False
 
-    def test_held_price_overwritten_when_timeout_fires(
-        self, hass: HomeAssistant    ) -> None:
+    def test_held_price_overwritten_when_timeout_fires(self, hass: HomeAssistant) -> None:
         """Test held price is overwritten when confirmation timeout expires."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
@@ -1419,13 +1411,15 @@ class TestHeldPriceAtBoundary:
                 ATTR_FORECASTS: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.25}],
             },
         }
-        coordinator._data_sources.update_polling({
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.30,
-                ATTR_ESTIMATE: True,
-                ATTR_FORECASTS: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30}],
-            },
-        })
+        coordinator._data_sources.update_polling(
+            {
+                CHANNEL_GENERAL: {
+                    ATTR_PER_KWH: 0.30,
+                    ATTR_ESTIMATE: True,
+                    ATTR_FORECASTS: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30}],
+                },
+            }
+        )
 
         coordinator._confirmation_timeout_expired = True
         coordinator._on_confirmation_timeout(datetime.now(UTC))
@@ -1433,8 +1427,7 @@ class TestHeldPriceAtBoundary:
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is True
 
-    async def test_on_interval_check_calls_held_price_before_refresh(
-        self, hass: HomeAssistant    ) -> None:
+    async def test_on_interval_check_calls_held_price_before_refresh(self, hass: HomeAssistant) -> None:
         """Test _on_interval_check calls _push_held_price_at_boundary before async_refresh."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
