@@ -19,7 +19,7 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 ## Features
 
 - **Simple Setup**: Just like the official integration - enter your API key, select a site, and you're done
-- **Smart Polling**: Get confirmed prices seconds after they're published by learning when they arrive, rather than waiting for the next fixed polling cycle
+- **Smart Polling**: Learns when confirmed prices typically arrive and polls at those times to update
 - **WebSocket Support**: Supports real-time updates via Amber's WebSocket API (alpha feature) as a redundant data source to polling
 - **Flexible Pricing**: Choose between AEMO-based pricing (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
 - **HAEO Compatible**: Forecast sensors are fully compatible with [HAEO](https://haeo.io/) for energy optimization
