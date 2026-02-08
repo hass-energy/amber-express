@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from amberelectric.models import Site, TariffInformation
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
@@ -303,47 +303,35 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         API latency. Only runs when wait_for_confirmed is True.
         """
         wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
-        if not wait_for_confirmed or self._confirmation_timeout <= 0:
+        confirmation_timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
+        if not wait_for_confirmed or confirmation_timeout <= 0:
             return
         if not self.current_data:
             return
-
-        new_data: CoordinatorData = {}
-        for key, value in self.current_data.items():
-            if key.startswith("_"):
-                new_data[key] = value
 
         applied_held = False
         for channel, channel_data in self.current_data.items():
             if channel.startswith("_"):
                 continue
             if not channel_data or not isinstance(channel_data, dict):
-                new_data[channel] = cast("ChannelData", dict(self.current_data[channel]))
                 continue
             forecasts = channel_data.get(ATTR_FORECASTS)
             if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
-                new_data[channel] = cast("ChannelData", dict(channel_data))
                 continue
 
-            next_entry = cast("ChannelData", dict(channel_data))
-            if ATTR_FORECASTS in next_entry:
-                del next_entry[ATTR_FORECASTS]
-            next_template = forecasts[1]
+            next_entry = forecasts[1]
             for attr in _INTERVAL_TIME_ATTRS:
-                val = next_template.get(attr)
+                val = next_entry.get(attr)
                 if val is not None:
-                    next_entry[attr] = val
-            next_entry[ATTR_ESTIMATE] = True
-
-            new_channel = cast("ChannelData", dict(next_entry))
-            new_channel[ATTR_FORECASTS] = [next_entry, *forecasts[2:]]  # type: ignore[typeddict-item]
-            new_data[channel] = new_channel
+                    channel_data[attr] = val
+            channel_data[ATTR_ESTIMATE] = True
+            current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS}
+            channel_data[ATTR_FORECASTS] = [current_snapshot, *forecasts[2:]]
             applied_held = True
 
         if not applied_held:
             return
 
-        self.current_data = new_data
         self.async_set_updated_data(self.current_data)
         _LOGGER.debug("Pushed held price at interval boundary")
 
