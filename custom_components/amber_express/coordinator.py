@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from amberelectric.models import Site, TariffInformation
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
@@ -20,12 +20,14 @@ from .api_client import AmberApiClient, AmberApiError, RateLimitedError
 from .cdf_polling import CDFPollingStats, IntervalObservation
 from .cdf_storage import CDFObservationStore
 from .const import (
+    ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
+    ATTR_SPOT_PER_KWH,
     ATTR_TARIFF_BLOCK,
     ATTR_TARIFF_PERIOD,
     ATTR_TARIFF_SEASON,
@@ -54,6 +56,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Interval detection - check every second to detect interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
+
+# Minimum forecast entries needed to push held price (current + next interval)
+_MIN_FORECASTS_FOR_HELD = 2
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -286,11 +291,67 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._on_scheduled_poll,
         )
 
+    def _push_held_price_at_boundary(self) -> None:
+        """Push a sensor update at interval boundary using previous confirmed price.
+
+        Shifts the forecast list forward and holds the previous interval's price
+        for the new current interval so HAEO sees time-aligned data with zero
+        API latency. Only runs when wait_for_confirmed is True.
+        """
+        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
+        if not wait_for_confirmed or self._confirmation_timeout <= 0:
+            return
+        if not self.current_data:
+            return
+
+        new_data: CoordinatorData = {}
+        for key, value in self.current_data.items():
+            if key.startswith("_"):
+                new_data[key] = value
+
+        applied_held = False
+        for channel in (CHANNEL_GENERAL, CHANNEL_FEED_IN, CHANNEL_CONTROLLED_LOAD):
+            channel_data = self.current_data.get(channel)
+            if not channel_data or not isinstance(channel_data, dict):
+                if channel in self.current_data:
+                    new_data[channel] = cast("ChannelData", dict(self.current_data[channel]))
+                continue
+            forecasts = channel_data.get(ATTR_FORECASTS)
+            if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
+                new_data[channel] = cast("ChannelData", dict(channel_data))
+                continue
+
+            next_entry = cast("ChannelData", dict(forecasts[1]))
+            held_per_kwh = channel_data.get(ATTR_PER_KWH)
+            if held_per_kwh is not None:
+                next_entry[ATTR_PER_KWH] = held_per_kwh
+            held_spot = channel_data.get(ATTR_SPOT_PER_KWH)
+            if held_spot is not None:
+                next_entry[ATTR_SPOT_PER_KWH] = held_spot
+            held_advanced = channel_data.get(ATTR_ADVANCED_PRICE)
+            if held_advanced is not None:
+                next_entry[ATTR_ADVANCED_PRICE] = held_advanced
+            next_entry[ATTR_ESTIMATE] = True
+
+            new_channel = cast("ChannelData", dict(next_entry))
+            new_channel[ATTR_FORECASTS] = [next_entry, *forecasts[2:]]  # type: ignore[typeddict-item]
+            new_data[channel] = new_channel
+            applied_held = True
+
+        if not applied_held:
+            return
+
+        self.current_data = new_data
+        self.async_set_updated_data(self.current_data)
+        _LOGGER.debug("Pushed held price at interval boundary")
+
     async def _on_interval_check(self, _now: object) -> None:
         """Check for new interval and start sub-second polling chain."""
         # Check if this is a new interval
         if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
             return
+
+        self._push_held_price_at_boundary()
 
         # New interval - cancel any pending poll from previous interval
         self._cancel_pending_poll()
