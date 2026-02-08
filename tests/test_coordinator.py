@@ -1458,3 +1458,65 @@ class TestHeldPriceAtBoundary:
             await coordinator._on_interval_check(None)
 
             assert call_order == ["held", "refresh"]
+
+    def test_held_price_forward_projects_demand_window_starting(self, hass: HomeAssistant) -> None:
+        """Test held price picks up demand_window=True from the next interval."""
+        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
+        coordinator.current_data = {
+            CHANNEL_GENERAL: {
+                ATTR_PER_KWH: 0.25,
+                ATTR_ESTIMATE: False,
+                ATTR_FORECASTS: [
+                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
+                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_DEMAND_WINDOW: True},
+                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
+                ],
+            },
+        }
+
+        coordinator._push_held_price_at_boundary()
+
+        general = coordinator.current_data[CHANNEL_GENERAL]
+        assert general[ATTR_DEMAND_WINDOW] is True
+
+    def test_held_price_forward_projects_demand_window_ending(self, hass: HomeAssistant) -> None:
+        """Test held price clears demand_window when next interval has it False."""
+        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
+        coordinator.current_data = {
+            CHANNEL_GENERAL: {
+                ATTR_PER_KWH: 0.25,
+                ATTR_DEMAND_WINDOW: True,
+                ATTR_ESTIMATE: False,
+                ATTR_FORECASTS: [
+                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, ATTR_DEMAND_WINDOW: True},
+                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_DEMAND_WINDOW: False},
+                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
+                ],
+            },
+        }
+
+        coordinator._push_held_price_at_boundary()
+
+        general = coordinator.current_data[CHANNEL_GENERAL]
+        assert general[ATTR_DEMAND_WINDOW] is False
+
+    def test_held_price_removes_demand_window_when_absent_from_next(self, hass: HomeAssistant) -> None:
+        """Test held price removes demand_window when next interval has no tariff info."""
+        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
+        coordinator.current_data = {
+            CHANNEL_GENERAL: {
+                ATTR_PER_KWH: 0.25,
+                ATTR_DEMAND_WINDOW: True,
+                ATTR_ESTIMATE: False,
+                ATTR_FORECASTS: [
+                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, ATTR_DEMAND_WINDOW: True},
+                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
+                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
+                ],
+            },
+        }
+
+        coordinator._push_held_price_at_boundary()
+
+        general = coordinator.current_data[CHANNEL_GENERAL]
+        assert ATTR_DEMAND_WINDOW not in general
