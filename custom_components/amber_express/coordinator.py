@@ -21,11 +21,14 @@ from .cdf_polling import CDFPollingStats, IntervalObservation
 from .cdf_storage import CDFObservationStore
 from .const import (
     ATTR_DEMAND_WINDOW,
+    ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
+    ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
+    ATTR_START_TIME,
     ATTR_TARIFF_BLOCK,
     ATTR_TARIFF_PERIOD,
     ATTR_TARIFF_SEASON,
@@ -54,6 +57,12 @@ _LOGGER = logging.getLogger(__name__)
 
 # Interval detection - check every second to detect interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
+
+# Minimum forecast entries needed to push held price (current + next interval)
+_MIN_FORECASTS_FOR_HELD = 2
+
+# Time attributes to take from the next forecast so the held entry is time-aligned
+_INTERVAL_TIME_ATTRS = (ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME)
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -286,11 +295,53 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._on_scheduled_poll,
         )
 
+    def _push_held_price_at_boundary(self) -> None:
+        """Push a sensor update at interval boundary using previous confirmed price.
+
+        Shifts the forecast list forward and holds the previous interval's price
+        for the new current interval so HAEO sees time-aligned data with zero
+        API latency. Only runs when wait_for_confirmed is True.
+        """
+        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
+        confirmation_timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
+        if not wait_for_confirmed or confirmation_timeout <= 0:
+            return
+        if not self.current_data:
+            return
+
+        applied_held = False
+        for channel, channel_data in self.current_data.items():
+            if channel.startswith("_"):
+                continue
+            if not channel_data or not isinstance(channel_data, dict):
+                continue
+            forecasts = channel_data.get(ATTR_FORECASTS)
+            if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
+                continue
+
+            next_entry = forecasts[1]
+            for attr in _INTERVAL_TIME_ATTRS:
+                val = next_entry.get(attr)
+                if val is not None:
+                    channel_data[attr] = val
+            channel_data[ATTR_ESTIMATE] = True
+            current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS}
+            channel_data[ATTR_FORECASTS] = [current_snapshot, *forecasts[2:]]
+            applied_held = True
+
+        if not applied_held:
+            return
+
+        self.async_set_updated_data(self.current_data)
+        _LOGGER.debug("Pushed held price at interval boundary")
+
     async def _on_interval_check(self, _now: object) -> None:
         """Check for new interval and start sub-second polling chain."""
         # Check if this is a new interval
         if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
             return
+
+        self._push_held_price_at_boundary()
 
         # New interval - cancel any pending poll from previous interval
         self._cancel_pending_poll()
