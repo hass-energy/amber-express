@@ -31,6 +31,7 @@ from .const import (
     CONF_CONFIRMATION_TIMEOUT,
     CONF_DEMAND_WINDOW_PRICE,
     CONF_ENABLE_WEBSOCKET,
+    CONF_FORECAST_INTERVALS,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_SITE_NAME,
@@ -38,9 +39,11 @@ from .const import (
     DEFAULT_CONFIRMATION_TIMEOUT,
     DEFAULT_DEMAND_WINDOW_PRICE,
     DEFAULT_ENABLE_WEBSOCKET,
+    DEFAULT_FORECAST_INTERVALS,
     DEFAULT_PRICING_MODE,
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
+    MAX_FORECAST_INTERVALS,
     PRICING_MODE_AEMO,
     PRICING_MODE_ALL,
     PRICING_MODE_APP,
@@ -315,6 +318,7 @@ class AmberElectricLiveConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_ENABLE_WEBSOCKET: DEFAULT_ENABLE_WEBSOCKET,
                         CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
                         CONF_CONFIRMATION_TIMEOUT: DEFAULT_CONFIRMATION_TIMEOUT,
+                        CONF_FORECAST_INTERVALS: DEFAULT_FORECAST_INTERVALS,
                     },
                     "subentry_type": SUBENTRY_TYPE_SITE,
                     "title": site_name,
@@ -516,6 +520,7 @@ class AmberElectricLiveConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_ENABLE_WEBSOCKET: DEFAULT_ENABLE_WEBSOCKET,
                     CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
                     CONF_CONFIRMATION_TIMEOUT: DEFAULT_CONFIRMATION_TIMEOUT,
+                    CONF_FORECAST_INTERVALS: DEFAULT_FORECAST_INTERVALS,
                 }
                 self.hass.config_entries.async_add_subentry(
                     entry,
@@ -581,6 +586,7 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                         CONF_ENABLE_WEBSOCKET: DEFAULT_ENABLE_WEBSOCKET,
                         CONF_WAIT_FOR_CONFIRMED: DEFAULT_WAIT_FOR_CONFIRMED,
                         CONF_CONFIRMATION_TIMEOUT: DEFAULT_CONFIRMATION_TIMEOUT,
+                        CONF_FORECAST_INTERVALS: DEFAULT_FORECAST_INTERVALS,
                     },
                     unique_id=site_id,
                 )
@@ -620,6 +626,7 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                 CONF_ENABLE_WEBSOCKET: user_input[CONF_ENABLE_WEBSOCKET],
                 CONF_WAIT_FOR_CONFIRMED: user_input[CONF_WAIT_FOR_CONFIRMED],
                 CONF_CONFIRMATION_TIMEOUT: user_input[CONF_CONFIRMATION_TIMEOUT],
+                CONF_FORECAST_INTERVALS: user_input[CONF_FORECAST_INTERVALS],
             }
             if CONF_DEMAND_WINDOW_PRICE in user_input:
                 updated_data[CONF_DEMAND_WINDOW_PRICE] = user_input[CONF_DEMAND_WINDOW_PRICE]
@@ -665,6 +672,10 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                         CONF_CONFIRMATION_TIMEOUT,
                         default=current_data.get(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT),
                     ): vol.Coerce(int),
+                    vol.Required(
+                        CONF_FORECAST_INTERVALS,
+                        default=current_data.get(CONF_FORECAST_INTERVALS, DEFAULT_FORECAST_INTERVALS),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_FORECAST_INTERVALS)),
                     vol.Optional(
                         CONF_DEMAND_WINDOW_PRICE,
                         default=current_data.get(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE),

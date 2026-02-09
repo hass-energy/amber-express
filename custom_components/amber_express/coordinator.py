@@ -37,15 +37,16 @@ from .const import (
     CHANNEL_GENERAL,
     CONF_API_TOKEN,
     CONF_CONFIRMATION_TIMEOUT,
+    CONF_FORECAST_INTERVALS,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_WAIT_FOR_CONFIRMED,
     DATA_SOURCE_POLLING,
     DEFAULT_CONFIRMATION_TIMEOUT,
+    DEFAULT_FORECAST_INTERVALS,
     DEFAULT_PRICING_MODE,
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
-    FORECAST_INTERVALS,
 )
 from .data_source import DataSourceMerger
 from .interval_processor import IntervalProcessor
@@ -456,9 +457,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         try:
+            next_intervals = int(self._get_subentry_option(CONF_FORECAST_INTERVALS, DEFAULT_FORECAST_INTERVALS))
             intervals = await self._api_client.fetch_current_prices(
                 self.site_id,
-                next_intervals=FORECAST_INTERVALS,
+                next_intervals=next_intervals,
                 resolution=resolution,
             )
         except RateLimitedError:

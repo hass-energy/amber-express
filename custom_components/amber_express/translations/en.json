@@ -102,6 +102,7 @@
             "confirmation_timeout": "Confirmation timeout (seconds)",
             "demand_window_price": "Demand Window Price ($/kWh)",
             "enable_websocket": "Enable WebSocket (Real-time updates)",
+            "forecast_intervals": "Forecast intervals to fetch",
             "pricing_mode": "Pricing Mode",
             "site_name": "Site Name",
             "wait_for_confirmed": "Wait for confirmed prices"
@@ -110,6 +111,7 @@
             "confirmation_timeout": "Maximum seconds to wait for confirmed price before using estimates. Set to 0 to wait indefinitely.",
             "demand_window_price": "Price to add to general channel during demand windows. Set high (e.g. $50) to prevent imports during demand periods.",
             "enable_websocket": "Enable WebSocket for real-time price updates (alpha feature)",
+            "forecast_intervals": "How many future intervals to request from the Amber API (maps to the `next` parameter). Range: 1 to 2048. Availability may be capped by the API.",
             "pricing_mode": "AEMO is Amber's displayed price (per_kwh). APP uses Amber's predicted price (advanced_price_predicted).",
             "site_name": "A friendly name for this site",
             "wait_for_confirmed": "When enabled, sensors only update when a confirmed (non-estimated) price is received."
