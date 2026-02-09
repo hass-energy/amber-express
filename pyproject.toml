@@ -1,6 +1,6 @@
 [project]
 name = "amber-express"
-version = "0.2.4"
+version = "0.2.5"
 description = "Home Assistant integration for Amber Electric with smart polling and WebSocket support"
 readme = "README.md"
 requires-python = ">=3.13.2,<3.14"
