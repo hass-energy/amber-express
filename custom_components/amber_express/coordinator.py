@@ -375,9 +375,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
             return
 
-        # Fallback: push if pre-boundary did not fire (e.g. startup race)
-        if not self._held_price_pushed:
-            self._push_held_price_at_boundary()
         self._held_price_pushed = False
 
         # New interval - cancel any pending poll from previous interval

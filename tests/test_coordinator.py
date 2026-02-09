@@ -1428,7 +1428,7 @@ class TestHeldPriceAtBoundary:
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is True
 
     async def test_on_interval_check_calls_held_price_before_refresh(self, hass: HomeAssistant) -> None:
-        """Test _on_interval_check calls _push_held_price_at_boundary (fallback) before async_refresh."""
+        """Test _on_interval_check calls _push_held_price_at_boundary (pre-boundary) before async_refresh."""
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {
             CHANNEL_GENERAL: {
@@ -1446,7 +1446,7 @@ class TestHeldPriceAtBoundary:
             call_order.append("refresh")
 
         with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=10.0),
+            patch.object(coordinator, "_seconds_until_next_boundary", return_value=1.0),
             patch.object(coordinator._polling_manager, "check_new_interval", return_value=True),
             patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
             patch.object(coordinator, "async_refresh", new=AsyncMock(side_effect=record_refresh)),
@@ -1454,7 +1454,8 @@ class TestHeldPriceAtBoundary:
             patch.object(coordinator, "_cancel_pending_poll"),
             patch.object(coordinator, "_schedule_confirmation_timeout"),
         ):
-            mock_held.side_effect = lambda: call_order.append("held")
+            mock_held.return_value = True
+            mock_held.side_effect = lambda: call_order.append("held") or True
 
             await coordinator._on_interval_check(None)
 
@@ -1474,7 +1475,7 @@ class TestHeldPriceAtBoundary:
             },
         }
         with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=1.5),
+            patch.object(coordinator, "_seconds_until_next_boundary", return_value=0.5),
             patch.object(coordinator._polling_manager, "check_new_interval", return_value=False),
             patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
         ):
@@ -1533,33 +1534,6 @@ class TestHeldPriceAtBoundary:
         ):
             mock_held.return_value = True
 
-            await coordinator._on_interval_check(None)
-
-            mock_held.assert_called_once()
-            assert coordinator._held_price_pushed is False
-
-    async def test_boundary_fallback_fires_when_pre_boundary_missed(self, hass: HomeAssistant) -> None:
-        """Test _push_held_price_at_boundary is called at boundary when pre-boundary did not fire."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-        }
-        with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=10.0),
-            patch.object(coordinator._polling_manager, "check_new_interval", return_value=True),
-            patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
-            patch.object(coordinator, "async_refresh", new=AsyncMock()),
-            patch.object(coordinator, "_schedule_next_poll"),
-            patch.object(coordinator, "_cancel_pending_poll"),
-            patch.object(coordinator, "_schedule_confirmation_timeout"),
-        ):
             await coordinator._on_interval_check(None)
 
             mock_held.assert_called_once()
