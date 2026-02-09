@@ -140,6 +140,7 @@ class TestAmberApiClient:
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
         """Test site fetch with rate limiting raises RateLimitedError."""
+        rate_limiter.record_rate_limit(None)  # Consume grace so mock 429 is second
         err = ApiException(status=429)
         err.headers = _make_rate_limit_headers(reset=60)
 
@@ -196,8 +197,8 @@ class TestAmberApiClient:
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
         """Test price fetch when already in rate limit backoff raises RateLimitedError."""
-        # Put rate limiter into backoff mode
-        rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))
+        rate_limiter.record_rate_limit(None)  # Consume grace
+        rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))  # Put into backoff
 
         with pytest.raises(RateLimitedError):
             await api_client.fetch_current_prices("test_site")
@@ -219,6 +220,7 @@ class TestAmberApiClient:
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
         """Test price fetch triggers backoff on 429."""
+        rate_limiter.record_rate_limit(None)  # Consume grace so mock 429 is second
         err = ApiException(status=429)
         err.headers = _make_rate_limit_headers(reset=120)
 
@@ -240,6 +242,7 @@ class TestAmberApiClient:
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
         """Test 429 response without rate limit headers uses exponential backoff."""
+        rate_limiter.record_rate_limit(None)  # Consume grace so mock 429 is second
         err = ApiException(status=429)
         # CloudFront 429 responses don't include rate limit headers
         err.headers = {
@@ -257,18 +260,17 @@ class TestAmberApiClient:
 
             # No reset_at when headers are missing
             assert exc_info.value.reset_at is None
-            # Still triggers backoff (initial backoff of 10s)
+            # Still triggers backoff (initial backoff of 1s)
             assert rate_limiter.is_limited() is True
-            assert rate_limiter.current_backoff == 10
+            assert rate_limiter.current_backoff == 1
 
     async def test_fetch_current_prices_resets_backoff_on_success(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
         """Test successful fetch resets rate limiter backoff."""
-        # Trigger a rate limit first
-        rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=5))
-        # Wait for backoff to expire (simulate)
-        rate_limiter._rate_limit_until = None  # Clear rate limit
+        rate_limiter.record_rate_limit(None)  # Consume grace
+        rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=5))  # Trigger backoff
+        rate_limiter._rate_limit_until = None  # Simulate backoff expired
 
         interval = _make_interval()
         mock_response = MagicMock()
