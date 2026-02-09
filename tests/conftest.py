@@ -281,7 +281,12 @@ def mock_channel_data_feed_in() -> dict:
         ATTR_DESCRIPTOR: "low",
         ATTR_SPIKE_STATUS: "none",
         ATTR_FORECASTS: [
-            {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_PER_KWH: 0.11, "advanced_price_predicted": 0.12},
+            {
+                ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
+                ATTR_PER_KWH: 0.11,
+                ATTR_SPOT_PER_KWH: 0.09,
+                "advanced_price_predicted": {"low": 0.08, "predicted": 0.12, "high": 0.18},
+            },
         ],
     }
 
