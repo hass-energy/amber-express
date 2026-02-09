@@ -20,6 +20,7 @@ from custom_components.amber_express.const import (
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
     ATTR_PER_KWH,
+    ATTR_SPOT_PER_KWH,
     ATTR_START_TIME,
     CHANNEL_CONTROLLED_LOAD,
     CHANNEL_FEED_IN,
@@ -463,8 +464,10 @@ class TestAmberDetailedPriceSensor:
 
         attrs = sensor.extra_state_attributes
         forecasts = attrs[ATTR_FORECASTS]
-        # Original price is 0.11, should be -0.11 after inversion
-        assert forecasts[0][ATTR_PER_KWH] == -0.11
+        forecast = forecasts[0]
+        assert forecast[ATTR_PER_KWH] == -0.11
+        assert forecast[ATTR_SPOT_PER_KWH] == 0.09
+        assert forecast[ATTR_ADVANCED_PRICE] == {"low": -0.08, "predicted": -0.12, "high": -0.18}
 
     def test_detailed_price_sensor_disabled_by_default(
         self,
