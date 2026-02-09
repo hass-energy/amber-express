@@ -19,10 +19,11 @@ class ExponentialBackoffRateLimiter:
     - Providing remaining seconds until rate limit expires
 
     The backoff strategy:
-    1. If API provides ratelimit-reset header, use that duration + 2s buffer
-    2. Otherwise, start at initial_backoff (10s) and double on each consecutive 429
+    1. First consecutive 429 is ignored (no backoff) to tolerate spurious server-load 429s
+    2. Second consecutive 429: if API provides ratelimit-reset header, use that + 2s buffer;
+       otherwise start at initial_backoff (1s) and double on each further consecutive 429
     3. Cap at max_backoff (300s / 5 minutes)
-    4. Reset to 0 on any successful API call
+    4. Reset to 0 on any successful API call (including resetting the consecutive counter)
 
     This class is shared between AmberApiClient (which records events) and the
     coordinator (which checks before scheduling polls).
@@ -31,13 +32,13 @@ class ExponentialBackoffRateLimiter:
     def __init__(
         self,
         *,
-        initial_backoff: int = 10,
+        initial_backoff: int = 1,
         max_backoff: int = 300,
     ) -> None:
         """Initialize the rate limiter.
 
         Args:
-            initial_backoff: Initial backoff duration in seconds
+            initial_backoff: Initial backoff duration in seconds (used from 2nd 429 onward)
             max_backoff: Maximum backoff duration in seconds
 
         """
@@ -45,6 +46,7 @@ class ExponentialBackoffRateLimiter:
         self._max_backoff = max_backoff
         self._backoff_seconds = 0
         self._rate_limit_until: datetime | None = None
+        self._consecutive_429s = 0
 
     def is_limited(self) -> bool:
         """Check if we're currently rate limited.
@@ -70,24 +72,30 @@ class ExponentialBackoffRateLimiter:
         return max(0, remaining)
 
     def record_success(self) -> None:
-        """Record a successful API call, resetting backoff."""
+        """Record a successful API call, resetting backoff and consecutive 429 count."""
         self._backoff_seconds = 0
         self._rate_limit_until = None
+        self._consecutive_429s = 0
 
-    def record_rate_limit(self, reset_at: datetime | None) -> datetime:
+    def record_rate_limit(self, reset_at: datetime | None) -> datetime | None:
         """Record a rate limit event and set backoff.
 
-        Uses reset_at from API header if provided, otherwise falls back
-        to exponential backoff.
+        First consecutive 429 is ignored (no backoff). From the second onward,
+        uses reset_at from API header if provided, otherwise exponential backoff.
 
         Args:
             reset_at: When quota resets (from API header), or None to use backoff
 
         Returns:
-            When the rate limit expires
+            When the rate limit expires, or None if first 429 was ignored
 
         """
+        self._consecutive_429s += 1
         now = datetime.now(UTC)
+
+        if self._consecutive_429s == 1:
+            _LOGGER.debug("Rate limited (429), ignoring first occurrence")
+            return None
 
         if reset_at is not None:
             # Use the API-provided reset time (add small buffer)

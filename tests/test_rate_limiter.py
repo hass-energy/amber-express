@@ -21,7 +21,8 @@ class TestRateLimiterInit:
         """Test custom initialization values."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=5, max_backoff=60)
 
-        # First rate limit should use custom initial
+        # First rate limit is ignored; second uses custom initial
+        limiter.record_rate_limit(None)
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 5
 
@@ -42,9 +43,10 @@ class TestIsLimited:
         with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
-            limiter.record_rate_limit(None)
+            limiter.record_rate_limit(None)  # First ignored
+            limiter.record_rate_limit(None)  # Second sets 1s backoff
 
-            # Still at 10:00, limit until 10:00:10
+            # Still at 10:00, limit until 10:00:01
             assert limiter.is_limited() is True
 
     def test_not_limited_when_rate_limit_expired(self) -> None:
@@ -53,7 +55,8 @@ class TestIsLimited:
 
         with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            limiter.record_rate_limit(None)
+            limiter.record_rate_limit(None)  # First ignored
+            limiter.record_rate_limit(None)  # Second sets 1s backoff
 
             # Move past the limit
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
@@ -73,12 +76,11 @@ class TestRemainingSeconds:
         """Test remaining_seconds returns correct time remaining."""
         limiter = ExponentialBackoffRateLimiter()
 
-        # Record a rate limit
-        limiter.record_rate_limit(None)
+        limiter.record_rate_limit(None)  # First ignored
+        limiter.record_rate_limit(None)  # Second sets 1s backoff
 
-        # Remaining should be approximately the initial backoff (10s)
         remaining = limiter.remaining_seconds()
-        assert 9 <= remaining <= 10  # Allow for test execution time
+        assert 0 <= remaining <= 1  # Default initial is 1s
 
     def test_zero_when_expired(self) -> None:
         """Test remaining_seconds returns 0 when limit has expired."""
@@ -86,9 +88,9 @@ class TestRemainingSeconds:
 
         with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            limiter.record_rate_limit(None)
+            limiter.record_rate_limit(None)  # First ignored
+            limiter.record_rate_limit(None)  # Second sets 1s backoff
 
-            # Move past the limit
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 15, tzinfo=UTC)
             remaining = limiter.remaining_seconds()
             assert remaining == 0
@@ -101,9 +103,9 @@ class TestRecordSuccess:
         """Test record_success resets backoff to 0."""
         limiter = ExponentialBackoffRateLimiter()
 
-        # Set up a rate limit
-        limiter.record_rate_limit(None)
-        assert limiter.current_backoff == 10
+        limiter.record_rate_limit(None)  # First ignored
+        limiter.record_rate_limit(None)  # Second sets 1s backoff
+        assert limiter.current_backoff == 1
 
         limiter.record_success()
         assert limiter.current_backoff == 0
@@ -112,6 +114,7 @@ class TestRecordSuccess:
         """Test record_success clears rate_limit_until."""
         limiter = ExponentialBackoffRateLimiter()
 
+        limiter.record_rate_limit(None)  # First ignored
         limiter.record_rate_limit(None)
         assert limiter.rate_limit_until is not None
 
@@ -124,6 +127,7 @@ class TestRecordSuccess:
 
         with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+            limiter.record_rate_limit(None)  # First ignored
             limiter.record_rate_limit(None)
             assert limiter.is_limited() is True
 
@@ -134,29 +138,28 @@ class TestRecordSuccess:
 class TestRecordRateLimit:
     """Tests for record_rate_limit method."""
 
-    def test_first_rate_limit_uses_initial_backoff(self) -> None:
-        """Test first rate limit uses initial backoff value when reset_at is None."""
+    def test_second_rate_limit_uses_initial_backoff(self) -> None:
+        """Test second consecutive rate limit uses initial backoff when reset_at is None."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
 
-        limiter.record_rate_limit(None)
+        limiter.record_rate_limit(None)  # First ignored
+        limiter.record_rate_limit(None)  # Second applies 10s
 
         assert limiter.current_backoff == 10
 
     def test_exponential_backoff_doubles(self) -> None:
-        """Test exponential backoff doubles on each rate limit."""
+        """Test exponential backoff doubles on each rate limit after the first."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10, max_backoff=300)
 
+        limiter.record_rate_limit(None)  # First ignored
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 10
 
-        # Clear rate limit so we can trigger another
         limiter._rate_limit_until = None
-
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 20
 
         limiter._rate_limit_until = None
-
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 40
 
@@ -164,6 +167,7 @@ class TestRecordRateLimit:
         """Test backoff does not exceed max_backoff."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=100, max_backoff=150)
 
+        limiter.record_rate_limit(None)  # First ignored
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 100
 
@@ -176,47 +180,52 @@ class TestRecordRateLimit:
         assert limiter.current_backoff == 150  # Still capped
 
     def test_returns_expiry_time(self) -> None:
-        """Test record_rate_limit returns expiry datetime."""
+        """Test record_rate_limit returns expiry datetime on second 429, None on first."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
 
-        expiry = limiter.record_rate_limit(None)
+        first = limiter.record_rate_limit(None)
+        assert first is None
 
-        # Returned value should match the property
+        expiry = limiter.record_rate_limit(None)
         assert expiry == limiter.rate_limit_until
         assert expiry is not None
 
     def test_sets_rate_limit_until(self) -> None:
-        """Test record_rate_limit sets rate_limit_until."""
+        """Test record_rate_limit sets rate_limit_until on second 429 only."""
         limiter = ExponentialBackoffRateLimiter()
 
         assert limiter.rate_limit_until is None
 
-        limiter.record_rate_limit(None)
+        limiter.record_rate_limit(None)  # First ignored
+        assert limiter.rate_limit_until is None
 
+        limiter.record_rate_limit(None)
         assert limiter.rate_limit_until is not None
 
     def test_uses_reset_at_when_provided(self) -> None:
-        """Test record_rate_limit uses reset_at from API when provided."""
+        """Test record_rate_limit uses reset_at from API when provided (on second 429)."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
 
         reset_at = datetime.now(UTC) + timedelta(seconds=120)
-        limiter.record_rate_limit(reset_at)
+        limiter.record_rate_limit(reset_at)  # First ignored
+        limiter.record_rate_limit(reset_at)  # Second uses reset_at + 2 buffer
 
-        # Should use reset_at + 2 buffer instead of initial_backoff (may be 121-122 due to timing)
         assert 121 <= limiter.current_backoff <= 122
 
     def test_none_reset_uses_exponential_backoff(self) -> None:
         """Test record_rate_limit falls back to exponential when reset_at is None."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
 
-        limiter.record_rate_limit(None)
+        limiter.record_rate_limit(None)  # First ignored
+        limiter.record_rate_limit(None)  # Second applies 10s
         assert limiter.current_backoff == 10
 
     def test_none_reset_at_uses_exponential_backoff(self) -> None:
         """Test record_rate_limit falls back to exponential when reset_at is None."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10)
 
-        limiter.record_rate_limit(None)
+        limiter.record_rate_limit(None)  # First ignored
+        limiter.record_rate_limit(None)  # Second applies 10s
         assert limiter.current_backoff == 10
 
 
@@ -227,20 +236,18 @@ class TestBackoffSequence:
         """Test a full sequence of rate limits and success."""
         limiter = ExponentialBackoffRateLimiter(initial_backoff=10, max_backoff=80)
 
-        # First rate limit
+        limiter.record_rate_limit(None)  # First ignored
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 10
 
-        # Success resets
         limiter.record_success()
         assert limiter.current_backoff == 0
         assert limiter.rate_limit_until is None
 
-        # Start over
+        limiter.record_rate_limit(None)  # Grace again
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 10
 
-        # Multiple consecutive rate limits
         limiter._rate_limit_until = None
         limiter.record_rate_limit(None)
         assert limiter.current_backoff == 20
@@ -267,6 +274,9 @@ class TestProperties:
 
         assert limiter.rate_limit_until is None
 
+        limiter.record_rate_limit(None)  # First ignored
+        assert limiter.rate_limit_until is None
+
         limiter.record_rate_limit(None)
         assert limiter.rate_limit_until is not None
         assert isinstance(limiter.rate_limit_until, datetime)
@@ -277,5 +287,48 @@ class TestProperties:
 
         assert limiter.current_backoff == 0
 
-        limiter.record_rate_limit(None)
+        limiter.record_rate_limit(None)  # First ignored
+        limiter.record_rate_limit(None)  # Second applies 15s
         assert limiter.current_backoff == 15
+
+
+class TestGraceFirst429:
+    """Tests for ignoring the first consecutive 429."""
+
+    def test_first_429_returns_none_and_not_limited(self) -> None:
+        """Test first 429 returns None and is_limited stays False."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        result = limiter.record_rate_limit(None)
+
+        assert result is None
+        assert limiter.is_limited() is False
+        assert limiter.rate_limit_until is None
+        assert limiter.current_backoff == 0
+
+    def test_second_consecutive_429_starts_backoff(self) -> None:
+        """Test second consecutive 429 applies backoff."""
+        limiter = ExponentialBackoffRateLimiter(initial_backoff=1)
+
+        limiter.record_rate_limit(None)
+        result = limiter.record_rate_limit(None)
+
+        assert result is not None
+        assert limiter.is_limited() is True
+        assert limiter.current_backoff == 1
+
+    def test_success_resets_grace(self) -> None:
+        """Test success between 429s resets the grace so next 429 is ignored again."""
+        limiter = ExponentialBackoffRateLimiter(initial_backoff=2)
+
+        limiter.record_rate_limit(None)  # Ignored
+        limiter.record_rate_limit(None)  # Backoff 2s
+        limiter.record_success()  # Reset
+
+        limiter.record_rate_limit(None)  # Ignored again
+        assert limiter.is_limited() is False
+        assert limiter.current_backoff == 0
+
+        limiter.record_rate_limit(None)  # Backoff 2s again
+        assert limiter.is_limited() is True
+        assert limiter.current_backoff == 2
