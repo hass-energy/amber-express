@@ -22,7 +22,6 @@ from .const import (
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
     ATTR_PER_KWH,
-    ATTR_SPOT_PER_KWH,
     ATTR_START_TIME,
     CHANNEL_CONTROLLED_LOAD,
     CHANNEL_FEED_IN,
@@ -432,7 +431,7 @@ class AmberDetailedPriceSensor(AmberBaseSensor):
     def _negate_prices(self, data: dict[str, Any]) -> dict[str, Any]:
         """Negate price fields for feed-in channel."""
         result = data.copy()
-        for key in (ATTR_PER_KWH, ATTR_ADVANCED_PRICE, ATTR_SPOT_PER_KWH):
+        for key in (ATTR_PER_KWH, ATTR_ADVANCED_PRICE):
             if key not in result:
                 continue
             value = result[key]

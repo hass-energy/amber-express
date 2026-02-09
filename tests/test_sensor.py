@@ -466,7 +466,7 @@ class TestAmberDetailedPriceSensor:
         forecasts = attrs[ATTR_FORECASTS]
         forecast = forecasts[0]
         assert forecast[ATTR_PER_KWH] == -0.11
-        assert forecast[ATTR_SPOT_PER_KWH] == -0.09
+        assert forecast[ATTR_SPOT_PER_KWH] == 0.09
         assert forecast[ATTR_ADVANCED_PRICE] == {"low": -0.08, "predicted": -0.12, "high": -0.18}
 
     def test_detailed_price_sensor_disabled_by_default(
