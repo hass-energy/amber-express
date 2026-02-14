@@ -83,10 +83,7 @@
     "select": {
       "pricing_mode": {
         "name": "Pricing Mode",
-        "state": {
-          "advanced_price_predicted": "Advanced Price Predicted",
-          "per_kwh": "AEMO (including tariffs)"
-        }
+        "state": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
       }
     }
   },
@@ -139,14 +136,6 @@
       "initiate_flow": { "reconfigure": "Site", "user": "Site" }
     }
   },
-  "selector": {
-    "pricing_mode": {
-      "options": {
-        "advanced_price_predicted": "Advanced Price Predicted",
-        "per_kwh": "AEMO (including tariffs)"
-      }
-    }
-  },
   "issues": {
     "legacy_pricing_mode_all": {
       "title": "Migrate removed pricing mode",
@@ -159,6 +148,11 @@
           }
         }
       }
+    }
+  },
+  "selector": {
+    "pricing_mode": {
+      "options": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
     }
   }
 }

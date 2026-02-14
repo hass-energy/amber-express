@@ -62,9 +62,7 @@ class LegacyPricingModeAllRepairFlow(RepairsFlow):
         """Handle the first step of a fix flow."""
         return await self.async_step_confirm()
 
-    async def async_step_confirm(
-        self, user_input: dict[str, str] | None = None
-    ) -> data_entry_flow.FlowResult:
+    async def async_step_confirm(self, user_input: dict[str, str] | None = None) -> data_entry_flow.FlowResult:
         """Handle the confirm step of a fix flow."""
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if entry is None:
