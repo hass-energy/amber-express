@@ -65,33 +65,27 @@ Export Price: sensor.amber_express_feed_in_forecast
 
 ## Smart Polling
 
-Amber Express learns when confirmed prices typically arrive and polls at precisely the right moment to get them immediately:
+Amber Express learns when confirmed prices typically arrive and schedules its polling at the most likely times.
 
-1. At the start of each 5-minute interval, polls to get the initial estimate
+1. At the start of each 5-minute interval, polls to get the initial estimate price and forecast
 2. Tracks when confirmed prices historically arrive and times subsequent polls accordingly
 3. Stops polling once confirmed price is received
 
-This adaptive approach typically delivers confirmed prices within seconds of publication, rather than waiting up to a minute for the next fixed polling cycle.
+This adaptive approach typically delivers confirmed prices within seconds of publication.
 
 ## WebSocket Support
 
 The integration will (optionally) connect to Amber's WebSocket API for real-time push updates. This is an alpha feature from Amber and cannot be currently relied upon, so it is used in tandem, getting prices from whichever API is faster.
 
-## Comparison with Official Integration
+## Comparison
 
-| Feature          | Official       | amber2mqtt                  | Amber Express              |
-| ---------------- | -------------- | --------------------------- | -------------------------- |
-| Polling          | Fixed 1-minute | Scheduled (you configure)   | Adaptive (learns timing)   |
-| Stops on Confirm | No             | Yes                         | Yes                        |
-| AEMO Direct      | No             | Yes                         | No                         |
-| WebSocket        | No             | No                          | Optional (alpha)           |
-| Forecast Pricing | per_kwh        | per_kwh (advanced in attrs) | per_kwh or advanced_price  |
-| Runs In          | HA directly    | Docker + MQTT               | HA directly                |
-
-Key differences:
-
-- **amber2mqtt** uses pre-configured poll schedules (you define the seconds/minutes) and requires Docker + MQTT broker. Polls AEMO directly as a secondary source. Publishes advanced_price as forecast attributes.
-- **Amber Express** learns when prices arrive and adapts automatically. Runs as a native HA integration. Lets you choose per_kwh or advanced_price for forecast sensor values.
+| Feature          | Amber Express             | amber2mqtt                  | Official           |
+| ---------------- | ------------------------- | --------------------------- | ------------------ |
+| Polling          | Adaptive (learns timing)  | Scheduled (you configure)   | Fixed 1-minute     |
+| Update Speed     | Fastest                   | Fast                        | Slow               |
+| Stops on Confirm | Yes                       | Yes                         | No                 |
+| WebSocket        | Optional (alpha)          | No                          | No                 |
+| Environment      | Native Integration        | Addon + Requires MQTT       | Native Integration |
 
 ## Credits
 
