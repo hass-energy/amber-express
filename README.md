@@ -14,7 +14,7 @@
 
 ---
 
-A Home Assistant custom integration for [Amber Electric](https://www.amber.com.au/) that provides real-time electricity pricing with smart polling and WebSocket support.
+A Home Assistant custom integration for [Amber Electric](https://www.amber.com.au/) that provides faster real-time electricity pricing with smart polling and WebSocket support.
 
 ## Features
 
