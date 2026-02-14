@@ -18,11 +18,17 @@ from .const import (
     CONF_SITE_ID,
     DEFAULT_ENABLE_WEBSOCKET,
     DEFAULT_FORECAST_INTERVALS,
+    DEFAULT_PRICING_MODE,
     PRICING_MODE_AEMO,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
 from .coordinator import AmberDataCoordinator
+from .repairs import (
+    LEGACY_PRICING_MODE_ALL,
+    async_create_legacy_pricing_mode_all_issue,
+    async_delete_legacy_pricing_mode_all_issue,
+)
 from .websocket import AmberWebSocketClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,6 +84,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> boo
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_TYPE_SITE:
             continue
+
+        pricing_mode = subentry.data.get(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
+        if pricing_mode == LEGACY_PRICING_MODE_ALL:
+            async_create_legacy_pricing_mode_all_issue(
+                hass=hass,
+                entry_id=entry.entry_id,
+                subentry_id=subentry.subentry_id,
+                site_name=subentry.title,
+            )
+            continue
+        async_delete_legacy_pricing_mode_all_issue(hass, subentry.subentry_id)
 
         await _setup_site(hass, entry, subentry, runtime_data)
 

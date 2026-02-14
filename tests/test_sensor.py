@@ -333,6 +333,26 @@ class TestAmberPriceSensor:
         # APP mode should use advanced_price_predicted for forecast values
         assert attrs["forecast"][0]["value"] == 0.28
 
+    def test_price_sensor_forecast_aemo_uses_single_value_shape(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+    ) -> None:
+        """Test AEMO mode forecasts use single value output."""
+        subentry = create_mock_subentry(pricing_mode="aemo")
+
+        sensor = AmberPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=subentry,
+            channel=CHANNEL_GENERAL,
+        )
+        mock_config_entry.subentries = {subentry.subentry_id: subentry}
+
+        first_forecast = sensor.extra_state_attributes["forecast"][0]
+        assert first_forecast["value"] == 0.26
+        assert set(first_forecast) == {"time", "value"}
+
     def test_price_sensor_feed_in_negates_forecast(
         self,
         mock_coordinator_with_data: MagicMock,
