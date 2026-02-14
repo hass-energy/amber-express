@@ -79,13 +79,13 @@ The integration will (optionally) connect to Amber's WebSocket API for real-time
 
 ## Comparison
 
-| Feature          | Amber Express             | amber2mqtt                  | Amber Electric     |
-| ---------------- | ------------------------- | --------------------------- | ------------------ |
-| Polling          | Adaptive (learns timing)  | Scheduled (you configure)   | Fixed 1-minute     |
-| Update Speed     | Fastest                   | Fast                        | Slow               |
-| Stops on Confirm | Yes                       | Yes                         | No                 |
-| WebSocket        | Optional (alpha)          | No                          | No                 |
-| Environment      | Native Integration        | Addon + Requires MQTT       | Native Integration |
+| Feature          | Amber Express            | amber2mqtt                | Amber Electric     |
+| ---------------- | ------------------------ | ------------------------- | ------------------ |
+| Polling          | Adaptive (learns timing) | Scheduled (you configure) | Fixed 1-minute     |
+| Update Speed     | Fastest                  | Fast                      | Slow               |
+| Stops on Confirm | Yes                      | Yes                       | No                 |
+| WebSocket        | Optional (alpha)         | No                        | No                 |
+| Environment      | Native Integration       | Addon + Requires MQTT     | Native Integration |
 
 ## Credits
 
