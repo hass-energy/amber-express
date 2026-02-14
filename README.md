@@ -28,11 +28,11 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 
 ### Sensors
 
-![Amber Express sensors](images/sensors.png)
+![Amber Express sensors](https://github.com/hass-energy/amber-express/raw/main/images/sensors.png)
 
 ### Diagnostics
 
-![Amber Express diagnostics](images/diagnostics.png)
+![Amber Express diagnostics](https://github.com/hass-energy/amber-express/raw/main/images/diagnostics.png)
 
 ## Installation
 
