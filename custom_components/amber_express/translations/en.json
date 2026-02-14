@@ -154,8 +154,8 @@
       "fix_flow": {
         "step": {
           "confirm": {
-            "title": "Migrate pricing mode for `{site_name}`",
-            "description": "This will update the site to APP pricing mode (`advanced_price_predicted`) so setup can continue."
+            "title": "Migrate pricing mode for {site_name}",
+            "description": "The \"Both\" pricing mode has been removed. This repair will update the site to APP pricing mode (`advanced_price_predicted`)."
           }
         }
       }
