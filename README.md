@@ -24,6 +24,12 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 - **Flexible Pricing**: Choose between AEMO-based pricing (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
 - **HAEO Compatible**: Forecast sensors are fully compatible with [HAEO](https://haeo.io/) for energy optimization
 
+## Screenshots
+
+| Sensors                                                                                                                        | Diagnostics                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="https://github.com/hass-energy/amber-express/raw/main/images/sensors.png" alt="Amber Express sensors" width="317px"> | <img src="https://github.com/hass-energy/amber-express/raw/main/images/diagnostics.png" alt="Amber Express diagnostics" width="317px"> |
+
 ## Installation
 
 ### HACS (Recommended)
