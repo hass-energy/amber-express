@@ -83,11 +83,7 @@
     "select": {
       "pricing_mode": {
         "name": "Pricing Mode",
-        "state": {
-          "advanced_price_predicted": "Advanced Price Predicted",
-          "all": "Both",
-          "per_kwh": "AEMO (including tariffs)"
-        }
+        "state": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
       }
     }
   },
@@ -140,13 +136,22 @@
       "initiate_flow": { "reconfigure": "Site", "user": "Site" }
     }
   },
+  "issues": {
+    "legacy_pricing_mode_all": {
+      "title": "Migrate removed pricing mode",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Migrate pricing mode for {site_name}",
+            "description": "The \"Both\" pricing mode has been removed. This repair will update the site to APP pricing mode (`advanced_price_predicted`)."
+          }
+        }
+      }
+    }
+  },
   "selector": {
     "pricing_mode": {
-      "options": {
-        "advanced_price_predicted": "Advanced Price Predicted",
-        "all": "Both",
-        "per_kwh": "AEMO (including tariffs)"
-      }
+      "options": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
     }
   }
 }

@@ -45,7 +45,6 @@ from .const import (
     DOMAIN,
     MAX_FORECAST_INTERVALS,
     PRICING_MODE_AEMO,
-    PRICING_MODE_ALL,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
@@ -654,7 +653,6 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                             options=[
                                 {"value": PRICING_MODE_APP, "label": "advanced_price_predicted"},
                                 {"value": PRICING_MODE_AEMO, "label": "per_kwh"},
-                                {"value": PRICING_MODE_ALL, "label": "all"},
                             ],
                             translation_key="pricing_mode",
                             mode=SelectSelectorMode.DROPDOWN,

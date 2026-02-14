@@ -27,7 +27,6 @@ CHANNEL_CONTROLLED_LOAD: Final = "controlled_load"
 # Pricing modes
 PRICING_MODE_AEMO: Final = "per_kwh"  # Uses per_kwh
 PRICING_MODE_APP: Final = "advanced_price_predicted"  # Uses advanced_price_predicted
-PRICING_MODE_ALL: Final = "all"  # Includes all price types in forecasts
 
 # Config keys
 CONF_API_TOKEN: Final = "api_token"  # noqa: S105
