@@ -20,8 +20,10 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 
 - **Simple Setup**: Just like the official integration - enter your API key, select a site, and you're done
 - **Smart Polling**: Adapts and learns when confirmed prices typically arrive and polls at those times to fetch latest prices as fast as possible
-- **WebSocket Support**: Supports real-time updates via Amber's WebSocket API (alpha feature) as a redundant data source to polling
 - **Flexible Pricing**: Choose between AEMO-based pricing (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
+- **Waits for Confirmation**: Holds previous prices until confirmed values arrive, with configurable timeout control
+- **Demand Window Pricing**: Optionally add a surcharge during demand windows for optimization-focused automations
+- **WebSocket Support**: Supports real-time updates via Amber's WebSocket API (alpha feature) as a redundant data source to polling
 - **HAEO Compatible**: Forecast sensors are fully compatible with [HAEO](https://haeo.io/) for energy optimization
 
 ## Screenshots
@@ -56,8 +58,24 @@ Or manually:
 2. Click **Add Integration**
 3. Search for "Amber Express"
 4. Enter your Amber API token (get one from [Amber Developer Settings](https://app.amber.com.au/developers/))
-5. Select your site from the dropdown
+5. Select your site
 6. Optionally configure the integration options
+
+## Options
+
+Amber Express supports the following per-site options:
+
+- **Site name**: Display name used for the Home Assistant device and entities
+- **Pricing mode**: Choose the price field used by sensors
+  - `per_kwh`: AEMO-based pricing (this is what the Amber App displays to users)
+  - `advanced_price_predicted`: Amber advanced predicted pricing (this is what Amber SmartShift uses, and recommended for optimizers)
+- **Enable WebSocket**: Enables Amber WebSocket updates as a secondary real-time data source
+- **Wait for confirmed prices**: Enabled by default; holds previous interval price until confirmation
+- **Confirmation timeout (seconds)**: Maximum wait before publishing falling back to estimate price
+- **Forecast intervals**: Number of future intervals returned by forecast sensors
+- **Demand Window Price ($/kWh)**: Adds a configurable surcharge to general channel prices during demand windows
+
+Adding a demand window price helps optimizers such as [HAEO](https://haeo.io/) avoid importing during the demand window.
 
 ## HAEO Integration
 
@@ -85,13 +103,13 @@ The integration will (optionally) connect to Amber's WebSocket API for real-time
 
 ## Comparison
 
-| Feature          | Amber Express            | amber2mqtt                | Amber Electric     |
-| ---------------- | ------------------------ | ------------------------- | ------------------ |
-| Polling          | Adaptive (learns timing) | Scheduled (you configure) | Fixed 1-minute     |
-| Update Speed     | Fastest                  | Fast                      | Slow               |
-| Stops on Confirm | Yes                      | Yes                       | No                 |
-| WebSocket        | Optional (alpha)         | No                        | No                 |
-| Environment      | Native Integration       | Addon + Requires MQTT     | Native Integration |
+| Feature           | Amber Express            | amber2mqtt                | Amber Electric     |
+| ----------------- | ------------------------ | ------------------------- | ------------------ |
+| Polling           | Adaptive (learns timing) | Scheduled (you configure) | Fixed 1-minute     |
+| Update Speed      | Fastest                  | Fast                      | Slow               |
+| Waits for Confirm | Configurable             | Always                    | No                 |
+| WebSocket         | Optional (alpha)         | No                        | No                 |
+| Environment       | Native Integration       | Addon + Requires MQTT     | Native Integration |
 
 ## Credits
 
