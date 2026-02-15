@@ -45,7 +45,7 @@ DEFAULT_PRICING_MODE: Final = PRICING_MODE_APP
 DEFAULT_FORECAST_INTERVALS: Final = 288
 DEFAULT_ENABLE_WEBSOCKET: Final = True
 DEFAULT_WAIT_FOR_CONFIRMED: Final = True  # Keep polling until non-estimated price
-DEFAULT_CONFIRMATION_TIMEOUT: Final = 60  # seconds to wait for confirmed price
+DEFAULT_CONFIRMATION_TIMEOUT: Final = 45  # seconds to wait for confirmed price
 DEFAULT_DEMAND_WINDOW_PRICE: Final = 0.0  # $/kWh penalty during demand window
 
 # Sensor attributes
