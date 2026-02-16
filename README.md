@@ -21,6 +21,7 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 
 - **Simple Setup**: Just like the official integration - enter your API key, select a site, and you're done
 - **Smart Polling**: Adapts and learns when confirmed prices typically arrive and polls at those times to fetch latest prices as fast as possible
+- **Forecasting**: Provides price forecasts for both import and feed-in channels for automations and optimizers
 - **Flexible Pricing**: Choose between AEMO-based pricing (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
 - **Waits for Confirmation**: Holds previous prices until confirmed values arrive, with configurable timeout control
 - **Demand Window Pricing**: Optionally add a surcharge during demand windows for optimization-focused automations
@@ -97,6 +98,14 @@ Amber Express learns when confirmed prices typically arrive and schedules its po
 3. Stops polling once confirmed price is received
 
 This adaptive approach typically delivers confirmed prices within seconds of publication.
+
+## Forecasting
+
+Amber Express includes forecast attributes for both import and feed-in channels.
+
+- Forecast length is configurable using the **Forecast intervals** option
+- Forecast sensors update with each polling cycle and can be consumed directly by automations
+- Forecast entities are designed to integrate easily with optimizers such as [HAEO](https://haeo.io/)
 
 ## WebSocket Support
 
