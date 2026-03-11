@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, cast
 
-from custom_components.amber_express.const import ATTR_FORECASTS, DATA_SOURCE_POLLING, DATA_SOURCE_WEBSOCKET
+from custom_components.amber_express.const import (
+    ATTR_FORECASTS,
+    ATTR_START_TIME,
+    DATA_SOURCE_POLLING,
+    DATA_SOURCE_WEBSOCKET,
+)
 from custom_components.amber_express.types import ChannelData
 
 
@@ -18,21 +23,36 @@ class MergedResult:
     source: str
 
 
+def _extract_data_time(data: dict[str, ChannelData]) -> datetime | None:
+    """Extract the interval start_time from channel data.
+
+    Looks at the first non-metadata channel and parses its start_time ISO string.
+    Returns None if no channel has a start_time.
+    """
+    for channel, channel_data in data.items():
+        if channel.startswith("_"):
+            continue
+        start_time = channel_data.get(ATTR_START_TIME)
+        if isinstance(start_time, str):
+            return datetime.fromisoformat(start_time)
+    return None
+
+
 class DataSourceMerger:
-    """Merges price data from polling and websocket sources with timestamp-based priority.
+    """Merges price data from polling and websocket sources with interval-based priority.
 
     Responsibilities:
     - Storing current interval data from polling and websocket separately
     - Storing forecasts (only available from polling API, not websocket)
-    - Determining which source has fresher data based on timestamps
+    - Determining which source has fresher data based on interval start_time
     - Merging current interval with forecasts into a unified result
     - Tracking metadata about data freshness and source
 
     Merge strategy:
-    - Current interval: whichever source (polling or websocket) is more recent wins
+    - Current interval: compared by data start_time, not wall-clock receipt time.
+      WebSocket only wins if its data covers a strictly newer interval than polling.
+      For the same interval, polling wins (it has confirmed prices and forecasts).
     - Forecasts: always from polling, preserved even when websocket updates current
-    - This ensures websocket provides real-time current prices while polling
-      provides forecast data that websocket doesn't have
     """
 
     def __init__(self) -> None:
@@ -51,13 +71,15 @@ class DataSourceMerger:
         """Update polling data.
 
         Extracts current interval data and forecasts, storing them separately.
+        Timestamp is derived from the data's start_time, not wall clock.
 
         Args:
             data: The new polling data (may contain forecasts)
 
         """
-        now = datetime.now(UTC)
-        self._polling_current_timestamp = now
+        data_time = _extract_data_time(data)
+        if data_time is not None:
+            self._polling_current_timestamp = data_time
 
         # Separate current interval from forecasts
         for channel, channel_data in data.items():
@@ -69,7 +91,8 @@ class DataSourceMerger:
             forecasts = channel_data.get(ATTR_FORECASTS)
             if forecasts is not None:
                 self._forecasts[channel] = forecasts
-                self._forecasts_timestamp = now
+                if data_time is not None:
+                    self._forecasts_timestamp = data_time
 
             # Store current interval without forecasts
             current_only = cast("ChannelData", {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS})
@@ -79,18 +102,23 @@ class DataSourceMerger:
         """Update websocket data.
 
         WebSocket only provides current interval data, never forecasts.
+        Timestamp is derived from the data's start_time, not wall clock.
 
         Args:
             data: The new websocket data
 
         """
+        data_time = _extract_data_time(data)
+        if data_time is not None:
+            self._websocket_current_timestamp = data_time
         self._websocket_current = data
-        self._websocket_current_timestamp = datetime.now(UTC)
 
     def get_merged_data(self) -> MergedResult:
         """Merge data from polling and websocket sources.
 
         Uses fresher source for current interval, always attaches forecasts from polling.
+        WebSocket only wins when it has data for a strictly newer interval (by start_time).
+        Polling wins in all ambiguous cases (equal timestamps, missing timestamps).
 
         Returns:
             MergedResult containing the merged data and source name
@@ -99,26 +127,25 @@ class DataSourceMerger:
         current_data: dict[str, Any]
         data_source: str
 
-        polling_fresh = self._polling_current_timestamp is not None
-        websocket_fresh = self._websocket_current_timestamp is not None
+        polling_has_data = bool(self._polling_current)
+        websocket_has_data = bool(self._websocket_current)
 
-        # Determine which source has fresher current interval data
-        if (
-            websocket_fresh
-            and polling_fresh
-            and self._websocket_current_timestamp is not None
-            and self._polling_current_timestamp is not None
-        ):
-            if self._websocket_current_timestamp > self._polling_current_timestamp:
+        if polling_has_data and websocket_has_data:
+            # Both have data - WebSocket only wins with a strictly newer interval
+            if (
+                self._websocket_current_timestamp is not None
+                and self._polling_current_timestamp is not None
+                and self._websocket_current_timestamp > self._polling_current_timestamp
+            ):
                 current_data = {k: dict(v) for k, v in self._websocket_current.items()}
                 data_source = DATA_SOURCE_WEBSOCKET
             else:
                 current_data = {k: dict(v) for k, v in self._polling_current.items()}
                 data_source = DATA_SOURCE_POLLING
-        elif websocket_fresh:
+        elif websocket_has_data:
             current_data = {k: dict(v) for k, v in self._websocket_current.items()}
             data_source = DATA_SOURCE_WEBSOCKET
-        elif polling_fresh:
+        elif polling_has_data:
             current_data = {k: dict(v) for k, v in self._polling_current.items()}
             data_source = DATA_SOURCE_POLLING
         else:

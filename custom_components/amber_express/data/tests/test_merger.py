@@ -3,8 +3,7 @@
 # pyright: reportArgumentType=false
 # pyright: reportGeneralTypeIssues=false
 
-from datetime import UTC, datetime
-from unittest.mock import patch
+from datetime import datetime
 
 from custom_components.amber_express.const import DATA_SOURCE_POLLING, DATA_SOURCE_WEBSOCKET
 from custom_components.amber_express.data import DataSourceMerger, MergedResult
@@ -29,29 +28,34 @@ class TestUpdatePolling:
     def test_stores_data(self) -> None:
         """Test that polling data is stored."""
         merger = DataSourceMerger()
-        data = {"general": {"price": 0.25}}
+        data = {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}}
 
         merger.update_polling(data)
 
-        assert merger.polling_data == data
+        assert merger.polling_data["general"]["price"] == 0.25
 
-    def test_sets_timestamp(self) -> None:
-        """Test that timestamp is set on update."""
+    def test_sets_timestamp_from_start_time(self) -> None:
+        """Test that timestamp is derived from the data's start_time."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
 
-            merger.update_polling({"general": {"price": 0.25}})
+        assert merger.polling_timestamp == datetime.fromisoformat("2024-01-01T10:00:00+10:00")
 
-            assert merger.polling_timestamp == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+    def test_no_timestamp_without_start_time(self) -> None:
+        """Test that timestamp stays None when data has no start_time."""
+        merger = DataSourceMerger()
+
+        merger.update_polling({"general": {"price": 0.25}})
+
+        assert merger.polling_timestamp is None
 
     def test_overwrites_previous_data(self) -> None:
         """Test that new data overwrites previous data."""
         merger = DataSourceMerger()
 
-        merger.update_polling({"general": {"price": 0.25}})
-        merger.update_polling({"general": {"price": 0.30}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_polling({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
 
         assert merger.polling_data["general"]["price"] == 0.30
 
@@ -62,22 +66,27 @@ class TestUpdateWebsocket:
     def test_stores_data(self) -> None:
         """Test that websocket data is stored."""
         merger = DataSourceMerger()
-        data = {"general": {"price": 0.25}}
+        data = {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}}
 
         merger.update_websocket(data)
 
         assert merger.websocket_data == data
 
-    def test_sets_timestamp(self) -> None:
-        """Test that timestamp is set on update."""
+    def test_sets_timestamp_from_start_time(self) -> None:
+        """Test that timestamp is derived from the data's start_time."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        merger.update_websocket({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
 
-            merger.update_websocket({"general": {"price": 0.25}})
+        assert merger.websocket_timestamp == datetime.fromisoformat("2024-01-01T10:00:00+10:00")
 
-            assert merger.websocket_timestamp == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+    def test_no_timestamp_without_start_time(self) -> None:
+        """Test that timestamp stays None when data has no start_time."""
+        merger = DataSourceMerger()
+
+        merger.update_websocket({"general": {"price": 0.25}})
+
+        assert merger.websocket_timestamp is None
 
 
 class TestGetMergedData:
@@ -97,7 +106,7 @@ class TestGetMergedData:
         """Test with only polling data."""
         merger = DataSourceMerger()
 
-        merger.update_polling({"general": {"price": 0.25}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
         result = merger.get_merged_data()
 
         assert result.source == DATA_SOURCE_POLLING
@@ -107,42 +116,66 @@ class TestGetMergedData:
         """Test with only websocket data."""
         merger = DataSourceMerger()
 
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
+        result = merger.get_merged_data()
+
+        assert result.source == DATA_SOURCE_WEBSOCKET
+        assert result.data["general"]["price"] == 0.30
+
+    def test_websocket_newer_interval_wins(self) -> None:
+        """Test that WebSocket wins when it has a strictly newer interval."""
+        merger = DataSourceMerger()
+
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
+
+        result = merger.get_merged_data()
+
+        assert result.source == DATA_SOURCE_WEBSOCKET
+        assert result.data["general"]["price"] == 0.30
+
+    def test_polling_newer_interval_wins(self) -> None:
+        """Test that polling wins when it has a newer interval."""
+        merger = DataSourceMerger()
+
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:30:00+10:00"}})
+
+        result = merger.get_merged_data()
+
+        assert result.source == DATA_SOURCE_POLLING
+        assert result.data["general"]["price"] == 0.25
+
+    def test_same_interval_polling_wins(self) -> None:
+        """Test that polling wins when both sources cover the same interval."""
+        merger = DataSourceMerger()
+
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
+
+        result = merger.get_merged_data()
+
+        assert result.source == DATA_SOURCE_POLLING
+        assert result.data["general"]["price"] == 0.25
+
+    def test_old_websocket_does_not_trump_polling(self) -> None:
+        """Test that WebSocket data for an old interval cannot override newer polling data."""
+        merger = DataSourceMerger()
+
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:30:00+10:00"}})
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
+
+        result = merger.get_merged_data()
+
+        assert result.source == DATA_SOURCE_POLLING
+        assert result.data["general"]["price"] == 0.25
+
+    def test_both_without_start_time_polling_wins(self) -> None:
+        """Test that polling wins when neither source has start_time."""
+        merger = DataSourceMerger()
+
+        merger.update_polling({"general": {"price": 0.25}})
         merger.update_websocket({"general": {"price": 0.30}})
-        result = merger.get_merged_data()
-
-        assert result.source == DATA_SOURCE_WEBSOCKET
-        assert result.data["general"]["price"] == 0.30
-
-    def test_websocket_fresher(self) -> None:
-        """Test that fresher websocket data is used."""
-        merger = DataSourceMerger()
-
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Polling at 10:00:00
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25}})
-
-            # Websocket at 10:00:30 (fresher)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
-
-        result = merger.get_merged_data()
-
-        assert result.source == DATA_SOURCE_WEBSOCKET
-        assert result.data["general"]["price"] == 0.30
-
-    def test_polling_fresher(self) -> None:
-        """Test that fresher polling data is used."""
-        merger = DataSourceMerger()
-
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Websocket at 10:00:00
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
-
-            # Polling at 10:00:30 (fresher)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25}})
 
         result = merger.get_merged_data()
 
@@ -150,23 +183,19 @@ class TestGetMergedData:
         assert result.data["general"]["price"] == 0.25
 
     def test_includes_metadata(self) -> None:
-        """Test that merged data includes metadata."""
+        """Test that merged data includes metadata from start_time."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25}})
-
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
 
         result = merger.get_merged_data()
 
         assert "_source" in result.data
         assert "_polling_timestamp" in result.data
         assert "_websocket_timestamp" in result.data
-        assert result.data["_polling_timestamp"] == "2024-01-01T10:00:00+00:00"
-        assert result.data["_websocket_timestamp"] == "2024-01-01T10:00:30+00:00"
+        assert result.data["_polling_timestamp"] == "2024-01-01T10:00:00+10:00"
+        assert result.data["_websocket_timestamp"] == "2024-01-01T10:30:00+10:00"
 
     def test_metadata_with_no_timestamps(self) -> None:
         """Test metadata when no timestamps are set."""
@@ -181,7 +210,7 @@ class TestGetMergedData:
         """Test that merged data is a shallow copy at the top level."""
         merger = DataSourceMerger()
 
-        merger.update_polling({"general": {"price": 0.25}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
         result = merger.get_merged_data()
 
         # Adding a new key to result doesn't affect the original
@@ -211,16 +240,16 @@ class TestProperties:
     def test_polling_data_property(self) -> None:
         """Test polling_data property."""
         merger = DataSourceMerger()
-        data = {"general": {"price": 0.25}}
+        data = {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}}
 
         merger.update_polling(data)
 
-        assert merger.polling_data == data
+        assert merger.polling_data["general"]["price"] == 0.25
 
     def test_websocket_data_property(self) -> None:
         """Test websocket_data property."""
         merger = DataSourceMerger()
-        data = {"general": {"price": 0.30}}
+        data = {"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}}
 
         merger.update_websocket(data)
 
@@ -232,8 +261,15 @@ class TestProperties:
 
         assert merger.polling_timestamp is None
 
-        merger.update_polling({})
+        merger.update_polling({"general": {"start_time": "2024-01-01T10:00:00+10:00"}})
         assert merger.polling_timestamp is not None
+
+    def test_polling_timestamp_none_without_start_time(self) -> None:
+        """Test polling_timestamp stays None without start_time in data."""
+        merger = DataSourceMerger()
+
+        merger.update_polling({"general": {"price": 0.25}})
+        assert merger.polling_timestamp is None
 
     def test_websocket_timestamp_property(self) -> None:
         """Test websocket_timestamp property."""
@@ -241,8 +277,15 @@ class TestProperties:
 
         assert merger.websocket_timestamp is None
 
-        merger.update_websocket({})
+        merger.update_websocket({"general": {"start_time": "2024-01-01T10:00:00+10:00"}})
         assert merger.websocket_timestamp is not None
+
+    def test_websocket_timestamp_none_without_start_time(self) -> None:
+        """Test websocket_timestamp stays None without start_time in data."""
+        merger = DataSourceMerger()
+
+        merger.update_websocket({"general": {"price": 0.25}})
+        assert merger.websocket_timestamp is None
 
 
 class TestMultipleChannels:
@@ -253,9 +296,9 @@ class TestMultipleChannels:
         merger = DataSourceMerger()
 
         data = {
-            "general": {"price": 0.25},
-            "feed_in": {"price": 0.10},
-            "controlled_load": {"price": 0.15},
+            "general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"},
+            "feed_in": {"price": 0.10, "start_time": "2024-01-01T10:00:00+10:00"},
+            "controlled_load": {"price": 0.15, "start_time": "2024-01-01T10:00:00+10:00"},
         }
 
         merger.update_polling(data)
@@ -269,21 +312,16 @@ class TestMultipleChannels:
         """Test sources with different channels available."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25}})
-
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket(
-                {
-                    "general": {"price": 0.30},
-                    "feed_in": {"price": 0.10},
-                }
-            )
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_websocket(
+            {
+                "general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"},
+                "feed_in": {"price": 0.10, "start_time": "2024-01-01T10:30:00+10:00"},
+            }
+        )
 
         result = merger.get_merged_data()
 
-        # Should use websocket (fresher)
         assert result.source == DATA_SOURCE_WEBSOCKET
         assert "general" in result.data
         assert "feed_in" in result.data
@@ -298,18 +336,13 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Polling at 10:00:00 with forecasts
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
-
-            # Websocket at 10:00:30 (fresher, no forecasts)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+        )
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
 
         result = merger.get_merged_data()
 
-        # Should use websocket price but preserve polling forecasts
         assert result.source == DATA_SOURCE_WEBSOCKET
         assert result.data["general"]["price"] == 0.30
         assert result.data["general"]["forecasts"] == forecasts
@@ -319,22 +352,14 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Initial polling with forecasts
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
-
-            # First websocket update
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
-
-            # Second websocket update
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.35}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+        )
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
+        merger.update_websocket({"general": {"price": 0.35, "start_time": "2024-01-01T11:00:00+10:00"}})
 
         result = merger.get_merged_data()
 
-        # Should have latest websocket price but still preserve forecasts
         assert result.data["general"]["price"] == 0.35
         assert result.data["general"]["forecasts"] == forecasts
 
@@ -344,24 +369,18 @@ class TestForecastPreservation:
         general_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
         feed_in_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.08}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Polling with forecasts for multiple channels
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling(
-                {
-                    "general": {"price": 0.25, "forecasts": general_forecasts},
-                    "feed_in": {"price": 0.10, "forecasts": feed_in_forecasts},
-                }
-            )
-
-            # Websocket update (no forecasts)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket(
-                {
-                    "general": {"price": 0.30},
-                    "feed_in": {"price": 0.12},
-                }
-            )
+        merger.update_polling(
+            {
+                "general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": general_forecasts},
+                "feed_in": {"price": 0.10, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": feed_in_forecasts},
+            }
+        )
+        merger.update_websocket(
+            {
+                "general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"},
+                "feed_in": {"price": 0.12, "start_time": "2024-01-01T10:30:00+10:00"},
+            }
+        )
 
         result = merger.get_merged_data()
 
@@ -374,22 +393,16 @@ class TestForecastPreservation:
         old_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
         new_forecasts = [{"time": "2024-01-01T12:00:00", "price": 0.32}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Initial polling
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": old_forecasts}})
-
-            # Websocket update
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
-
-            # New polling with updated forecasts
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.27, "forecasts": new_forecasts}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": old_forecasts}}
+        )
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
+        merger.update_polling(
+            {"general": {"price": 0.27, "start_time": "2024-01-01T11:00:00+10:00", "forecasts": new_forecasts}}
+        )
 
         result = merger.get_merged_data()
 
-        # Should have new polling data and new forecasts
         assert result.source == DATA_SOURCE_POLLING
         assert result.data["general"]["price"] == 0.27
         assert result.data["general"]["forecasts"] == new_forecasts
@@ -399,39 +412,34 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+        )
 
         assert merger.forecasts == {"general": forecasts}
 
-    def test_forecasts_timestamp_property(self) -> None:
-        """Test the forecasts_timestamp property."""
+    def test_forecasts_timestamp_from_start_time(self) -> None:
+        """Test the forecasts_timestamp is derived from start_time."""
         merger = DataSourceMerger()
 
         assert merger.forecasts_timestamp is None
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": []}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": []}})
 
-        assert merger.forecasts_timestamp == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        assert merger.forecasts_timestamp == datetime.fromisoformat("2024-01-01T10:00:00+10:00")
 
     def test_polling_without_forecasts_preserves_existing(self) -> None:
         """Test that polling without forecasts preserves existing forecasts."""
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Initial polling with forecasts
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
-
-            # Subsequent polling without forecasts (e.g., quick price check)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.27}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+        )
+        merger.update_polling({"general": {"price": 0.27, "start_time": "2024-01-01T10:00:00+10:00"}})
 
         result = merger.get_merged_data()
 
-        # Should have new price but preserve existing forecasts
         assert result.data["general"]["price"] == 0.27
         assert result.data["general"]["forecasts"] == forecasts
 
@@ -440,7 +448,6 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        # Polling with only forecasts, no current interval fields
         merger.update_polling({"general": {"forecasts": forecasts}})
 
         result = merger.get_merged_data()
@@ -448,69 +455,52 @@ class TestForecastPreservation:
         assert "general" in result.data
         assert result.data["general"]["forecasts"] == forecasts
 
-    def test_websocket_first_then_polling_forecasts(self) -> None:
-        """Test WebSocket price arrives first, then polling brings forecasts."""
+    def test_websocket_first_then_polling_same_interval(self) -> None:
+        """Test WebSocket price arrives first, polling arrives for same interval."""
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # WebSocket arrives first with current price
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
-
-            # Polling arrives later with price + forecasts
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+        )
 
         result = merger.get_merged_data()
 
-        # Polling is fresher, should use polling price and forecasts
+        # Same interval: polling wins (has confirmed data + forecasts)
         assert result.source == DATA_SOURCE_POLLING
         assert result.data["general"]["price"] == 0.25
         assert result.data["general"]["forecasts"] == forecasts
 
-    def test_polling_price_websocket_price_polling_forecasts(self) -> None:
-        """Test API price, WebSocket price, then API with forecasts."""
+    def test_polling_then_websocket_then_polling_newer(self) -> None:
+        """Test API price, WebSocket price, then API with newer interval."""
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Initial polling with price only (no forecasts yet)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25}})
-
-            # WebSocket update with fresher price
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
-
-            # Later polling brings forecasts (but older price)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.27, "forecasts": forecasts}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
+        merger.update_polling(
+            {"general": {"price": 0.27, "start_time": "2024-01-01T11:00:00+10:00", "forecasts": forecasts}}
+        )
 
         result = merger.get_merged_data()
 
-        # Latest polling is fresher than websocket
         assert result.source == DATA_SOURCE_POLLING
         assert result.data["general"]["price"] == 0.27
         assert result.data["general"]["forecasts"] == forecasts
 
-    def test_websocket_fresher_than_polling_with_forecasts(self) -> None:
-        """Test WebSocket price is used when fresher, but polling forecasts preserved."""
+    def test_websocket_newer_interval_with_polling_forecasts(self) -> None:
+        """Test WebSocket price is used when it has a newer interval, with forecasts preserved."""
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
-            # Polling with price + forecasts
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
-
-            # WebSocket with fresher price (no forecasts)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 30, tzinfo=UTC)
-            merger.update_websocket({"general": {"price": 0.30}})
+        merger.update_polling(
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+        )
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
 
         result = merger.get_merged_data()
 
-        # WebSocket is fresher for current price, but forecasts from polling
         assert result.source == DATA_SOURCE_WEBSOCKET
         assert result.data["general"]["price"] == 0.30
         assert result.data["general"]["forecasts"] == forecasts

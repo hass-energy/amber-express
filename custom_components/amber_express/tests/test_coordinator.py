@@ -241,7 +241,7 @@ class TestAmberDataCoordinator:
 
     def test_update_from_websocket(self, coordinator: AmberDataCoordinator) -> None:
         """Test update_from_websocket."""
-        data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25}}
+        data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25, ATTR_START_TIME: "2024-01-01T10:00:00+10:00"}}
 
         with patch.object(coordinator, "async_set_updated_data") as mock_update:
             coordinator.update_from_websocket(data)
