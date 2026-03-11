@@ -5,6 +5,8 @@
 from collections.abc import Generator
 from datetime import UTC, date, datetime, timedelta
 from email.utils import format_datetime
+from pathlib import Path
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from amberelectric.models import CurrentInterval, ForecastInterval, Interval, Site
@@ -48,7 +50,8 @@ from custom_components.amber_express.const import (
     SUBENTRY_TYPE_SITE,
 )
 
-# Enable loading of the custom component
+sys.path.insert(0, str(Path(__file__).parent))
+
 pytest_plugins = "pytest_homeassistant_custom_component"
 
 

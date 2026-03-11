@@ -65,7 +65,7 @@ jobs:
       - name: Create release package
         run: |
           cd custom_components
-          zip -r ../amber_express.zip amber_express
+          zip -r ../amber_express.zip amber_express --exclude "amber_express/**/tests/*"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2

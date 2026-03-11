@@ -19,6 +19,7 @@ import pytest
 if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
 
+from conftest import make_current_interval
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
@@ -40,7 +41,6 @@ from custom_components.amber_express.const import (
     WS_MIN_RECONNECT_DELAY,
 )
 from custom_components.amber_express.websocket import WS_CHANNEL_TYPE_MAP, AmberWebSocketClient
-from tests.conftest import make_current_interval
 
 # Suppress unawaited coroutine warnings in tests
 pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning")

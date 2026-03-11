@@ -58,7 +58,20 @@ force-sort-within-sections = true
 split-on-trailing-comma = false
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = [
+"**/test_*.py" = [
+    'S101',    # Assert is allowed in tests
+    'B011',    # Assert false is allowed in tests
+    'PT015',   # Assert that always fails is fine in a test
+    'SLF001',  # Accessing private methods is ok in testing
+    'ARG001',  # Unused function argument - test fixtures often provide unused parameters for setup
+    'PLR2004', # Magic value used in comparison - test assertions often use simple numeric values
+    'S110',    # Try-except-pass detected - test exception handling patterns differ from production code
+    'SIM105',  # Use contextlib.suppress instead of try-except-pass - test exception handling patterns differ
+    'BLE001',  # Do not catch blind exception - test code needs to handle various exception types
+    'FBT001',  # Boolean positional argument - common in parametrized tests
+    'FBT003',  # Boolean positional value - test assertions often pass literal booleans
+]
+"**/conftest.py" = [
     'S101',    # Assert is allowed in tests
     'B011',    # Assert false is allowed in tests
     'PT015',   # Assert that always fails is fine in a test
@@ -81,7 +94,7 @@ max-statements = 60
 # Type checking configuration
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["tests", "custom_components"]
+include = ["custom_components"]
 extraPaths = ["."]
 
 # Disable errors that propagate from third-party incomplete types
@@ -102,25 +115,21 @@ reportMissingTypeArgument = false           # Generic type args in HA patterns
 reportReturnType = false                    # HA config flow return types
 reportAttributeAccessIssue = false          # HA config entry patterns
 reportTypedDictNotRequiredAccess = false    # Standard pytest patterns
-
-# Test-specific overrides - allow patterns common in testing
-[[tool.pyright.executionEnvironments]]
-root = "tests"
-reportPrivateUsage = "none"
+reportPrivateUsage = false                  # Allow private access in colocated tests
 
 [tool.pytest.ini_options]
 timeout = 5
-testpaths = ["tests"]
+testpaths = ["custom_components/amber_express"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = ["--strict-markers", "--strict-config"]
+addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib"]
 filterwarnings = ["error"]
 
 [tool.coverage.run]
 omit = [
-    "tests/*",
+    "**/tests/*",
 ]
 
 [tool.setuptools]
