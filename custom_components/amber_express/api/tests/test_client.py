@@ -17,8 +17,12 @@ from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.amber_express.api_client import AmberApiClient, AmberApiError, RateLimitedError
-from custom_components.amber_express.rate_limiter import ExponentialBackoffRateLimiter
+from custom_components.amber_express.api import (
+    AmberApiClient,
+    AmberApiError,
+    ExponentialBackoffRateLimiter,
+    RateLimitedError,
+)
 
 
 def _make_rate_limit_headers(

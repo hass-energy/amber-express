@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING, TypedDict
 
 from homeassistant.helpers.storage import Store
 
+from custom_components.amber_express.const import DOMAIN
+
 from .cdf_cold_start import get_cold_start_observations
 from .cdf_polling import IntervalObservation
-from .const import DOMAIN
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant

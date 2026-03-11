@@ -17,8 +17,9 @@ from amberelectric.models.interval import Interval
 from amberelectric.rest import ApiException
 import http_sf
 
+from custom_components.amber_express.types import RateLimitInfo
+
 from .rate_limiter import ExponentialBackoffRateLimiter
-from .types import RateLimitInfo
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant

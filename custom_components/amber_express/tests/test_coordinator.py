@@ -15,9 +15,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from conftest import make_current_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
-from custom_components.amber_express.api_client import AmberApiError
-from custom_components.amber_express.cdf_cold_start import get_cold_start_observations
-from custom_components.amber_express.cdf_storage import CDFObservationStore
+from custom_components.amber_express.api import AmberApiError
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
@@ -45,7 +43,8 @@ from custom_components.amber_express.const import (
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
-from custom_components.amber_express.smart_polling import SmartPollingManager
+from custom_components.amber_express.polling import CDFObservationStore, SmartPollingManager
+from custom_components.amber_express.polling.cdf_cold_start import get_cold_start_observations
 from custom_components.amber_express.types import RateLimitInfo
 
 
@@ -805,7 +804,7 @@ class TestCoordinatorLifecycle:
             "policy": "50;w=300",
         }
 
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
+        with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             coordinator._polling_manager.should_poll(has_data=True)
             coordinator._polling_manager.update_budget(rate_limit_info)
@@ -904,7 +903,7 @@ class TestCoordinatorLifecycle:
         }
 
         # Set up interval so we have a next poll delay
-        with patch("custom_components.amber_express.smart_polling.datetime") as mock_dt:
+        with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             coordinator._polling_manager.should_poll(has_data=True)
             coordinator._polling_manager.update_budget(rate_limit_info)

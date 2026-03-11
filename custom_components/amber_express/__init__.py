@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .cdf_storage import CDFObservationStore
+from .api import AmberWebSocketClient
 from .const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
@@ -24,12 +24,12 @@ from .const import (
     SUBENTRY_TYPE_SITE,
 )
 from .coordinator import AmberDataCoordinator
+from .polling import CDFObservationStore
 from .repairs import (
     LEGACY_PRICING_MODE_ALL,
     async_create_legacy_pricing_mode_all_issue,
     async_delete_legacy_pricing_mode_all_issue,
 )
-from .websocket import AmberWebSocketClient
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
 
+from custom_components.amber_express.types import RateLimitInfo
+
 from .cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
-from .types import RateLimitInfo
 
 _LOGGER = logging.getLogger(__name__)
 

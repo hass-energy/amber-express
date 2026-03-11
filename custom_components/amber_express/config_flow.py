@@ -23,8 +23,8 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
-from .api_client import AmberApiClient, AmberApiError
-from .api_client import RateLimitedError as ApiRateLimitedError
+from .api import AmberApiClient, AmberApiError, ExponentialBackoffRateLimiter
+from .api import RateLimitedError as ApiRateLimitedError
 from .const import (
     API_DEVELOPER_URL,
     CONF_API_TOKEN,
@@ -48,7 +48,6 @@ from .const import (
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
-from .rate_limiter import ExponentialBackoffRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
 

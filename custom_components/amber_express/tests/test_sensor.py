@@ -808,7 +808,7 @@ class TestAmberPollingStatsSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test polling stats sensor returns last confirmed elapsed time."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+        from custom_components.amber_express.polling import CDFPollingStats  # noqa: PLC0415
 
         coordinator = MagicMock()
         coordinator.get_cdf_polling_stats = MagicMock(
@@ -837,7 +837,7 @@ class TestAmberPollingStatsSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test polling stats sensor returns None when no observation."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+        from custom_components.amber_express.polling import CDFPollingStats  # noqa: PLC0415
 
         coordinator = MagicMock()
         coordinator.get_cdf_polling_stats = MagicMock(
@@ -919,7 +919,7 @@ class TestAmberConfirmationLagSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test confirmation lag sensor calculates gap from observation."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+        from custom_components.amber_express.polling import CDFPollingStats  # noqa: PLC0415
 
         coordinator = MagicMock()
         coordinator.get_cdf_polling_stats = MagicMock(
@@ -1340,7 +1340,7 @@ class TestAmberNextPollSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test next poll sensor extra attributes."""
-        from custom_components.amber_express.cdf_polling import CDFPollingStats  # noqa: PLC0415
+        from custom_components.amber_express.polling import CDFPollingStats  # noqa: PLC0415
 
         coordinator = MagicMock()
         coordinator.get_cdf_polling_stats = MagicMock(

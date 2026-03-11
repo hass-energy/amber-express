@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 from custom_components.amber_express.const import DATA_SOURCE_POLLING, DATA_SOURCE_WEBSOCKET
-from custom_components.amber_express.data_source import DataSourceMerger, MergedResult
+from custom_components.amber_express.data import DataSourceMerger, MergedResult
 
 
 class TestDataSourceMergerInit:
@@ -39,7 +39,7 @@ class TestUpdatePolling:
         """Test that timestamp is set on update."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             merger.update_polling({"general": {"price": 0.25}})
@@ -72,7 +72,7 @@ class TestUpdateWebsocket:
         """Test that timestamp is set on update."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             merger.update_websocket({"general": {"price": 0.25}})
@@ -117,7 +117,7 @@ class TestGetMergedData:
         """Test that fresher websocket data is used."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Polling at 10:00:00
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25}})
@@ -135,7 +135,7 @@ class TestGetMergedData:
         """Test that fresher polling data is used."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Websocket at 10:00:00
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_websocket({"general": {"price": 0.30}})
@@ -153,7 +153,7 @@ class TestGetMergedData:
         """Test that merged data includes metadata."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25}})
 
@@ -269,7 +269,7 @@ class TestMultipleChannels:
         """Test sources with different channels available."""
         merger = DataSourceMerger()
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25}})
 
@@ -298,7 +298,7 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Polling at 10:00:00 with forecasts
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
@@ -319,7 +319,7 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Initial polling with forecasts
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
@@ -344,7 +344,7 @@ class TestForecastPreservation:
         general_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
         feed_in_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.08}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Polling with forecasts for multiple channels
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling(
@@ -374,7 +374,7 @@ class TestForecastPreservation:
         old_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
         new_forecasts = [{"time": "2024-01-01T12:00:00", "price": 0.32}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Initial polling
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25, "forecasts": old_forecasts}})
@@ -409,7 +409,7 @@ class TestForecastPreservation:
 
         assert merger.forecasts_timestamp is None
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25, "forecasts": []}})
 
@@ -420,7 +420,7 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Initial polling with forecasts
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})
@@ -453,7 +453,7 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # WebSocket arrives first with current price
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_websocket({"general": {"price": 0.30}})
@@ -474,7 +474,7 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Initial polling with price only (no forecasts yet)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25}})
@@ -499,7 +499,7 @@ class TestForecastPreservation:
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        with patch("custom_components.amber_express.data_source.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.data.merger.datetime") as mock_datetime:
             # Polling with price + forecasts
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             merger.update_polling({"general": {"price": 0.25, "forecasts": forecasts}})

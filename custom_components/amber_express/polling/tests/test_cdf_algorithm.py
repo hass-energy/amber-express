@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from custom_components.amber_express.cdf_algorithm import IntervalObservation, build_cdf, sample_quantiles
+from custom_components.amber_express.polling import IntervalObservation, build_cdf, sample_quantiles
 
 
 class TestSampleQuantiles:

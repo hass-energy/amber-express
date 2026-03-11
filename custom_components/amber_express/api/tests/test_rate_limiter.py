@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from custom_components.amber_express.rate_limiter import ExponentialBackoffRateLimiter
+from custom_components.amber_express.api import ExponentialBackoffRateLimiter
 
 
 class TestRateLimiterInit:
@@ -40,7 +40,7 @@ class TestIsLimited:
         """Test is_limited returns True when rate limit is active."""
         limiter = ExponentialBackoffRateLimiter()
 
-        with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.api.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             limiter.record_rate_limit(None)  # First ignored
@@ -53,7 +53,7 @@ class TestIsLimited:
         """Test is_limited returns False when rate limit has expired."""
         limiter = ExponentialBackoffRateLimiter()
 
-        with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.api.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             limiter.record_rate_limit(None)  # First ignored
             limiter.record_rate_limit(None)  # Second sets 1s backoff
@@ -86,7 +86,7 @@ class TestRemainingSeconds:
         """Test remaining_seconds returns 0 when limit has expired."""
         limiter = ExponentialBackoffRateLimiter()
 
-        with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.api.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             limiter.record_rate_limit(None)  # First ignored
             limiter.record_rate_limit(None)  # Second sets 1s backoff
@@ -125,7 +125,7 @@ class TestRecordSuccess:
         """Test record_success clears limited state."""
         limiter = ExponentialBackoffRateLimiter()
 
-        with patch("custom_components.amber_express.rate_limiter.datetime") as mock_datetime:
+        with patch("custom_components.amber_express.api.rate_limiter.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
             limiter.record_rate_limit(None)  # First ignored
             limiter.record_rate_limit(None)

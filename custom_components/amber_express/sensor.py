@@ -37,7 +37,7 @@ from .const import (
     SUBENTRY_TYPE_SITE,
 )
 from .coordinator import AmberDataCoordinator
-from .interval_processor import CHANNEL_TYPE_MAP
+from .data import CHANNEL_TYPE_MAP
 from .types import ChannelData
 from .utils import to_local_iso_minute
 

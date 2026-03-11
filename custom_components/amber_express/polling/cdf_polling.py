@@ -11,9 +11,6 @@ from numpy.typing import NDArray
 
 from .cdf_algorithm import IntervalObservation, build_cdf, sample_quantiles
 
-# Re-export for backwards compatibility
-__all__ = ["CDFPollingStats", "CDFPollingStrategy", "IntervalObservation"]
-
 
 @dataclass
 class CDFPollingStats:

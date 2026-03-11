@@ -19,8 +19,7 @@ from amberelectric.models.spike_status import SpikeStatus
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.amber_express.api_client import AmberApiError, RateLimitedError
-from custom_components.amber_express.cdf_polling import CDFPollingStats
+from custom_components.amber_express.api import AmberApiError, RateLimitedError
 from custom_components.amber_express.const import (
     ATTR_DESCRIPTOR,
     ATTR_END_TIME,
@@ -49,6 +48,7 @@ from custom_components.amber_express.const import (
     DOMAIN,
     SUBENTRY_TYPE_SITE,
 )
+from custom_components.amber_express.polling import CDFPollingStats
 
 sys.path.insert(0, str(Path(__file__).parent))
 

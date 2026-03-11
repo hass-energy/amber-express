@@ -31,7 +31,7 @@ from custom_components.amber_express.const import (
     PRICING_MODE_AEMO,
     PRICING_MODE_APP,
 )
-from custom_components.amber_express.interval_processor import CHANNEL_TYPE_MAP, IntervalProcessor
+from custom_components.amber_express.data import CHANNEL_TYPE_MAP, IntervalProcessor
 
 
 def _make_current_interval(

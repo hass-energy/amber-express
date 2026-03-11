@@ -9,7 +9,7 @@ from homeassistant.data_entry_flow import FlowResultType, InvalidData
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.amber_express.api_client import AmberApiError
+from custom_components.amber_express.api import AmberApiError
 from custom_components.amber_express.config_flow import validate_api_token
 from custom_components.amber_express.const import (
     CONF_API_TOKEN,

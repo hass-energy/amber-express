@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from .const import ATTR_FORECASTS, DATA_SOURCE_POLLING, DATA_SOURCE_WEBSOCKET
-from .types import ChannelData
+from custom_components.amber_express.const import ATTR_FORECASTS, DATA_SOURCE_POLLING, DATA_SOURCE_WEBSOCKET
+from custom_components.amber_express.types import ChannelData
 
 
 @dataclass

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
 
 from conftest import make_current_interval
+from custom_components.amber_express.api import WS_CHANNEL_TYPE_MAP, AmberWebSocketClient
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
@@ -40,7 +41,6 @@ from custom_components.amber_express.const import (
     WS_MAX_RECONNECT_DELAY,
     WS_MIN_RECONNECT_DELAY,
 )
-from custom_components.amber_express.websocket import WS_CHANNEL_TYPE_MAP, AmberWebSocketClient
 
 # Suppress unawaited coroutine warnings in tests
 pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning")
@@ -243,7 +243,7 @@ class TestAmberWebSocketClient:
 
         with (
             patch.object(ws_client, "_connect_and_listen", side_effect=side_effect),
-            patch("custom_components.amber_express.websocket.asyncio.sleep", new=AsyncMock()),
+            patch("custom_components.amber_express.api.websocket.asyncio.sleep", new=AsyncMock()),
         ):
             await ws_client._run()
 
@@ -265,7 +265,7 @@ class TestAmberWebSocketClient:
 
         with (
             patch.object(ws_client, "_connect_and_listen", side_effect=side_effect),
-            patch("custom_components.amber_express.websocket.asyncio.sleep", new=AsyncMock()),
+            patch("custom_components.amber_express.api.websocket.asyncio.sleep", new=AsyncMock()),
         ):
             await ws_client._run()
 
@@ -287,7 +287,7 @@ class TestAmberWebSocketClient:
 
         with (
             patch.object(ws_client, "_connect_and_listen", side_effect=side_effect),
-            patch("custom_components.amber_express.websocket.asyncio.sleep", new=AsyncMock()),
+            patch("custom_components.amber_express.api.websocket.asyncio.sleep", new=AsyncMock()),
         ):
             await ws_client._run()
 
@@ -549,7 +549,7 @@ class TestAmberWebSocketClient:
         mock_session.ws_connect = MagicMock(return_value=AsyncContextManagerMock(mock_ws))
 
         with patch(
-            "custom_components.amber_express.websocket.async_get_clientsession",
+            "custom_components.amber_express.api.websocket.async_get_clientsession",
             return_value=mock_session,
         ):
             await client._connect_and_listen()
@@ -579,7 +579,7 @@ class TestAmberWebSocketClient:
         mock_session.ws_connect = MagicMock(return_value=AsyncContextManagerMock(mock_ws))
 
         with patch(
-            "custom_components.amber_express.websocket.async_get_clientsession",
+            "custom_components.amber_express.api.websocket.async_get_clientsession",
             return_value=mock_session,
         ):
             await client._connect_and_listen()
@@ -607,7 +607,7 @@ class TestAmberWebSocketClient:
         mock_session.ws_connect = MagicMock(return_value=AsyncContextManagerMock(mock_ws))
 
         with patch(
-            "custom_components.amber_express.websocket.async_get_clientsession",
+            "custom_components.amber_express.api.websocket.async_get_clientsession",
             return_value=mock_session,
         ):
             await client._connect_and_listen()
