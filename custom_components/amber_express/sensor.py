@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_ADVANCED_PRICE,
@@ -193,6 +194,24 @@ def _add_site_sensors(
         # Next poll sensor (disabled by default)
         entities.append(
             AmberNextPollSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
+        # Last forecast end sensor
+        entities.append(
+            AmberForecastEndSensor(
+                coordinator=coordinator,
+                entry=entry,
+                subentry=subentry,
+            )
+        )
+
+        # Last 5-minute forecast end sensor
+        entities.append(
+            AmberFiveMinuteForecastEndSensor(
                 coordinator=coordinator,
                 entry=entry,
                 subentry=subentry,
@@ -700,3 +719,78 @@ class AmberNextPollSensor(AmberBaseSensor):
             "poll_schedule": [round(t, 1) for t in stats.scheduled_polls],
             "poll_count": stats.confirmatory_poll_count + 1,
         }
+
+
+class AmberForecastEndSensor(AmberBaseSensor):
+    """Sensor for the end timestamp of the final received forecast interval."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the forecast end sensor."""
+        super().__init__(coordinator, entry, subentry, None)
+        self._attr_unique_id = f"{self._site_id}_forecast_end"
+        self._attr_translation_key = "forecast_end"
+
+    @staticmethod
+    def _parse_datetime(value: object) -> datetime | None:
+        """Parse an ISO timestamp string into a datetime."""
+        if not isinstance(value, str):
+            return None
+        return dt_util.parse_datetime(value)
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the latest forecast end timestamp."""
+        forecasts = self.coordinator.get_forecasts(CHANNEL_GENERAL)
+
+        latest_end: datetime | None = None
+        for forecast in forecasts:
+            end_time = self._parse_datetime(forecast.get(ATTR_END_TIME))
+            if end_time is None:
+                continue
+            if latest_end is None or end_time > latest_end:
+                latest_end = end_time
+
+        return latest_end
+
+
+class AmberFiveMinuteForecastEndSensor(AmberForecastEndSensor):
+    """Sensor for the end timestamp of the final 5-minute forecast interval."""
+
+    _FIVE_MINUTES = timedelta(minutes=5)
+
+    def __init__(
+        self,
+        coordinator: AmberDataCoordinator,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """Initialize the 5-minute forecast end sensor."""
+        super().__init__(coordinator, entry, subentry)
+        self._attr_unique_id = f"{self._site_id}_five_minute_forecast_end"
+        self._attr_translation_key = "five_minute_forecast_end"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the latest 5-minute forecast end timestamp."""
+        forecasts = self.coordinator.get_forecasts(CHANNEL_GENERAL)
+
+        latest_five_minute_end: datetime | None = None
+        for forecast in forecasts:
+            start_time = self._parse_datetime(forecast.get(ATTR_START_TIME))
+            end_time = self._parse_datetime(forecast.get(ATTR_END_TIME))
+            if start_time is None or end_time is None:
+                continue
+            if end_time - start_time != self._FIVE_MINUTES:
+                continue
+            if latest_five_minute_end is None or end_time > latest_five_minute_end:
+                latest_five_minute_end = end_time
+
+        return latest_five_minute_end

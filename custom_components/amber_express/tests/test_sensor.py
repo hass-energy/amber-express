@@ -37,6 +37,8 @@ from custom_components.amber_express.sensor import (
     AmberApiStatusSensor,
     AmberConfirmationLagSensor,
     AmberDetailedPriceSensor,
+    AmberFiveMinuteForecastEndSensor,
+    AmberForecastEndSensor,
     AmberNextPollSensor,
     AmberPollingStatsSensor,
     AmberPriceSensor,
@@ -713,8 +715,9 @@ class TestAsyncSetupEntry:
         # With general and feed_in enabled, we should have:
         # 2 channels x 2 sensors (price, detailed price) = 4
         # + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll = 12
-        assert len(added_entities) == 12
+        # + rate_limit_remaining + rate_limit_reset + next_poll
+        # + forecast_end + five_minute_forecast_end = 14
+        assert len(added_entities) == 14
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -754,8 +757,9 @@ class TestAsyncSetupEntry:
 
         # With only general channel:
         # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
-        assert len(added_entities) == 10
+        # + rate_limit_remaining + rate_limit_reset + next_poll
+        # + forecast_end + five_minute_forecast_end = 12
+        assert len(added_entities) == 12
 
     async def test_setup_entry_controlled_load_channel(
         self,
@@ -795,8 +799,9 @@ class TestAsyncSetupEntry:
 
         # With only controlled load channel:
         # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll = 10
-        assert len(added_entities) == 10
+        # + rate_limit_remaining + rate_limit_reset + next_poll
+        # + forecast_end + five_minute_forecast_end = 12
+        assert len(added_entities) == 12
 
 
 class TestAmberPollingStatsSensor:
@@ -1365,3 +1370,96 @@ class TestAmberNextPollSensor:
 
         assert attrs["poll_schedule"] == [21.0, 27.0, 33.0, 39.0]
         assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
+
+
+class TestAmberForecastEndSensors:
+    """Tests for forecast end timestamp diagnostic sensors."""
+
+    def test_forecast_end_sensor_init(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast end sensor initialization."""
+        from homeassistant.components.sensor import SensorDeviceClass  # noqa: PLC0415
+        from homeassistant.const import EntityCategory  # noqa: PLC0415
+
+        sensor = AmberForecastEndSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_forecast_end"
+        assert sensor._attr_translation_key == "forecast_end"
+        assert sensor._attr_device_class == SensorDeviceClass.TIMESTAMP
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_forecast_end_sensor_returns_last_forecast_end(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast end sensor returns the latest end_time."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:05:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_END_TIME: "2024-01-01T10:10:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:10:00+00:00", ATTR_END_TIME: "2024-01-01T10:15:00+00:00"},
+            ]
+        )
+
+        sensor = AmberForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:15:00+00:00")
+
+    def test_five_minute_forecast_end_sensor_filters_to_five_minute_windows(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test 5-minute forecast end sensor returns latest 5-minute window end."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:05:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_END_TIME: "2024-01-01T10:35:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:35:00+00:00", ATTR_END_TIME: "2024-01-01T10:40:00+00:00"},
+            ]
+        )
+
+        sensor = AmberFiveMinuteForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:40:00+00:00")
+
+    def test_five_minute_forecast_end_sensor_returns_none_without_matching_windows(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test 5-minute forecast end sensor returns None when no 5-minute windows exist."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T11:00:00+00:00"},
+            ]
+        )
+
+        sensor = AmberFiveMinuteForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
