@@ -1419,6 +1419,47 @@ class TestAmberForecastEndSensors:
 
         assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:15:00+00:00")
 
+    def test_forecast_end_sensor_ignores_invalid_end_times(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast end sensor skips forecasts with invalid end timestamps."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: None},
+                {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_END_TIME: "not-a-datetime"},
+                {ATTR_START_TIME: "2024-01-01T10:10:00+00:00", ATTR_END_TIME: "2024-01-01T10:15:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:15:00+00:00", ATTR_END_TIME: "2024-01-01T10:10:00+00:00"},
+            ]
+        )
+
+        sensor = AmberForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:15:00+00:00")
+
+    def test_forecast_end_sensor_returns_none_for_empty_forecasts(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast end sensor returns None when there are no forecasts."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(return_value=[])
+
+        sensor = AmberForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value is None
+
     def test_five_minute_forecast_end_sensor_filters_to_five_minute_windows(
         self,
         mock_config_entry: MockConfigEntry,
@@ -1433,6 +1474,115 @@ class TestAmberForecastEndSensors:
                 {ATTR_START_TIME: "2024-01-01T10:35:00+00:00", ATTR_END_TIME: "2024-01-01T10:40:00+00:00"},
             ]
         )
+
+        sensor = AmberFiveMinuteForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:40:00+00:00")
+
+    def test_five_minute_forecast_end_sensor_skips_invalid_timestamps(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test 5-minute sensor skips entries with invalid start or end timestamps."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: None, ATTR_END_TIME: "2024-01-01T10:05:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: None},
+                {ATTR_START_TIME: "invalid-start", ATTR_END_TIME: "2024-01-01T10:05:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "invalid-end"},
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:05:00+00:00"},
+            ]
+        )
+
+        sensor = AmberFiveMinuteForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:05:00+00:00")
+
+    def test_five_minute_forecast_end_sensor_keeps_latest_when_older_window_follows(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test 5-minute sensor does not replace latest end with an older valid window."""
+        coordinator = MagicMock()
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: "2024-01-01T10:10:00+00:00", ATTR_END_TIME: "2024-01-01T10:15:00+00:00"},
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:05:00+00:00"},
+            ]
+        )
+
+        sensor = AmberFiveMinuteForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T10:15:00+00:00")
+
+    def test_forecast_end_sensor_uses_latest_end_across_channels(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test forecast end sensor takes max horizon across all channels."""
+        coordinator = MagicMock()
+
+        def get_forecasts_for_channel(channel: str) -> list[dict[str, str]]:
+            if channel == CHANNEL_GENERAL:
+                return [
+                    {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"}
+                ]
+            if channel == CHANNEL_CONTROLLED_LOAD:
+                return [
+                    {ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T11:00:00+00:00"}
+                ]
+            return [
+                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:45:00+00:00"}
+            ]
+
+        coordinator.get_forecasts = MagicMock(side_effect=get_forecasts_for_channel)
+
+        sensor = AmberForecastEndSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+        )
+
+        assert sensor.native_value == dt_util.parse_datetime("2024-01-01T11:00:00+00:00")
+
+    def test_five_minute_forecast_end_sensor_filters_across_channels(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Test 5-minute sensor filters durations while selecting latest across channels."""
+        coordinator = MagicMock()
+
+        def get_forecasts_for_channel(channel: str) -> list[dict[str, str]]:
+            if channel == CHANNEL_GENERAL:
+                return [
+                    {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"}
+                ]
+            if channel == CHANNEL_FEED_IN:
+                return [
+                    {ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T10:35:00+00:00"}
+                ]
+            return [
+                {ATTR_START_TIME: "2024-01-01T10:35:00+00:00", ATTR_END_TIME: "2024-01-01T10:40:00+00:00"}
+            ]
+
+        coordinator.get_forecasts = MagicMock(side_effect=get_forecasts_for_channel)
 
         sensor = AmberFiveMinuteForecastEndSensor(
             coordinator=coordinator,

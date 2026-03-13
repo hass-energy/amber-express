@@ -726,6 +726,11 @@ class AmberForecastEndSensor(AmberBaseSensor):
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _FORECAST_CHANNELS: tuple[str, ...] = (
+        CHANNEL_GENERAL,
+        CHANNEL_FEED_IN,
+        CHANNEL_CONTROLLED_LOAD,
+    )
 
     def __init__(
         self,
@@ -745,10 +750,17 @@ class AmberForecastEndSensor(AmberBaseSensor):
             return None
         return dt_util.parse_datetime(value)
 
+    def _iter_forecasts(self) -> list[ChannelData]:
+        """Return forecasts across all known channels."""
+        forecasts: list[ChannelData] = []
+        for channel in self._FORECAST_CHANNELS:
+            forecasts.extend(self.coordinator.get_forecasts(channel))
+        return forecasts
+
     @property
     def native_value(self) -> datetime | None:
         """Return the latest forecast end timestamp."""
-        forecasts = self.coordinator.get_forecasts(CHANNEL_GENERAL)
+        forecasts = self._iter_forecasts()
 
         latest_end: datetime | None = None
         for forecast in forecasts:
@@ -780,7 +792,7 @@ class AmberFiveMinuteForecastEndSensor(AmberForecastEndSensor):
     @property
     def native_value(self) -> datetime | None:
         """Return the latest 5-minute forecast end timestamp."""
-        forecasts = self.coordinator.get_forecasts(CHANNEL_GENERAL)
+        forecasts = self._iter_forecasts()
 
         latest_five_minute_end: datetime | None = None
         for forecast in forecasts:
