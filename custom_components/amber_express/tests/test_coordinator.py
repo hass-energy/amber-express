@@ -35,12 +35,12 @@ from custom_components.amber_express.const import (
     CHANNEL_GENERAL,
     CONF_API_TOKEN,
     CONF_CONFIRMATION_TIMEOUT,
-    CONF_FORECAST_INTERVALS,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_WAIT_FOR_CONFIRMED,
     DATA_SOURCE_POLLING,
     DOMAIN,
+    MAX_FORECAST_INTERVALS,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
 from custom_components.amber_express.polling import CDFObservationStore, SmartPollingManager
@@ -362,10 +362,8 @@ class TestAmberDataCoordinator:
         ):
             await coordinator._fetch_amber_data()
 
-    async def test_fetch_amber_data_uses_configured_forecast_intervals(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data uses forecast interval count from subentry config."""
-        coordinator.subentry.data = {**coordinator.subentry.data, CONF_FORECAST_INTERVALS: 576}
-
+    async def test_fetch_amber_data_requests_maximum_forecast_intervals(self, coordinator: AmberDataCoordinator) -> None:
+        """Test _fetch_amber_data always requests the maximum forecast interval count."""
         intervals = [
             wrap_interval(make_current_interval(channel_type=ChannelType.GENERAL, estimate=False)),
             wrap_interval(make_current_interval(channel_type=ChannelType.FEEDIN, estimate=False)),
@@ -377,7 +375,7 @@ class TestAmberDataCoordinator:
 
         mock_fetch.assert_called_once()
         _args, kwargs = mock_fetch.call_args
-        assert kwargs["next_intervals"] == 576
+        assert kwargs["next_intervals"] == MAX_FORECAST_INTERVALS
 
     def test_log_price_data(self, coordinator: AmberDataCoordinator) -> None:
         """Test _log_price_data."""
