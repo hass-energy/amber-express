@@ -41,8 +41,8 @@ CONF_DEMAND_WINDOW_PRICE: Final = "demand_window_price"
 
 # Default options
 DEFAULT_PRICING_MODE: Final = PRICING_MODE_APP
-# 24 hours at 5-min resolution, or 48 hours at 30-min
-DEFAULT_FORECAST_INTERVALS: Final = 288
+# Default to the maximum forecast window supported by the Amber API
+DEFAULT_FORECAST_INTERVALS: Final = MAX_FORECAST_INTERVALS
 DEFAULT_ENABLE_WEBSOCKET: Final = True
 DEFAULT_WAIT_FOR_CONFIRMED: Final = True  # Keep polling until non-estimated price
 DEFAULT_CONFIRMATION_TIMEOUT: Final = 45  # seconds to wait for confirmed price
