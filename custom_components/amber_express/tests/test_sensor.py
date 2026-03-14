@@ -1540,16 +1540,10 @@ class TestAmberForecastEndSensors:
 
         def get_forecasts_for_channel(channel: str) -> list[dict[str, str]]:
             if channel == CHANNEL_GENERAL:
-                return [
-                    {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"}
-                ]
+                return [{ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"}]
             if channel == CHANNEL_CONTROLLED_LOAD:
-                return [
-                    {ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T11:00:00+00:00"}
-                ]
-            return [
-                {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:45:00+00:00"}
-            ]
+                return [{ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T11:00:00+00:00"}]
+            return [{ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:45:00+00:00"}]
 
         coordinator.get_forecasts = MagicMock(side_effect=get_forecasts_for_channel)
 
@@ -1571,16 +1565,10 @@ class TestAmberForecastEndSensors:
 
         def get_forecasts_for_channel(channel: str) -> list[dict[str, str]]:
             if channel == CHANNEL_GENERAL:
-                return [
-                    {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"}
-                ]
+                return [{ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"}]
             if channel == CHANNEL_FEED_IN:
-                return [
-                    {ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T10:35:00+00:00"}
-                ]
-            return [
-                {ATTR_START_TIME: "2024-01-01T10:35:00+00:00", ATTR_END_TIME: "2024-01-01T10:40:00+00:00"}
-            ]
+                return [{ATTR_START_TIME: "2024-01-01T10:30:00+00:00", ATTR_END_TIME: "2024-01-01T10:35:00+00:00"}]
+            return [{ATTR_START_TIME: "2024-01-01T10:35:00+00:00", ATTR_END_TIME: "2024-01-01T10:40:00+00:00"}]
 
         coordinator.get_forecasts = MagicMock(side_effect=get_forecasts_for_channel)
 
