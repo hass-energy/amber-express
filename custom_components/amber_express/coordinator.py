@@ -1,6 +1,14 @@
 """Data coordinator for Amber Express integration."""
 
+
 from __future__ import annotations
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Core Pydantic V1 functionality",
+    category=UserWarning,
+)
 
 from datetime import UTC, datetime, timedelta
 import logging
