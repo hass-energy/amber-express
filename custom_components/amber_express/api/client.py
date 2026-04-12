@@ -154,7 +154,8 @@ class AmberApiClient:
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
                 reset_at = self._extract_reset_at_from_429(err.headers)
-                self._rate_limiter.record_rate_limit(reset_at)
+                remaining = self._rate_limit_info.get("remaining") if self._rate_limit_info else None
+                self._rate_limiter.record_rate_limit(reset_at, remaining=remaining)
                 raise RateLimitedError(reset_at) from err
 
             msg = f"Failed to fetch sites: {err}"
@@ -225,7 +226,8 @@ class AmberApiClient:
 
             if err.status == HTTP_TOO_MANY_REQUESTS:
                 reset_at = self._extract_reset_at_from_429(err.headers)
-                self._rate_limiter.record_rate_limit(reset_at)
+                remaining = self._rate_limit_info.get("remaining") if self._rate_limit_info else None
+                self._rate_limiter.record_rate_limit(reset_at, remaining=remaining)
                 raise RateLimitedError(reset_at) from err
 
             msg = f"Amber API error ({status}): {err.reason}"

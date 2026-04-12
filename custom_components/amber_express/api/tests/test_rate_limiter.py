@@ -1,7 +1,10 @@
 """Tests for the exponential backoff rate limiter."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+
+import pytest
 
 from custom_components.amber_express.api import ExponentialBackoffRateLimiter
 
@@ -332,3 +335,81 @@ class TestGraceFirst429:
         limiter.record_rate_limit(None)  # Backoff 2s again
         assert limiter.is_limited() is True
         assert limiter.current_backoff == 2
+
+
+class TestLogSeverityByRemaining:
+    """Tests for log level selection based on remaining quota."""
+
+    def test_server_side_429_logs_debug_not_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """High remaining quota means server-side load shedding — log at debug."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        limiter.record_rate_limit(None)  # First ignored
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(None, remaining=40)
+
+        assert any(r.levelno == logging.DEBUG and "Rate limited (429)" in r.message for r in caplog.records)
+        assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_low_remaining_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Low remaining quota means client is burning quota — log at warning."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        limiter.record_rate_limit(None)  # First ignored
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(None, remaining=3)
+
+        assert any(r.levelno == logging.WARNING and "Rate limited (429)" in r.message for r in caplog.records)
+
+    def test_none_remaining_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Missing remaining (no headers) means quota likely exhausted — log at warning."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        limiter.record_rate_limit(None)  # First ignored
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(None, remaining=None)
+
+        assert any(r.levelno == logging.WARNING and "Rate limited (429)" in r.message for r in caplog.records)
+
+    def test_remaining_at_threshold_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Remaining exactly at the threshold (5) should still warn."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        limiter.record_rate_limit(None)  # First ignored
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(None, remaining=5)
+
+        assert any(r.levelno == logging.WARNING and "Rate limited (429)" in r.message for r in caplog.records)
+
+    def test_remaining_above_threshold_logs_debug(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Remaining just above the threshold (6) should log debug."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        limiter.record_rate_limit(None)  # First ignored
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(None, remaining=6)
+
+        assert any(r.levelno == logging.DEBUG and "Rate limited (429)" in r.message for r in caplog.records)
+        assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_first_429_always_debug_regardless_of_remaining(self, caplog: pytest.LogCaptureFixture) -> None:
+        """First 429 is always ignored at debug level, even with low remaining."""
+        limiter = ExponentialBackoffRateLimiter()
+
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(None, remaining=0)
+
+        assert any(r.levelno == logging.DEBUG and "ignoring first occurrence" in r.message for r in caplog.records)
+        assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_server_side_429_with_reset_at_logs_debug(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Server-side 429 with reset_at header and high remaining logs debug."""
+        limiter = ExponentialBackoffRateLimiter()
+        reset_at = datetime.now(UTC) + timedelta(seconds=60)
+
+        limiter.record_rate_limit(reset_at)  # First ignored
+        with caplog.at_level(logging.DEBUG):
+            limiter.record_rate_limit(reset_at, remaining=40)
+
+        assert any(r.levelno == logging.DEBUG and "Rate limited (429)" in r.message for r in caplog.records)
+        assert not any(r.levelno == logging.WARNING for r in caplog.records)

@@ -373,3 +373,73 @@ class TestRateLimitHeaderParsing:
             pytest.raises(Exception, match="Network error"),
         ):
             await api_client.fetch_sites()
+
+
+class TestRateLimitRemainingPassthrough:
+    """Tests that 429 handlers pass remaining quota to the rate limiter."""
+
+    async def test_fetch_prices_429_passes_remaining_to_limiter(
+        self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
+    ) -> None:
+        """429 with rate limit headers passes remaining to record_rate_limit."""
+        rate_limiter.record_rate_limit(None)  # Consume grace
+        err = ApiException(status=429)
+        err.headers = _make_rate_limit_headers(remaining=40, reset=60)
+
+        with (
+            patch.object(
+                api_client._hass,
+                "async_add_executor_job",
+                new=AsyncMock(side_effect=err),
+            ),
+            patch.object(rate_limiter, "record_rate_limit", wraps=rate_limiter.record_rate_limit) as mock_record,
+            pytest.raises(RateLimitedError),
+        ):
+            await api_client.fetch_current_prices("test_site")
+
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["remaining"] == 40
+
+    async def test_fetch_sites_429_passes_remaining_to_limiter(
+        self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
+    ) -> None:
+        """429 on fetch_sites with rate limit headers passes remaining to record_rate_limit."""
+        rate_limiter.record_rate_limit(None)  # Consume grace
+        err = ApiException(status=429)
+        err.headers = _make_rate_limit_headers(remaining=30, reset=60)
+
+        with (
+            patch.object(
+                api_client._hass,
+                "async_add_executor_job",
+                new=AsyncMock(side_effect=err),
+            ),
+            patch.object(rate_limiter, "record_rate_limit", wraps=rate_limiter.record_rate_limit) as mock_record,
+            pytest.raises(RateLimitedError),
+        ):
+            await api_client.fetch_sites()
+
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["remaining"] == 30
+
+    async def test_fetch_prices_429_without_headers_passes_none_remaining(
+        self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
+    ) -> None:
+        """429 without rate limit headers passes remaining=None."""
+        rate_limiter.record_rate_limit(None)  # Consume grace
+        err = ApiException(status=429)
+        err.headers = {"Content-Type": "application/json"}
+
+        with (
+            patch.object(
+                api_client._hass,
+                "async_add_executor_job",
+                new=AsyncMock(side_effect=err),
+            ),
+            patch.object(rate_limiter, "record_rate_limit", wraps=rate_limiter.record_rate_limit) as mock_record,
+            pytest.raises(RateLimitedError),
+        ):
+            await api_client.fetch_current_prices("test_site")
+
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["remaining"] is None

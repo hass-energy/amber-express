@@ -7,6 +7,8 @@ import logging
 
 _LOGGER = logging.getLogger(__name__)
 
+_QUOTA_WARNING_THRESHOLD = 5
+
 
 class ExponentialBackoffRateLimiter:
     """Manages exponential backoff for rate-limited API calls.
@@ -77,14 +79,19 @@ class ExponentialBackoffRateLimiter:
         self._rate_limit_until = None
         self._consecutive_429s = 0
 
-    def record_rate_limit(self, reset_at: datetime | None) -> datetime | None:
+    def record_rate_limit(self, reset_at: datetime | None, *, remaining: int | None = None) -> datetime | None:
         """Record a rate limit event and set backoff.
 
         First consecutive 429 is ignored (no backoff). From the second onward,
         uses reset_at from API header if provided, otherwise exponential backoff.
 
+        Log severity depends on remaining quota: server-side load shedding (high
+        remaining) logs at debug, while client-caused rate limits (low/no remaining)
+        log at warning.
+
         Args:
             reset_at: When quota resets (from API header), or None to use backoff
+            remaining: Remaining API quota from rate limit headers, or None if unknown
 
         Returns:
             When the rate limit expires, or None if first 429 was ignored
@@ -97,25 +104,27 @@ class ExponentialBackoffRateLimiter:
             _LOGGER.debug("Rate limited (429), ignoring first occurrence")
             return None
 
+        server_side = remaining is not None and remaining > _QUOTA_WARNING_THRESHOLD
+        log = _LOGGER.debug if server_side else _LOGGER.warning
+
         if reset_at is not None:
-            # Use the API-provided reset time (add small buffer)
             self._backoff_seconds = int((reset_at - now).total_seconds()) + 2
             self._rate_limit_until = reset_at + timedelta(seconds=2)
-            _LOGGER.warning(
+            log(
                 "Rate limited (429). Waiting until %s (from API reset header)",
                 self._rate_limit_until.strftime("%H:%M:%S"),
             )
         elif self._backoff_seconds == 0:
             self._backoff_seconds = self._initial_backoff
             self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
-            _LOGGER.warning(
+            log(
                 "Rate limited (429). Backing off for %d seconds",
                 self._backoff_seconds,
             )
         else:
             self._backoff_seconds = min(self._backoff_seconds * 2, self._max_backoff)
             self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
-            _LOGGER.warning(
+            log(
                 "Rate limited (429). Backing off for %d seconds (exponential)",
                 self._backoff_seconds,
             )
