@@ -1,7 +1,7 @@
 """Tests for the exponential backoff rate limiter."""
 
-import logging
 from datetime import UTC, datetime, timedelta
+import logging
 from unittest.mock import patch
 
 import pytest
