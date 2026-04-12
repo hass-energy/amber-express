@@ -716,7 +716,7 @@ class AmberForecastHorizonSensor(AmberBaseSensor):
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "h"
-    _attr_suggested_display_precision = 1
+    _attr_suggested_display_precision = 0
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _FORECAST_CHANNELS: tuple[str, ...] = (
         CHANNEL_GENERAL,

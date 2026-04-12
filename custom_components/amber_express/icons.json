@@ -30,6 +30,9 @@
       "feed_in_price_detailed": {
         "default": "mdi:solar-power"
       },
+      "forecast_horizon": {
+        "default": "mdi:format-horizontal-align-right"
+      },
       "general_price": {
         "default": "mdi:transmission-tower"
       },

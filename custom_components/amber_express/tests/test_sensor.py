@@ -1395,7 +1395,7 @@ class TestAmberForecastHorizonSensor:
         assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
         assert sensor._attr_native_unit_of_measurement == "h"
         assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
-        assert sensor._attr_suggested_display_precision == 1
+        assert sensor._attr_suggested_display_precision == 0
         assert not hasattr(sensor, "_attr_device_class") or sensor._attr_device_class != SensorDeviceClass.TIMESTAMP
 
     def test_forecast_horizon_returns_hours(
