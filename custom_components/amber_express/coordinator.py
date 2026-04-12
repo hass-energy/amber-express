@@ -637,6 +637,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get last API status code (200 = OK)."""
         return self._api_client.last_status
 
+    def get_forecasts_timestamp(self) -> datetime | None:
+        """Get the start_time of the interval whose polling response included forecasts."""
+        return self._data_sources.forecasts_timestamp
+
     def get_rate_limit_info(self) -> RateLimitInfo:
         """Get rate limit information from last API response."""
         return self._api_client.rate_limit_info

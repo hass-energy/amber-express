@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
@@ -200,18 +200,8 @@ def _add_site_sensors(
             )
         )
 
-        # Last forecast end sensor
         entities.append(
-            AmberForecastEndSensor(
-                coordinator=coordinator,
-                entry=entry,
-                subentry=subentry,
-            )
-        )
-
-        # Last 5-minute forecast end sensor
-        entities.append(
-            AmberFiveMinuteForecastEndSensor(
+            AmberForecastHorizonSensor(
                 coordinator=coordinator,
                 entry=entry,
                 subentry=subentry,
@@ -721,10 +711,12 @@ class AmberNextPollSensor(AmberBaseSensor):
         }
 
 
-class AmberForecastEndSensor(AmberBaseSensor):
-    """Sensor for the end timestamp of the final received forecast interval."""
+class AmberForecastHorizonSensor(AmberBaseSensor):
+    """Sensor for how many hours of forecast data are available."""
 
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "h"
+    _attr_suggested_display_precision = 1
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _FORECAST_CHANNELS: tuple[str, ...] = (
         CHANNEL_GENERAL,
@@ -738,10 +730,10 @@ class AmberForecastEndSensor(AmberBaseSensor):
         entry: ConfigEntry,
         subentry: ConfigSubentry,
     ) -> None:
-        """Initialize the forecast end sensor."""
+        """Initialize the forecast horizon sensor."""
         super().__init__(coordinator, entry, subentry, None)
-        self._attr_unique_id = f"{self._site_id}_forecast_end"
-        self._attr_translation_key = "forecast_end"
+        self._attr_unique_id = f"{self._site_id}_forecast_horizon"
+        self._attr_translation_key = "forecast_horizon"
 
     @staticmethod
     def _parse_datetime(value: object) -> datetime | None:
@@ -750,59 +742,35 @@ class AmberForecastEndSensor(AmberBaseSensor):
             return None
         return dt_util.parse_datetime(value)
 
-    def _iter_forecasts(self) -> list[ChannelData]:
-        """Return forecasts across all known channels."""
-        forecasts: list[ChannelData] = []
-        for channel in self._FORECAST_CHANNELS:
-            forecasts.extend(self.coordinator.get_forecasts(channel))
-        return forecasts
-
-    @property
-    def native_value(self) -> datetime | None:
-        """Return the latest forecast end timestamp."""
-        forecasts = self._iter_forecasts()
-
+    def _get_latest_forecast_end(self) -> datetime | None:
+        """Return the latest forecast end_time across all channels."""
         latest_end: datetime | None = None
-        for forecast in forecasts:
-            end_time = self._parse_datetime(forecast.get(ATTR_END_TIME))
-            if end_time is None:
-                continue
-            if latest_end is None or end_time > latest_end:
-                latest_end = end_time
-
+        for channel in self._FORECAST_CHANNELS:
+            for forecast in self.coordinator.get_forecasts(channel):
+                end_time = self._parse_datetime(forecast.get(ATTR_END_TIME))
+                if end_time is None:
+                    continue
+                if latest_end is None or end_time > latest_end:
+                    latest_end = end_time
         return latest_end
 
+    @property
+    def native_value(self) -> float | None:
+        """Return the forecast horizon in hours."""
+        baseline = self.coordinator.get_forecasts_timestamp()
+        if baseline is None:
+            return None
 
-class AmberFiveMinuteForecastEndSensor(AmberForecastEndSensor):
-    """Sensor for the end timestamp of the final 5-minute forecast interval."""
+        latest_end = self._get_latest_forecast_end()
+        if latest_end is None:
+            return None
 
-    _FIVE_MINUTES = timedelta(minutes=5)
-
-    def __init__(
-        self,
-        coordinator: AmberDataCoordinator,
-        entry: ConfigEntry,
-        subentry: ConfigSubentry,
-    ) -> None:
-        """Initialize the 5-minute forecast end sensor."""
-        super().__init__(coordinator, entry, subentry)
-        self._attr_unique_id = f"{self._site_id}_five_minute_forecast_end"
-        self._attr_translation_key = "five_minute_forecast_end"
+        return (latest_end - baseline).total_seconds() / 3600
 
     @property
-    def native_value(self) -> datetime | None:
-        """Return the latest 5-minute forecast end timestamp."""
-        forecasts = self._iter_forecasts()
-
-        latest_five_minute_end: datetime | None = None
-        for forecast in forecasts:
-            start_time = self._parse_datetime(forecast.get(ATTR_START_TIME))
-            end_time = self._parse_datetime(forecast.get(ATTR_END_TIME))
-            if start_time is None or end_time is None:
-                continue
-            if end_time - start_time != self._FIVE_MINUTES:
-                continue
-            if latest_five_minute_end is None or end_time > latest_five_minute_end:
-                latest_five_minute_end = end_time
-
-        return latest_five_minute_end
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the raw forecast end timestamp as an attribute."""
+        latest_end = self._get_latest_forecast_end()
+        if latest_end is None:
+            return {}
+        return {"forecast_end": latest_end.isoformat()}
