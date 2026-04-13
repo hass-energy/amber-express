@@ -2,7 +2,10 @@
   "name": "amber-express",
   "private": true,
   "dependencies": {
-    "prettier": "^3.7.3",
     "prettier-plugin-sort-json": "^4.1.1"
+  },
+  "devDependencies": {
+    "@prettier/plugin-xml": "^3.4.2",
+    "prettier": "^3.8.1"
   }
 }
