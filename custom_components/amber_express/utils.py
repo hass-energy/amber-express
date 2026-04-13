@@ -1,6 +1,7 @@
 """Utility functions for Amber Express."""
 
 from datetime import timedelta
+from http import HTTPStatus
 
 from homeassistant.util import dt as dt_util
 
@@ -24,3 +25,11 @@ def to_local_iso_minute(iso_string: str | None) -> str | None:
     local_dt = dt_util.as_local(dt)
     rounded = (local_dt + timedelta(seconds=30)).replace(second=0, microsecond=0)
     return rounded.isoformat()
+
+
+def get_http_status_label(status_code: int) -> str:
+    """Get human-readable label for HTTP status code."""
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "Unknown Error"

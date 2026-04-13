@@ -9,6 +9,8 @@ from amberelectric.models import Site
 from amberelectric.models.channel import Channel
 from amberelectric.models.channel_type import ChannelType
 from amberelectric.models.site_status import SiteStatus
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -34,19 +36,15 @@ from custom_components.amber_express.const import (
 from custom_components.amber_express.sensor import (
     CHANNEL_PRICE_DETAILED_TRANSLATION_KEY,
     CHANNEL_PRICE_TRANSLATION_KEY,
-    AmberApiStatusSensor,
-    AmberConfirmationLagSensor,
+    SENSOR_DESCRIPTIONS,
     AmberDetailedPriceSensor,
     AmberForecastHorizonSensor,
-    AmberNextPollSensor,
-    AmberPollingStatsSensor,
     AmberPriceSensor,
-    AmberRateLimitRemainingSensor,
-    AmberRateLimitResetSensor,
-    AmberRenewablesSensor,
-    AmberSiteSensor,
+    AmberSensor,
+    AmberSensorDescription,
     async_setup_entry,
 )
+from custom_components.amber_express.utils import get_http_status_label
 
 
 def create_mock_subentry(
@@ -69,6 +67,11 @@ def create_mock_subentry(
         CONF_PRICING_MODE: pricing_mode,
     }
     return subentry
+
+
+def _get_description(key: str) -> AmberSensorDescription:
+    """Look up a sensor description by key."""
+    return next(d for d in SENSOR_DESCRIPTIONS if d.key == key)
 
 
 class TestAmberPriceSensor:
@@ -122,7 +125,6 @@ class TestAmberPriceSensor:
             channel=CHANNEL_FEED_IN,
         )
 
-        # Feed-in price is negated (earnings shown as negative cost)
         assert sensor.native_value == -0.10
 
     def test_price_sensor_no_data(
@@ -178,7 +180,6 @@ class TestAmberPriceSensor:
         )
 
         attrs = sensor.extra_state_attributes
-        # Times are converted to local timezone and rounded to the minute
         expected_start = (
             dt_util.as_local(dt_util.parse_datetime("2024-01-01T10:00:00+00:00"))
             .replace(second=0, microsecond=0)
@@ -228,7 +229,6 @@ class TestAmberPriceSensor:
             channel=CHANNEL_GENERAL,
         )
 
-        # AEMO pricing mode uses per_kwh
         assert sensor.native_value == 0.25
 
     def test_price_sensor_uses_pricing_mode_app(
@@ -239,7 +239,6 @@ class TestAmberPriceSensor:
         """Test price sensor uses advanced_price_predicted when pricing mode is APP."""
         subentry = create_mock_subentry(pricing_mode=PRICING_MODE_APP)
 
-        # Add advanced price to mock data
         mock_coordinator_with_data.get_channel_data = MagicMock(
             return_value={
                 ATTR_PER_KWH: 0.25,
@@ -255,7 +254,6 @@ class TestAmberPriceSensor:
             channel=CHANNEL_GENERAL,
         )
 
-        # APP pricing mode uses advanced_price_predicted
         assert sensor.native_value == 0.28
 
     def test_price_sensor_app_mode_fallback_to_per_kwh(
@@ -266,7 +264,6 @@ class TestAmberPriceSensor:
         """Test price sensor falls back to per_kwh when advanced price not available."""
         subentry = create_mock_subentry(pricing_mode=PRICING_MODE_APP)
 
-        # No advanced price in mock data
         mock_coordinator_with_data.get_channel_data = MagicMock(
             return_value={
                 ATTR_PER_KWH: 0.25,
@@ -281,7 +278,6 @@ class TestAmberPriceSensor:
             channel=CHANNEL_GENERAL,
         )
 
-        # Should fall back to per_kwh
         assert sensor.native_value == 0.25
 
     def test_price_sensor_includes_forecast_attribute(
@@ -302,8 +298,6 @@ class TestAmberPriceSensor:
         assert "forecast" in attrs
         assert len(attrs["forecast"]) == 2
 
-        # Check time/value format (default is APP mode, uses advanced_price_predicted)
-        # Times are converted to local timezone and rounded to the minute
         first_forecast = attrs["forecast"][0]
         assert "time" in first_forecast
         assert "value" in first_forecast
@@ -331,7 +325,6 @@ class TestAmberPriceSensor:
         )
 
         attrs = sensor.extra_state_attributes
-        # APP mode should use advanced_price_predicted for forecast values
         assert attrs["forecast"][0]["value"] == 0.28
 
     def test_price_sensor_forecast_aemo_uses_single_value_shape(
@@ -369,7 +362,6 @@ class TestAmberPriceSensor:
         )
 
         attrs = sensor.extra_state_attributes
-        # Feed-in forecast values should be negated (default is APP mode)
         assert attrs["forecast"][0]["value"] == -0.12
 
 
@@ -399,7 +391,6 @@ class TestAmberDetailedPriceSensor:
         mock_config_entry: MockConfigEntry,
     ) -> None:
         """Test detailed price sensor returns current price."""
-        # Use AEMO mode to test per_kwh
         subentry = create_mock_subentry(pricing_mode="aemo")
 
         sensor = AmberDetailedPriceSensor(
@@ -409,7 +400,6 @@ class TestAmberDetailedPriceSensor:
             channel=CHANNEL_GENERAL,
         )
 
-        # AEMO mode uses per_kwh
         assert sensor.native_value == 0.25
 
     def test_detailed_price_sensor_feed_in_negated(
@@ -427,7 +417,6 @@ class TestAmberDetailedPriceSensor:
             channel=CHANNEL_FEED_IN,
         )
 
-        # Feed-in price is negated
         assert sensor.native_value == -0.10
 
     def test_detailed_price_sensor_no_data(
@@ -514,7 +503,6 @@ class TestAmberDetailedPriceSensor:
         """Test detailed price sensor uses configured pricing mode."""
         subentry = create_mock_subentry(pricing_mode=PRICING_MODE_APP)
 
-        # Add advanced price to mock data
         mock_coordinator_with_data.get_channel_data = MagicMock(
             return_value={
                 ATTR_PER_KWH: 0.25,
@@ -529,12 +517,11 @@ class TestAmberDetailedPriceSensor:
             channel=CHANNEL_GENERAL,
         )
 
-        # APP pricing mode uses advanced_price_predicted
         assert sensor.native_value == 0.28
 
 
 class TestAmberRenewablesSensor:
-    """Tests for AmberRenewablesSensor."""
+    """Tests for AmberRenewablesSensor (description-driven)."""
 
     def test_renewables_sensor_init(
         self,
@@ -543,15 +530,17 @@ class TestAmberRenewablesSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test renewables sensor initialization."""
-        sensor = AmberRenewablesSensor(
+        desc = _get_description("renewables")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_renewables"
-        assert sensor._attr_translation_key == "renewables"
-        assert sensor._attr_native_unit_of_measurement == "%"
+        assert sensor.entity_description.translation_key == "renewables"
+        assert sensor.entity_description.native_unit_of_measurement == "%"
 
     def test_renewables_sensor_native_value(
         self,
@@ -560,17 +549,19 @@ class TestAmberRenewablesSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test renewables sensor returns correct value."""
-        sensor = AmberRenewablesSensor(
+        desc = _get_description("renewables")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == 45.5
 
 
 class TestAmberSiteSensor:
-    """Tests for AmberSiteSensor."""
+    """Tests for AmberSiteSensor (description-driven)."""
 
     def test_site_sensor_init(
         self,
@@ -579,14 +570,16 @@ class TestAmberSiteSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test site sensor initialization."""
-        sensor = AmberSiteSensor(
+        desc = _get_description("site")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_site"
-        assert sensor._attr_translation_key == "site"
+        assert sensor.entity_description.translation_key == "site"
 
     def test_site_sensor_native_value(
         self,
@@ -595,30 +588,20 @@ class TestAmberSiteSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test site sensor returns network name."""
-        sensor = AmberSiteSensor(
+        desc = _get_description("site")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == "Ausgrid"
 
-    def test_site_sensor_is_diagnostic(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_site_sensor_is_diagnostic(self) -> None:
         """Test site sensor is a diagnostic entity."""
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
-
-        sensor = AmberSiteSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+        desc = _get_description("site")
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
     def test_site_sensor_extra_attributes(
         self,
@@ -627,14 +610,15 @@ class TestAmberSiteSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test site sensor returns site info as attributes."""
-        sensor = AmberSiteSensor(
+        desc = _get_description("site")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         attrs = sensor.extra_state_attributes
-        # Should return raw site_info from coordinator
         assert attrs["network"] == "Ausgrid"
         assert attrs["nmi"] == "1234567890"
         assert attrs["status"] == "active"
@@ -695,7 +679,6 @@ class TestAsyncSetupEntry:
         """Test async_setup_entry creates expected sensors."""
         mock_config_entry.add_to_hass(hass)
 
-        # Set up runtime data
         mock_config_entry.runtime_data = AmberRuntimeData(
             sites={
                 "test_subentry_id": SiteRuntimeData(
@@ -711,12 +694,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # With general and feed_in enabled, we should have:
-        # 2 channels x 2 sensors (price, detailed price) = 4
-        # + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll
-        # + forecast_horizon = 13
-        assert len(added_entities) == 13
+        # 2 channels x 2 price sensors + description-driven sensors + forecast_horizon
+        assert len(added_entities) == 4 + len(SENSOR_DESCRIPTIONS) + 1
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -725,7 +704,6 @@ class TestAsyncSetupEntry:
         mock_subentry: MagicMock,  # noqa: ARG002 - required for fixture
     ) -> None:
         """Test async_setup_entry creates sensors based on site channels."""
-        # Coordinator with only general channel
         coordinator = MagicMock()
         coordinator.get_site_info = MagicMock(
             return_value=Site(
@@ -754,11 +732,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # With only general channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll
-        # + forecast_horizon = 11
-        assert len(added_entities) == 11
+        # 1 channel x 2 price sensors + description-driven sensors + forecast_horizon
+        assert len(added_entities) == 2 + len(SENSOR_DESCRIPTIONS) + 1
 
     async def test_setup_entry_controlled_load_channel(
         self,
@@ -767,7 +742,6 @@ class TestAsyncSetupEntry:
         mock_subentry: MagicMock,  # noqa: ARG002 - required for fixture
     ) -> None:
         """Test async_setup_entry with controlled load channel only."""
-        # Coordinator with only controlled load channel
         coordinator = MagicMock()
         coordinator.get_site_info = MagicMock(
             return_value=Site(
@@ -796,15 +770,12 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # With only controlled load channel:
-        # 1 channel x 2 sensors + renewables + site + polling_stats + api_status + confirmation_lag
-        # + rate_limit_remaining + rate_limit_reset + next_poll
-        # + forecast_horizon = 11
-        assert len(added_entities) == 11
+        # 1 channel x 2 price sensors + description-driven sensors + forecast_horizon
+        assert len(added_entities) == 2 + len(SENSOR_DESCRIPTIONS) + 1
 
 
 class TestAmberPollingStatsSensor:
-    """Tests for AmberPollingStatsSensor."""
+    """Tests for confirmation delay sensor (description-driven)."""
 
     def test_polling_stats_sensor_native_value_with_observation(
         self,
@@ -826,13 +797,14 @@ class TestAmberPollingStatsSensor:
             )
         )
 
-        sensor = AmberPollingStatsSensor(
+        desc = _get_description("confirmation_delay")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
-        # native_value should be the last_observation["end"]
         assert sensor.native_value == 27.5
 
     def test_polling_stats_sensor_native_value_no_observation(
@@ -855,17 +827,19 @@ class TestAmberPollingStatsSensor:
             )
         )
 
-        sensor = AmberPollingStatsSensor(
+        desc = _get_description("confirmation_delay")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value is None
 
 
 class TestAmberConfirmationLagSensor:
-    """Tests for AmberConfirmationLagSensor."""
+    """Tests for confirmation lag sensor (description-driven)."""
 
     def test_confirmation_lag_sensor_init(
         self,
@@ -874,32 +848,22 @@ class TestAmberConfirmationLagSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test confirmation lag sensor initialization."""
-        sensor = AmberConfirmationLagSensor(
+        desc = _get_description("confirmation_lag")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_confirmation_lag"
-        assert sensor._attr_translation_key == "confirmation_lag"
-        assert sensor._attr_native_unit_of_measurement == "s"
+        assert sensor.entity_description.translation_key == "confirmation_lag"
+        assert sensor.entity_description.native_unit_of_measurement == "s"
 
-    def test_confirmation_lag_sensor_is_diagnostic(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_confirmation_lag_sensor_is_diagnostic(self) -> None:
         """Test confirmation lag sensor is a diagnostic entity."""
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
-
-        sensor = AmberConfirmationLagSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+        desc = _get_description("confirmation_lag")
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
     def test_confirmation_lag_sensor_no_observation(
         self,
@@ -908,11 +872,12 @@ class TestAmberConfirmationLagSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test confirmation lag sensor with no observation returns None."""
-        # Default mock has last_estimate_elapsed=None
-        sensor = AmberConfirmationLagSensor(
+        desc = _get_description("confirmation_lag")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value is None
@@ -937,13 +902,14 @@ class TestAmberConfirmationLagSensor:
             )
         )
 
-        sensor = AmberConfirmationLagSensor(
+        desc = _get_description("confirmation_lag")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
-        # Lag is confirmed - estimate = 27.5 - 15.0 = 12.5
         assert sensor.native_value == 12.5
 
 
@@ -964,7 +930,7 @@ class TestChannelTranslationKeys:
 
 
 class TestAmberApiStatusSensor:
-    """Tests for AmberApiStatusSensor."""
+    """Tests for api_status sensor (description-driven)."""
 
     def test_api_status_sensor_init(
         self,
@@ -972,39 +938,29 @@ class TestAmberApiStatusSensor:
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test API error sensor initialization."""
-        sensor = AmberApiStatusSensor(
+        """Test API status sensor initialization."""
+        desc = _get_description("api_status")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_api_status"
-        assert sensor._attr_translation_key == "api_status"
+        assert sensor.entity_description.translation_key == "api_status"
 
-    def test_api_status_sensor_is_diagnostic(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test API error sensor is a diagnostic entity."""
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
-
-        sensor = AmberApiStatusSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+    def test_api_status_sensor_is_diagnostic(self) -> None:
+        """Test API status sensor is a diagnostic entity."""
+        desc = _get_description("api_status")
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
     def test_api_status_sensor_status_200(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test API error sensor when status is 200 (OK)."""
+        """Test API status sensor when status is 200 (OK)."""
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=200)
         coordinator.get_rate_limit_info = MagicMock(
@@ -1017,10 +973,12 @@ class TestAmberApiStatusSensor:
             }
         )
 
-        sensor = AmberApiStatusSensor(
+        desc = _get_description("api_status")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == "OK"
@@ -1028,7 +986,7 @@ class TestAmberApiStatusSensor:
         assert attrs["status_code"] == 200
         assert attrs["rate_limit_quota"] == 50
         assert attrs["rate_limit_remaining"] == 45
-        assert "rate_limit_reset_at" in attrs  # ISO format datetime string
+        assert "rate_limit_reset_at" in attrs
         assert attrs["rate_limit_window_seconds"] == 300
         assert attrs["rate_limit_policy"] == "50;w=300"
 
@@ -1037,7 +995,7 @@ class TestAmberApiStatusSensor:
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test API error sensor with 429 error."""
+        """Test API status sensor with 429 error."""
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=429)
         coordinator.get_rate_limit_info = MagicMock(
@@ -1050,10 +1008,12 @@ class TestAmberApiStatusSensor:
             }
         )
 
-        sensor = AmberApiStatusSensor(
+        desc = _get_description("api_status")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == "Too Many Requests"
@@ -1066,15 +1026,17 @@ class TestAmberApiStatusSensor:
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test API error sensor with 500 error."""
+        """Test API status sensor with 500 error."""
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=500)
         coordinator.get_rate_limit_info = MagicMock(return_value={})
 
-        sensor = AmberApiStatusSensor(
+        desc = _get_description("api_status")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == "Internal Server Error"
@@ -1085,34 +1047,36 @@ class TestAmberApiStatusSensor:
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test API error sensor with unknown status code."""
+        """Test API status sensor with unknown status code."""
         coordinator = MagicMock()
         coordinator.get_api_status = MagicMock(return_value=999)
         coordinator.get_rate_limit_info = MagicMock(return_value={})
 
-        sensor = AmberApiStatusSensor(
+        desc = _get_description("api_status")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == "Unknown Error"
         assert sensor.extra_state_attributes["status_code"] == 999
 
     def test_get_http_status_label_common_codes(self) -> None:
-        """Test _get_http_status_label for common HTTP status codes."""
-        assert AmberApiStatusSensor._get_http_status_label(400) == "Bad Request"
-        assert AmberApiStatusSensor._get_http_status_label(401) == "Unauthorized"
-        assert AmberApiStatusSensor._get_http_status_label(403) == "Forbidden"
-        assert AmberApiStatusSensor._get_http_status_label(404) == "Not Found"
-        assert AmberApiStatusSensor._get_http_status_label(429) == "Too Many Requests"
-        assert AmberApiStatusSensor._get_http_status_label(500) == "Internal Server Error"
-        assert AmberApiStatusSensor._get_http_status_label(502) == "Bad Gateway"
-        assert AmberApiStatusSensor._get_http_status_label(503) == "Service Unavailable"
+        """Test get_http_status_label for common HTTP status codes."""
+        assert get_http_status_label(400) == "Bad Request"
+        assert get_http_status_label(401) == "Unauthorized"
+        assert get_http_status_label(403) == "Forbidden"
+        assert get_http_status_label(404) == "Not Found"
+        assert get_http_status_label(429) == "Too Many Requests"
+        assert get_http_status_label(500) == "Internal Server Error"
+        assert get_http_status_label(502) == "Bad Gateway"
+        assert get_http_status_label(503) == "Service Unavailable"
 
 
 class TestAmberRateLimitRemainingSensor:
-    """Tests for AmberRateLimitRemainingSensor."""
+    """Tests for rate_limit_remaining sensor (description-driven)."""
 
     def test_rate_limit_remaining_sensor_init(
         self,
@@ -1121,47 +1085,27 @@ class TestAmberRateLimitRemainingSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test rate limit remaining sensor initialization."""
-        sensor = AmberRateLimitRemainingSensor(
+        desc = _get_description("rate_limit_remaining")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_rate_limit_remaining"
-        assert sensor._attr_translation_key == "rate_limit_remaining"
-        assert sensor._attr_native_unit_of_measurement == "requests"
+        assert sensor.entity_description.translation_key == "rate_limit_remaining"
+        assert sensor.entity_description.native_unit_of_measurement == "requests"
 
-    def test_rate_limit_remaining_sensor_is_diagnostic(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_rate_limit_remaining_sensor_is_diagnostic(self) -> None:
         """Test rate limit remaining sensor is a diagnostic entity."""
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
+        desc = _get_description("rate_limit_remaining")
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
-        sensor = AmberRateLimitRemainingSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
-
-    def test_rate_limit_remaining_sensor_disabled_by_default(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_rate_limit_remaining_sensor_disabled_by_default(self) -> None:
         """Test rate limit remaining sensor is disabled by default."""
-        sensor = AmberRateLimitRemainingSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_registry_enabled_default is False
+        desc = _get_description("rate_limit_remaining")
+        assert desc.entity_registry_enabled_default is False
 
     def test_rate_limit_remaining_sensor_native_value(
         self,
@@ -1170,10 +1114,12 @@ class TestAmberRateLimitRemainingSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test rate limit remaining sensor returns correct value."""
-        sensor = AmberRateLimitRemainingSensor(
+        desc = _get_description("rate_limit_remaining")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value == 45
@@ -1187,17 +1133,19 @@ class TestAmberRateLimitRemainingSensor:
         coordinator = MagicMock()
         coordinator.get_rate_limit_info = MagicMock(return_value={})
 
-        sensor = AmberRateLimitRemainingSensor(
+        desc = _get_description("rate_limit_remaining")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value is None
 
 
 class TestAmberRateLimitResetSensor:
-    """Tests for AmberRateLimitResetSensor."""
+    """Tests for rate_limit_reset sensor (description-driven)."""
 
     def test_rate_limit_reset_sensor_init(
         self,
@@ -1206,49 +1154,29 @@ class TestAmberRateLimitResetSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test rate limit reset sensor initialization."""
-        from homeassistant.components.sensor import SensorDeviceClass  # noqa: PLC0415
+        desc = _get_description("rate_limit_reset")
 
-        sensor = AmberRateLimitResetSensor(
+        assert desc.device_class == SensorDeviceClass.TIMESTAMP
+        assert desc.translation_key == "rate_limit_reset"
+
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_rate_limit_reset"
-        assert sensor._attr_translation_key == "rate_limit_reset"
-        assert sensor._attr_device_class == SensorDeviceClass.TIMESTAMP
 
-    def test_rate_limit_reset_sensor_is_diagnostic(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_rate_limit_reset_sensor_is_diagnostic(self) -> None:
         """Test rate limit reset sensor is a diagnostic entity."""
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
+        desc = _get_description("rate_limit_reset")
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
-        sensor = AmberRateLimitResetSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
-
-    def test_rate_limit_reset_sensor_disabled_by_default(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_rate_limit_reset_sensor_disabled_by_default(self) -> None:
         """Test rate limit reset sensor is disabled by default."""
-        sensor = AmberRateLimitResetSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_registry_enabled_default is False
+        desc = _get_description("rate_limit_reset")
+        assert desc.entity_registry_enabled_default is False
 
     def test_rate_limit_reset_sensor_native_value(
         self,
@@ -1257,13 +1185,14 @@ class TestAmberRateLimitResetSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test rate limit reset sensor returns datetime value."""
-        sensor = AmberRateLimitResetSensor(
+        desc = _get_description("rate_limit_reset")
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
-        # Should return a datetime object
         assert isinstance(sensor.native_value, datetime)
 
     def test_rate_limit_reset_sensor_no_data(
@@ -1275,17 +1204,19 @@ class TestAmberRateLimitResetSensor:
         coordinator = MagicMock()
         coordinator.get_rate_limit_info = MagicMock(return_value={})
 
-        sensor = AmberRateLimitResetSensor(
+        desc = _get_description("rate_limit_reset")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.native_value is None
 
 
 class TestAmberNextPollSensor:
-    """Tests for AmberNextPollSensor."""
+    """Tests for next_poll sensor (description-driven)."""
 
     def test_next_poll_sensor_init(
         self,
@@ -1294,49 +1225,29 @@ class TestAmberNextPollSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test next poll sensor initialization."""
-        from homeassistant.components.sensor import SensorDeviceClass  # noqa: PLC0415
+        desc = _get_description("next_poll")
 
-        sensor = AmberNextPollSensor(
+        assert desc.device_class == SensorDeviceClass.TIMESTAMP
+        assert desc.translation_key == "next_poll"
+
+        sensor = AmberSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_next_poll"
-        assert sensor._attr_translation_key == "next_poll"
-        assert sensor._attr_device_class == SensorDeviceClass.TIMESTAMP
 
-    def test_next_poll_sensor_is_diagnostic(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_next_poll_sensor_is_diagnostic(self) -> None:
         """Test next poll sensor is a diagnostic entity."""
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
+        desc = _get_description("next_poll")
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
-        sensor = AmberNextPollSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
-
-    def test_next_poll_sensor_disabled_by_default(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
+    def test_next_poll_sensor_disabled_by_default(self) -> None:
         """Test next poll sensor is disabled by default."""
-        sensor = AmberNextPollSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-        )
-
-        assert sensor._attr_entity_registry_enabled_default is False
+        desc = _get_description("next_poll")
+        assert desc.entity_registry_enabled_default is False
 
     def test_next_poll_sensor_extra_state_attributes(
         self,
@@ -1359,16 +1270,18 @@ class TestAmberNextPollSensor:
         )
         coordinator.get_next_poll_time = MagicMock(return_value=None)
 
-        sensor = AmberNextPollSensor(
+        desc = _get_description("next_poll")
+        sensor = AmberSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         attrs = sensor.extra_state_attributes
 
         assert attrs["poll_schedule"] == [21.0, 27.0, 33.0, 39.0]
-        assert attrs["poll_count"] == 3  # confirmatory_poll_count + 1
+        assert attrs["poll_count"] == 3
 
 
 class TestAmberForecastHorizonSensor:
@@ -1381,9 +1294,6 @@ class TestAmberForecastHorizonSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test forecast horizon sensor initialization."""
-        from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass  # noqa: PLC0415
-        from homeassistant.const import EntityCategory  # noqa: PLC0415
-
         sensor = AmberForecastHorizonSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
@@ -1573,3 +1483,43 @@ class TestAmberForecastHorizonSensor:
         )
 
         assert sensor.extra_state_attributes == {}
+
+
+class TestSensorDescriptions:
+    """Tests for sensor description metadata."""
+
+    def test_renewables_description(self) -> None:
+        """Test renewables sensor description metadata."""
+        desc = _get_description("renewables")
+        assert desc.device_class == SensorDeviceClass.POWER_FACTOR
+        assert desc.state_class == SensorStateClass.MEASUREMENT
+        assert desc.native_unit_of_measurement == PERCENTAGE
+        assert desc.suggested_display_precision == 1
+
+    def test_confirmation_delay_description(self) -> None:
+        """Test confirmation delay sensor description metadata."""
+        desc = _get_description("confirmation_delay")
+        assert desc.state_class == SensorStateClass.MEASUREMENT
+        assert desc.native_unit_of_measurement == "s"
+        assert desc.suggested_display_precision == 1
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_confirmation_lag_description(self) -> None:
+        """Test confirmation lag sensor description metadata."""
+        desc = _get_description("confirmation_lag")
+        assert desc.state_class == SensorStateClass.MEASUREMENT
+        assert desc.native_unit_of_measurement == "s"
+        assert desc.suggested_display_precision == 1
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_rate_limit_remaining_description(self) -> None:
+        """Test rate limit remaining sensor description metadata."""
+        desc = _get_description("rate_limit_remaining")
+        assert desc.native_unit_of_measurement == "requests"
+        assert desc.entity_category == EntityCategory.DIAGNOSTIC
+        assert desc.entity_registry_enabled_default is False
+
+    def test_all_descriptions_have_unique_keys(self) -> None:
+        """Test that all sensor descriptions have unique keys."""
+        keys = [d.key for d in SENSOR_DESCRIPTIONS]
+        assert len(keys) == len(set(keys))

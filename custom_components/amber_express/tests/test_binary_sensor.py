@@ -13,8 +13,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData
 from custom_components.amber_express.binary_sensor import (
-    AmberDemandWindowSensor,
-    AmberPriceSpikeSensor,
+    BINARY_SENSOR_DESCRIPTIONS,
+    AmberBinarySensor,
+    AmberBinarySensorDescription,
     async_setup_entry,
 )
 from custom_components.amber_express.const import (
@@ -46,8 +47,13 @@ def create_mock_subentry(
     return subentry
 
 
+def _get_description(key: str) -> AmberBinarySensorDescription:
+    """Look up a binary sensor description by key."""
+    return next(d for d in BINARY_SENSOR_DESCRIPTIONS if d.key == key)
+
+
 class TestAmberPriceSpikeSensor:
-    """Tests for AmberPriceSpikeSensor."""
+    """Tests for price spike binary sensor (description-driven)."""
 
     def test_price_spike_sensor_init(
         self,
@@ -56,14 +62,16 @@ class TestAmberPriceSpikeSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test price spike sensor initialization."""
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_price_spike"
-        assert sensor._attr_translation_key == "price_spike"
+        assert sensor.entity_description.translation_key == "price_spike"
 
     def test_price_spike_sensor_not_spiking(
         self,
@@ -72,10 +80,12 @@ class TestAmberPriceSpikeSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test price spike sensor when not spiking."""
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.is_on is False
@@ -91,10 +101,12 @@ class TestAmberPriceSpikeSensor:
         coordinator.get_channel_data = MagicMock(return_value={ATTR_SPIKE_STATUS: "spike", ATTR_DESCRIPTOR: "spike"})
         coordinator.data_source = "polling"
 
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.is_on is True
@@ -106,10 +118,12 @@ class TestAmberPriceSpikeSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test price spike sensor device info."""
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         device_info = sensor.device_info
@@ -123,10 +137,12 @@ class TestAmberPriceSpikeSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test price spike sensor extra attributes."""
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         attrs = sensor.extra_state_attributes
@@ -144,10 +160,12 @@ class TestAmberPriceSpikeSensor:
         coordinator.get_channel_data = MagicMock(return_value=None)
         coordinator.data_source = "polling"
 
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.extra_state_attributes == {}
@@ -160,18 +178,20 @@ class TestAmberPriceSpikeSensor:
         """Test price spike sensor uses subentry site name."""
         subentry = create_mock_subentry(site_name="My Home")
 
-        sensor = AmberPriceSpikeSensor(
+        desc = _get_description("price_spike")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=subentry,
+            description=desc,
         )
 
         assert sensor._site_name == "My Home"
-        assert sensor._attr_translation_key == "price_spike"
+        assert sensor.entity_description.translation_key == "price_spike"
 
 
 class TestAmberDemandWindowSensor:
-    """Tests for AmberDemandWindowSensor."""
+    """Tests for demand window binary sensor (description-driven)."""
 
     def test_demand_window_sensor_init(
         self,
@@ -180,14 +200,16 @@ class TestAmberDemandWindowSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test demand window sensor initialization."""
-        sensor = AmberDemandWindowSensor(
+        desc = _get_description("demand_window")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_demand_window"
-        assert sensor._attr_translation_key == "demand_window"
+        assert sensor.entity_description.translation_key == "demand_window"
 
     def test_demand_window_sensor_not_active(
         self,
@@ -196,13 +218,14 @@ class TestAmberDemandWindowSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test demand window sensor when not active."""
-        sensor = AmberDemandWindowSensor(
+        desc = _get_description("demand_window")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
-        # Mock returns None for demand_window
         assert sensor.is_on is None
 
     def test_demand_window_sensor_active(
@@ -214,10 +237,12 @@ class TestAmberDemandWindowSensor:
         coordinator = MagicMock()
         coordinator.is_demand_window = MagicMock(return_value=True)
 
-        sensor = AmberDemandWindowSensor(
+        desc = _get_description("demand_window")
+        sensor = AmberBinarySensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         assert sensor.is_on is True
@@ -229,10 +254,12 @@ class TestAmberDemandWindowSensor:
         mock_subentry: MagicMock,
     ) -> None:
         """Test demand window sensor device info."""
-        sensor = AmberDemandWindowSensor(
+        desc = _get_description("demand_window")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
+            description=desc,
         )
 
         device_info = sensor.device_info
@@ -246,14 +273,16 @@ class TestAmberDemandWindowSensor:
         """Test demand window sensor uses subentry site name."""
         subentry = create_mock_subentry(site_name="My Home")
 
-        sensor = AmberDemandWindowSensor(
+        desc = _get_description("demand_window")
+        sensor = AmberBinarySensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=subentry,
+            description=desc,
         )
 
         assert sensor._site_name == "My Home"
-        assert sensor._attr_translation_key == "demand_window"
+        assert sensor.entity_description.translation_key == "demand_window"
 
 
 class TestAsyncSetupEntry:
@@ -269,7 +298,6 @@ class TestAsyncSetupEntry:
         """Test async_setup_entry creates expected sensors."""
         mock_config_entry.add_to_hass(hass)
 
-        # Set up runtime data
         mock_config_entry.runtime_data = AmberRuntimeData(
             sites={
                 "test_subentry_id": SiteRuntimeData(
@@ -285,10 +313,10 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # With general enabled, we should have price spike + demand window = 2
-        assert len(added_entities) == 2
-        assert any(isinstance(e, AmberPriceSpikeSensor) for e in added_entities)
-        assert any(isinstance(e, AmberDemandWindowSensor) for e in added_entities)
+        assert len(added_entities) == len(BINARY_SENSOR_DESCRIPTIONS)
+        assert all(isinstance(e, AmberBinarySensor) for e in added_entities)
+        keys = {e.entity_description.key for e in added_entities}
+        assert keys == {"price_spike", "demand_window"}
 
     async def test_setup_entry_no_general_channel(
         self,
@@ -297,7 +325,6 @@ class TestAsyncSetupEntry:
         mock_subentry: MagicMock,  # noqa: ARG002 - required for fixture
     ) -> None:
         """Test async_setup_entry with no general channel."""
-        # Coordinator without general channel
         coordinator = MagicMock()
         coordinator.get_site_info = MagicMock(
             return_value=Site(
@@ -326,5 +353,4 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # Without general channel, no binary sensors should be created
         assert len(added_entities) == 0
