@@ -1,6 +1,6 @@
 """Tests for binary sensor platform."""
 
-# pyright: reportArgumentType=false
+# pyright: reportArgumentType=false, reportOptionalSubscript=false
 
 from unittest.mock import MagicMock
 

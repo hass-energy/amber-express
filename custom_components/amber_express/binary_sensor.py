@@ -124,9 +124,7 @@ def _add_site_binary_sensors(
     """Add binary sensors for a single site."""
     site = coordinator.get_site_info()
 
-    has_general = any(
-        CHANNEL_TYPE_MAP.get(ch.type.value) == CHANNEL_GENERAL for ch in site.channels
-    )
+    has_general = any(CHANNEL_TYPE_MAP.get(ch.type.value) == CHANNEL_GENERAL for ch in site.channels)
 
     if has_general:
         entities.extend(
@@ -145,9 +143,7 @@ def _add_site_binary_sensors(
 # ---------------------------------------------------------------------------
 
 
-class AmberBinarySensor(
-    CoordinatorEntity[AmberDataCoordinator], BinarySensorEntity
-):
+class AmberBinarySensor(CoordinatorEntity[AmberDataCoordinator], BinarySensorEntity):
     """Generic binary sensor driven by an AmberBinarySensorDescription."""
 
     _attr_has_entity_name = True

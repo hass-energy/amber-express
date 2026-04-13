@@ -1,6 +1,6 @@
 """Tests for sensor platform."""
 
-# pyright: reportArgumentType=false
+# pyright: reportArgumentType=false, reportOptionalSubscript=false, reportOperatorIssue=false
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock

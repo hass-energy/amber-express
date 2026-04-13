@@ -82,10 +82,7 @@ def _site_attributes(coordinator: AmberDataCoordinator) -> dict[str, Any]:
         "network": site.network,
         "status": site.status.value,
         "interval_length": site.interval_length,
-        "channels": [
-            {"identifier": ch.identifier, "type": ch.type.value, "tariff": ch.tariff}
-            for ch in site.channels
-        ],
+        "channels": [{"identifier": ch.identifier, "type": ch.type.value, "tariff": ch.tariff} for ch in site.channels],
     }
 
 
@@ -96,9 +93,7 @@ def _api_status_attributes(coordinator: AmberDataCoordinator) -> dict[str, Any]:
         "status_code": coordinator.get_api_status(),
         "rate_limit_quota": rate_limit.get("limit"),
         "rate_limit_remaining": rate_limit.get("remaining"),
-        "rate_limit_reset_at": rate_limit.get("reset_at").isoformat()
-        if rate_limit.get("reset_at")
-        else None,
+        "rate_limit_reset_at": rate_limit.get("reset_at").isoformat() if rate_limit.get("reset_at") else None,
         "rate_limit_window_seconds": rate_limit.get("window_seconds"),
         "rate_limit_policy": rate_limit.get("policy"),
     }
@@ -380,15 +375,11 @@ class AmberPriceSensor(AmberBaseSensor):
         super().__init__(coordinator, entry, subentry)
         self._channel = channel
         self._attr_unique_id = f"{self._site_id}_{channel}_price"
-        self._attr_translation_key = CHANNEL_PRICE_TRANSLATION_KEY.get(
-            channel, "general_price"
-        )
+        self._attr_translation_key = CHANNEL_PRICE_TRANSLATION_KEY.get(channel, "general_price")
 
     def _get_price_key(self) -> str:
         """Return the price key based on configured pricing mode."""
-        pricing_mode = self._get_subentry_option(
-            CONF_PRICING_MODE, DEFAULT_PRICING_MODE
-        )
+        pricing_mode = self._get_subentry_option(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
         if pricing_mode == PRICING_MODE_APP:
             return ATTR_ADVANCED_PRICE
         return ATTR_PER_KWH
@@ -422,9 +413,7 @@ class AmberPriceSensor(AmberBaseSensor):
         if price is None:
             return None
         if self._channel == CHANNEL_GENERAL and channel_data.get(ATTR_DEMAND_WINDOW):
-            demand_window_price = self._get_subentry_option(
-                CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE
-            )
+            demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
             price += demand_window_price
         return price
 
@@ -445,17 +434,11 @@ class AmberPriceSensor(AmberBaseSensor):
 
         forecasts = self.coordinator.get_forecasts(self._channel)
         forecast_list: list[dict[str, Any]] = []
-        demand_window_price = self._get_subentry_option(
-            CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE
-        )
+        demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
         for f in forecasts:
             time_value = to_local_iso_minute(f.get(ATTR_START_TIME))
             value = self._get_price(f, self._get_price_key())
-            if (
-                value is not None
-                and self._channel == CHANNEL_GENERAL
-                and f.get(ATTR_DEMAND_WINDOW)
-            ):
+            if value is not None and self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
                 value += demand_window_price
             forecast_list.append({"time": time_value, "value": value})
         attrs["interpolation_mode"] = "previous"
@@ -489,9 +472,7 @@ class AmberDetailedPriceSensor(AmberPriceSensor):
         """Initialize the detailed price sensor."""
         super().__init__(coordinator, entry, subentry, channel)
         self._attr_unique_id = f"{self._site_id}_{channel}_price_detailed"
-        self._attr_translation_key = CHANNEL_PRICE_DETAILED_TRANSLATION_KEY.get(
-            channel, "general_price_detailed"
-        )
+        self._attr_translation_key = CHANNEL_PRICE_DETAILED_TRANSLATION_KEY.get(channel, "general_price_detailed")
 
     @property
     def native_value(self) -> float | None:
@@ -516,9 +497,7 @@ class AmberDetailedPriceSensor(AmberPriceSensor):
 
     def _strip_forecast_fields(self, forecast: dict[str, Any]) -> dict[str, Any]:
         """Remove wasteful fields from forecast entry."""
-        return {
-            k: v for k, v in forecast.items() if k not in self._FORECAST_STRIP_FIELDS
-        }
+        return {k: v for k, v in forecast.items() if k not in self._FORECAST_STRIP_FIELDS}
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
