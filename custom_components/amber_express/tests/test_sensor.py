@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
+    ATTR_DEMAND_WINDOW,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
@@ -27,6 +28,7 @@ from custom_components.amber_express.const import (
     CHANNEL_CONTROLLED_LOAD,
     CHANNEL_FEED_IN,
     CHANNEL_GENERAL,
+    CONF_DEMAND_WINDOW_PRICE,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_SITE_NAME,
@@ -364,6 +366,69 @@ class TestAmberPriceSensor:
         attrs = sensor.extra_state_attributes
         assert attrs["forecast"][0]["value"] == -0.12
 
+    def test_price_sensor_rejects_non_numeric_price(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Non-numeric per_kwh values are treated as no price."""
+        coordinator = MagicMock()
+        coordinator.get_channel_data = MagicMock(
+            return_value={
+                ATTR_PER_KWH: "not-a-number",
+                ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
+            }
+        )
+        coordinator.data_source = "polling"
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        assert sensor.native_value is None
+
+    def test_price_sensor_adds_demand_window_surcharge(
+        self,
+        mock_config_entry: MockConfigEntry,
+    ) -> None:
+        """General channel applies configured demand window surcharge when flagged."""
+        subentry = create_mock_subentry()
+        subentry.data[CONF_DEMAND_WINDOW_PRICE] = 0.05
+        mock_config_entry.subentries = {subentry.subentry_id: subentry}
+
+        coordinator = MagicMock()
+        coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(
+            return_value={
+                ATTR_PER_KWH: 0.25,
+                ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
+                ATTR_DEMAND_WINDOW: True,
+            }
+        )
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {
+                    ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
+                    ATTR_PER_KWH: 0.26,
+                    ATTR_DEMAND_WINDOW: True,
+                },
+            ]
+        )
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        assert sensor.native_value == 0.30
+        attrs = sensor.extra_state_attributes
+        assert attrs["forecast"][0]["value"] == 0.31
+
 
 class TestAmberDetailedPriceSensor:
     """Tests for AmberDetailedPriceSensor."""
@@ -519,6 +584,26 @@ class TestAmberDetailedPriceSensor:
 
         assert sensor.native_value == 0.28
 
+    def test_detailed_price_sensor_extra_attributes_when_no_channel_data(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Without channel data, attributes only expose data_source."""
+        coordinator = MagicMock()
+        coordinator.get_channel_data = MagicMock(return_value=None)
+        coordinator.get_forecasts = MagicMock(return_value=[])
+        coordinator.data_source = "websocket"
+
+        sensor = AmberDetailedPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        assert sensor.extra_state_attributes == {"data_source": "websocket"}
+
 
 class TestAmberRenewablesSensor:
     """Tests for AmberRenewablesSensor (description-driven)."""
@@ -558,6 +643,23 @@ class TestAmberRenewablesSensor:
         )
 
         assert sensor.native_value == 45.5
+
+    def test_renewables_sensor_has_no_extra_state_attributes(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Descriptions without attributes_fn return None from extra_state_attributes."""
+        desc = _get_description("renewables")
+        sensor = AmberSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            description=desc,
+        )
+
+        assert sensor.extra_state_attributes is None
 
 
 class TestAmberSiteSensor:
@@ -664,6 +766,33 @@ class TestAmberBaseSensor:
 
         assert sensor._site_name == "My Home"
         assert sensor._attr_translation_key == "general_price"
+
+    def test_get_subentry_option_when_subentry_removed_uses_defaults(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """If the subentry is no longer on the config entry, options fall back to defaults."""
+        mock_config_entry.subentries = {}
+
+        coordinator = MagicMock()
+        coordinator.get_channel_data = MagicMock(
+            return_value={
+                ATTR_PER_KWH: 0.25,
+                ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
+            }
+        )
+        coordinator.get_forecasts = MagicMock(return_value=[])
+        coordinator.data_source = "polling"
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        assert sensor.native_value == 0.25
 
 
 class TestAsyncSetupEntry:
@@ -772,6 +901,70 @@ class TestAsyncSetupEntry:
 
         # 1 channel x 2 price sensors + description-driven sensors + forecast_horizon
         assert len(added_entities) == 2 + len(SENSOR_DESCRIPTIONS) + 1
+
+    async def test_setup_entry_no_runtime_data(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry: MockConfigEntry,
+    ) -> None:
+        """When runtime_data is missing, setup adds no entities."""
+        mock_config_entry.add_to_hass(hass)
+        mock_config_entry.runtime_data = None
+
+        add_calls: list[bool] = []
+
+        def mock_add_entities(entities: list, *, config_subentry_id: str | None = None) -> None:
+            add_calls.append(True)
+
+        await async_setup_entry(hass, mock_config_entry, mock_add_entities)
+
+        assert add_calls == []
+
+    async def test_setup_entry_skips_non_site_subentry(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry: MockConfigEntry,
+        mock_coordinator_with_data: MagicMock,
+    ) -> None:
+        """Non-site subentries are skipped."""
+        mock_config_entry.add_to_hass(hass)
+        other = MagicMock()
+        other.subentry_type = "other"
+        other.subentry_id = "other_id"
+        mock_config_entry.subentries = {"other_id": other}
+        mock_config_entry.runtime_data = AmberRuntimeData(
+            sites={
+                "other_id": SiteRuntimeData(coordinator=mock_coordinator_with_data),
+            }
+        )
+
+        added_entities: list = []
+
+        def mock_add_entities(entities: list, *, config_subentry_id: str | None = None) -> None:
+            added_entities.extend(entities)
+
+        await async_setup_entry(hass, mock_config_entry, mock_add_entities)
+
+        assert added_entities == []
+
+    async def test_setup_entry_skips_when_site_runtime_missing(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,  # noqa: ARG002
+    ) -> None:
+        """When sites dict has no entry for the subentry id, that site is skipped."""
+        mock_config_entry.add_to_hass(hass)
+        mock_config_entry.runtime_data = AmberRuntimeData(sites={})
+
+        added_entities: list = []
+
+        def mock_add_entities(entities: list, *, config_subentry_id: str | None = None) -> None:
+            added_entities.extend(entities)
+
+        await async_setup_entry(hass, mock_config_entry, mock_add_entities)
+
+        assert added_entities == []
 
 
 class TestAmberPollingStatsSensor:
