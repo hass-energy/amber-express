@@ -25,6 +25,7 @@ from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
     ATTR_DESCRIPTOR,
+    ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_NEM_TIME,
@@ -443,6 +444,7 @@ class TestAmberWebSocketClient:
         result = ws_client._extract_channel_data(interval)
         assert result is not None
         assert result[ATTR_PER_KWH] == 0.25
+        assert result[ATTR_DURATION] == 30
 
     def test_extract_channel_data_full(self, ws_client: AmberWebSocketClient) -> None:
         """Test _extract_channel_data with full data."""
@@ -465,6 +467,7 @@ class TestAmberWebSocketClient:
         assert ATTR_NEM_TIME in result
         assert result[ATTR_RENEWABLES] == 45.5
         assert result[ATTR_ESTIMATE] is False
+        assert result[ATTR_DURATION] == 30
 
     def test_extract_channel_data_with_advanced_price(self, ws_client: AmberWebSocketClient) -> None:
         """Test _extract_channel_data with advanced price."""

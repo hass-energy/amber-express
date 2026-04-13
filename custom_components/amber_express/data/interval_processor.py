@@ -12,6 +12,7 @@ from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
     ATTR_DESCRIPTOR,
+    ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
@@ -140,6 +141,7 @@ class IntervalProcessor:
         data: ChannelData = {
             ATTR_PER_KWH: cents_to_dollars(price_cents),  # type: ignore[typeddict-item]
             ATTR_SPOT_PER_KWH: cents_to_dollars(interval.spot_per_kwh),  # type: ignore[typeddict-item]
+            ATTR_DURATION: interval.duration,
             ATTR_START_TIME: interval.start_time.isoformat(),
             ATTR_END_TIME: interval.end_time.isoformat(),
             ATTR_NEM_TIME: interval.nem_time.isoformat(),

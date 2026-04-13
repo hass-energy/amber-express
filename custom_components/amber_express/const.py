@@ -64,6 +64,7 @@ ATTR_DEMAND_WINDOW: Final = "demand_window"
 ATTR_TARIFF_PERIOD: Final = "tariff_period"
 ATTR_TARIFF_SEASON: Final = "tariff_season"
 ATTR_TARIFF_BLOCK: Final = "tariff_block"
+ATTR_DURATION: Final = "duration"
 
 # Data source tracking
 DATA_SOURCE_POLLING: Final = "polling"

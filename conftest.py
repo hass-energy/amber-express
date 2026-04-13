@@ -22,6 +22,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.amber_express.api import AmberApiError, RateLimitedError
 from custom_components.amber_express.const import (
     ATTR_DESCRIPTOR,
+    ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
@@ -259,6 +260,7 @@ def mock_channel_data_general() -> dict:
     return {
         ATTR_PER_KWH: 0.25,
         ATTR_SPOT_PER_KWH: 0.20,
+        ATTR_DURATION: 30,
         ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
         ATTR_END_TIME: "2024-01-01T10:05:00+00:00",
         ATTR_ESTIMATE: False,
@@ -266,8 +268,18 @@ def mock_channel_data_general() -> dict:
         ATTR_SPIKE_STATUS: "none",
         ATTR_RENEWABLES: 45.5,
         ATTR_FORECASTS: [
-            {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_PER_KWH: 0.26, "advanced_price_predicted": 0.28},
-            {ATTR_START_TIME: "2024-01-01T10:10:00+00:00", ATTR_PER_KWH: 0.27, "advanced_price_predicted": 0.29},
+            {
+                ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
+                ATTR_PER_KWH: 0.26,
+                ATTR_DURATION: 30,
+                "advanced_price_predicted": 0.28,
+            },
+            {
+                ATTR_START_TIME: "2024-01-01T10:10:00+00:00",
+                ATTR_PER_KWH: 0.27,
+                ATTR_DURATION: 30,
+                "advanced_price_predicted": 0.29,
+            },
         ],
     }
 

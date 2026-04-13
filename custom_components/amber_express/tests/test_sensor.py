@@ -19,6 +19,7 @@ from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
+    ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
@@ -522,6 +523,8 @@ class TestAmberDetailedPriceSensor:
         assert ATTR_FORECASTS in attrs
         assert len(attrs[ATTR_FORECASTS]) == 2
         assert attrs["data_source"] == "polling"
+        assert attrs[ATTR_DURATION] == 30
+        assert attrs[ATTR_FORECASTS][0][ATTR_DURATION] == 30
 
     def test_detailed_price_sensor_feed_in_inverts_prices(
         self,

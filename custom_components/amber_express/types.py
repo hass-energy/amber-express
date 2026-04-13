@@ -30,6 +30,7 @@ class ChannelData(TypedDict, total=False):
     - renewables, descriptor, spike_status, estimate
 
     Optional fields (only present when SDK provides them):
+    - duration (interval length in minutes, from SDK CurrentInterval / ForecastInterval)
     - advanced_price_predicted, demand_window, tariff_period, tariff_season, tariff_block
     - forecasts (only on top-level channel entries, not forecast items)
 
@@ -48,6 +49,7 @@ class ChannelData(TypedDict, total=False):
     estimate: bool
 
     # Optional fields (from SDK optional fields)
+    duration: int  # Interval length in minutes
     advanced_price_predicted: AdvancedPriceData
     demand_window: bool
     tariff_period: str

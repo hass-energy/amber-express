@@ -18,6 +18,7 @@ from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
     ATTR_DESCRIPTOR,
+    ATTR_DURATION,
     ATTR_ESTIMATE,
     ATTR_FORECASTS,
     ATTR_PER_KWH,
@@ -142,6 +143,7 @@ class TestExtractIntervalData:
 
         assert result[ATTR_PER_KWH] == 0.25
         assert result[ATTR_SPOT_PER_KWH] == 0.20
+        assert result[ATTR_DURATION] == 30
         assert result[ATTR_RENEWABLES] == 45.0
         assert result[ATTR_DESCRIPTOR] == "neutral"
         assert result[ATTR_SPIKE_STATUS] == "none"
@@ -181,6 +183,7 @@ class TestExtractIntervalData:
         """Test _extract_interval_data marks forecasts as estimated."""
         result = processor._extract_interval_data(forecast_interval)
         assert result[ATTR_ESTIMATE] is True
+        assert result[ATTR_DURATION] == 30
 
     def test_extract_interval_data_app_mode_no_advanced_price(self, processor_app_mode: IntervalProcessor) -> None:
         """Test _extract_interval_data in APP mode falls back to per_kwh."""
@@ -209,6 +212,7 @@ class TestBuildForecasts:
         result = processor._build_forecasts([forecast_interval])
         assert len(result) == 1
         assert result[0][ATTR_PER_KWH] == 0.26
+        assert result[0][ATTR_DURATION] == 30
 
     def test_build_forecasts_with_advanced_price(self, processor: IntervalProcessor) -> None:
         """Test _build_forecasts includes advanced_price when available."""
@@ -256,6 +260,7 @@ class TestProcessIntervals:
 
         assert CHANNEL_GENERAL in result
         assert result[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.25
+        assert result[CHANNEL_GENERAL][ATTR_DURATION] == 30
         assert ATTR_FORECASTS in result[CHANNEL_GENERAL]
 
     def test_process_intervals_with_wrapper(self, processor: IntervalProcessor) -> None:
