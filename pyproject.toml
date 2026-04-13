@@ -58,6 +58,9 @@ force-sort-within-sections = true
 split-on-trailing-comma = false
 
 [tool.ruff.lint.per-file-ignores]
+"custom_components/amber_express/__init__.py" = [
+    'E402',    # Warning filter for amberelectric/pydantic must run before imports
+]
 "**/test_*.py" = [
     'S101',    # Assert is allowed in tests
     'B011',    # Assert false is allowed in tests
@@ -125,7 +128,10 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    "ignore:Core Pydantic V1:UserWarning:amberelectric\\.",
+]
 
 [tool.coverage.run]
 omit = [
