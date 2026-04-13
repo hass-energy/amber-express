@@ -20,7 +20,7 @@ def test_initializes_with_provided_observations() -> None:
     """Test that strategy uses provided observations."""
     strategy = CDFPollingStrategy(get_cold_start_observations())
 
-    assert len(strategy.observations) == 100
+    assert len(strategy.observations) == len(get_cold_start_observations())
     # Verify observations have valid start < end structure
     for obs in strategy.observations:
         assert obs["start"] < obs["end"]
@@ -61,7 +61,7 @@ def test_record_observation_adds_to_rolling_window() -> None:
     # Add a new observation
     strategy.record_observation(start=5.0, end=15.0)
 
-    # Should still have 100 observations (rolling window)
+    # Should still have WINDOW_SIZE observations (rolling window)
     assert len(strategy.observations) == initial_count
 
     # Last observation should be the new one
@@ -367,23 +367,20 @@ def test_update_budget_concentrates_polls_in_remaining_mass() -> None:
     strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(35, 0, _reset_at(0), 0)
 
-    # Original schedule spans within [15, 45] interval
     original = strategy.scheduled_polls.copy()
     assert len(original) == 35
-    # First few polls should be around 15-20s range
-    assert 15.0 < original[0] < 20.0
+    assert original == sorted(original)
+    last_poll = original[-1]
 
-    # Update at 30 seconds - half the probability mass is now gone, reset in 270s
-    # With k=35, reset=270: uniform_polls_needed = ceil(270/30) = 9
-    # Blends targeted [15,45] with uniform [30, 300]
-    strategy.update_budget(polls_per_interval=35, elapsed_seconds=30.0, reset_at=_reset_at(270), interval_seconds=0)
+    # Update past the last original poll - all targeted mass is now in the past
+    elapsed = last_poll + 1.0
+    strategy.update_budget(polls_per_interval=35, elapsed_seconds=elapsed, reset_at=_reset_at(270), interval_seconds=0)
 
-    # New schedule should be after elapsed time (30s)
     new_schedule = strategy.scheduled_polls
     assert len(new_schedule) == 35
-    assert all(t > 30.0 for t in new_schedule)
-    # Should extend beyond targeted range due to uniform blending
-    assert any(t > 45.0 for t in new_schedule)
+    assert all(t > elapsed for t in new_schedule)
+    # Should extend well beyond original range due to uniform blending
+    assert new_schedule[-1] > last_poll
 
 
 def test_update_budget_all_mass_in_past() -> None:
@@ -395,7 +392,7 @@ def test_update_budget_all_mass_in_past() -> None:
     strategy = CDFPollingStrategy(get_cold_start_observations())
     strategy.update_budget(4, 0, _reset_at(0), 0)
 
-    # Update at 50 seconds - all probability mass is in [15, 45], so F(50) = 1
+    # Update at 50 seconds - all probability mass is before 50s, so F(50) = 1
     # With k=4 and reset=250, uniform_polls_needed = ceil(250/30) = 9
     # Since k=4 <= 9, we use pure uniform from 50 to 300 (50+250)
     strategy.update_budget(polls_per_interval=4, elapsed_seconds=50.0, reset_at=_reset_at(250), interval_seconds=0)
