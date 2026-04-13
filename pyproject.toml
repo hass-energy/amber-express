@@ -19,7 +19,7 @@ dev = [
     "pytest>=9.0.0",
     "pytest-cov>=7.0.0",
     "pytest-homeassistant-custom-component>=0.13.300",
-    "ruff>=0.14.0",
+    "ruff>=0.15.10",
     "syrupy>=5.0.0",
 ]
 
