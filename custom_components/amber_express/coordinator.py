@@ -462,7 +462,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         except RateLimitedError:
             return
         except AmberApiError as err:
-            _LOGGER.debug("API error: %s", err)
+            _LOGGER.warning("API error: %s", err)
             return
         finally:
             # Update polling manager with rate limit info regardless of success/failure

@@ -16,6 +16,7 @@ from amberelectric.models.spike_status import SpikeStatus
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 import pytest
+import urllib3
 
 from custom_components.amber_express.api import (
     AmberApiClient,
@@ -140,6 +141,35 @@ class TestAmberApiClient:
             assert exc_info.value.status == 500
             assert api_client.last_status == 500
 
+    @pytest.mark.parametrize(
+        "network_error",
+        [
+            urllib3.exceptions.MaxRetryError(
+                None,
+                "/v1/sites/test_site/prices/current",
+                urllib3.exceptions.ProtocolError("connection broken", ConnectionResetError(104, "Connection reset")),
+            ),
+            OSError("Network is unreachable"),
+            TimeoutError("Request timed out"),
+        ],
+    )
+    async def test_fetch_sites_network_error(
+        self,
+        api_client: AmberApiClient,
+        network_error: Exception,
+    ) -> None:
+        """Test site fetch wraps network exceptions as AmberApiError."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=network_error),
+        ):
+            with pytest.raises(AmberApiError) as exc_info:
+                await api_client.fetch_sites()
+
+            assert exc_info.value.status == 0
+            assert api_client.last_status == 0
+
     async def test_fetch_sites_rate_limited(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
     ) -> None:
@@ -219,6 +249,35 @@ class TestAmberApiClient:
 
             assert exc_info.value.status == 503
             assert api_client.last_status == 503
+
+    @pytest.mark.parametrize(
+        "network_error",
+        [
+            urllib3.exceptions.MaxRetryError(
+                None,
+                "/v1/sites/test_site/prices/current",
+                urllib3.exceptions.ProtocolError("connection broken", ConnectionResetError(104, "Connection reset")),
+            ),
+            OSError("Network is unreachable"),
+            TimeoutError("Request timed out"),
+        ],
+    )
+    async def test_fetch_current_prices_network_error(
+        self,
+        api_client: AmberApiClient,
+        network_error: Exception,
+    ) -> None:
+        """Test price fetch wraps network exceptions as AmberApiError."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=network_error),
+        ):
+            with pytest.raises(AmberApiError) as exc_info:
+                await api_client.fetch_current_prices("test_site")
+
+            assert exc_info.value.status == 0
+            assert api_client.last_status == 0
 
     async def test_fetch_current_prices_rate_limit_triggers_backoff(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
