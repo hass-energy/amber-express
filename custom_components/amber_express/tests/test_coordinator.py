@@ -12,7 +12,7 @@ from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from conftest import make_current_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
 from custom_components.amber_express.api import AmberApiError
@@ -111,6 +111,10 @@ class TestAmberDataCoordinator:
         assert coordinator.site_id == "01ABCDEFGHIJKLMNOPQRSTUV"
         assert coordinator.data_source == DATA_SOURCE_POLLING
         assert coordinator.current_data == {}
+
+    def test_coordinator_has_five_minute_update_interval(self, coordinator: AmberDataCoordinator) -> None:
+        """Test coordinator has a five-minute safety-net update interval."""
+        assert coordinator.update_interval == timedelta(minutes=5)
 
     def test_get_channel_data(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_channel_data."""
@@ -726,6 +730,24 @@ class TestCoordinatorLifecycle:
             await coordinator.start()
 
             assert coordinator._unsub_time_change is mock_unsub
+
+    async def test_five_minute_update_interval_refreshes_data(
+        self,
+        coordinator: AmberDataCoordinator,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test the five-minute safety-net interval retries polling."""
+        unsub = coordinator.async_add_listener(lambda: None)
+        mock_fetch = AsyncMock()
+
+        try:
+            with patch.object(coordinator, "_fetch_amber_data", new=mock_fetch):
+                async_fire_time_changed(hass, datetime.now(UTC) + timedelta(minutes=5, seconds=1))
+                await hass.async_block_till_done()
+
+            mock_fetch.assert_called_once()
+        finally:
+            unsub()
 
     async def test_stop_unsubscribes_time_change(
         self,
