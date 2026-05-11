@@ -73,6 +73,15 @@ async def _run_executor_job(func: Callable[..., object], *args: object) -> objec
     return func(*args)
 
 
+def _make_connection_reset_error() -> urllib3.exceptions.MaxRetryError:
+    """Create a urllib3 error matching a reset connection."""
+    return urllib3.exceptions.MaxRetryError(
+        urllib3.connectionpool.HTTPConnectionPool("api.amber.com.au"),
+        "/v1/sites/test_site/prices/current",
+        urllib3.exceptions.ProtocolError("connection broken", ConnectionResetError(104, "Connection reset")),
+    )
+
+
 @pytest.fixture
 def rate_limiter() -> ExponentialBackoffRateLimiter:
     """Create a rate limiter for testing."""
@@ -167,11 +176,7 @@ class TestAmberApiClient:
     @pytest.mark.parametrize(
         "network_error",
         [
-            urllib3.exceptions.MaxRetryError(
-                None,
-                "/v1/sites/test_site/prices/current",
-                urllib3.exceptions.ProtocolError("connection broken", ConnectionResetError(104, "Connection reset")),
-            ),
+            _make_connection_reset_error(),
             OSError("Network is unreachable"),
             TimeoutError("Request timed out"),
         ],
@@ -300,11 +305,7 @@ class TestAmberApiClient:
     @pytest.mark.parametrize(
         "network_error",
         [
-            urllib3.exceptions.MaxRetryError(
-                None,
-                "/v1/sites/test_site/prices/current",
-                urllib3.exceptions.ProtocolError("connection broken", ConnectionResetError(104, "Connection reset")),
-            ),
+            _make_connection_reset_error(),
             OSError("Network is unreachable"),
             TimeoutError("Request timed out"),
         ],
