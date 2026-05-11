@@ -31,6 +31,9 @@ _LOGGER = logging.getLogger(__name__)
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_NETWORK_ERROR = 0
 
+# Request timeout as (connect timeout, read timeout), passed to urllib3 by the SDK
+_REQUEST_TIMEOUT = (10, 30)
+
 # Maximum jitter in reset_at timestamp to ignore (seconds)
 RESET_AT_JITTER_TOLERANCE = 5
 
@@ -135,7 +138,9 @@ class AmberApiClient:
 
         """
         try:
-            response = await self._hass.async_add_executor_job(self._api.get_sites_with_http_info)
+            response = await self._hass.async_add_executor_job(
+                lambda: self._api.get_sites_with_http_info(_request_timeout=_REQUEST_TIMEOUT)
+            )
             # API always returns rate limit headers
             headers = response.headers or {}
             self._rate_limit_info = self._extract_rate_limit_info(headers, self._rate_limit_info)
@@ -206,6 +211,7 @@ class AmberApiClient:
                     next=next_intervals,
                     previous=0,
                     resolution=resolution,
+                    _request_timeout=_REQUEST_TIMEOUT,
                 )
             )
             # API always returns rate limit headers
