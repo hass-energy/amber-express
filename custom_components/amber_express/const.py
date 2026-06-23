@@ -50,6 +50,7 @@ DEFAULT_DEMAND_WINDOW_PRICE: Final = 0.0  # $/kWh penalty during demand window
 
 # Sensor attributes
 ATTR_FORECASTS: Final = "forecasts"
+ATTR_DETAILED_FORECAST: Final = "detailedForecast"
 ATTR_START_TIME: Final = "start_time"
 ATTR_END_TIME: Final = "end_time"
 ATTR_PER_KWH: Final = "per_kwh"

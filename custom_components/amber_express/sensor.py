@@ -21,9 +21,9 @@ from .const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
     ATTR_DESCRIPTOR,
+    ATTR_DETAILED_FORECAST,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
     ATTR_PER_KWH,
     ATTR_START_TIME,
     CHANNEL_CONTROLLED_LOAD,
@@ -51,12 +51,6 @@ CHANNEL_PRICE_TRANSLATION_KEY = {
     CHANNEL_GENERAL: "general_price",
     CHANNEL_FEED_IN: "feed_in_price",
     CHANNEL_CONTROLLED_LOAD: "controlled_load_price",
-}
-
-CHANNEL_PRICE_DETAILED_TRANSLATION_KEY = {
-    CHANNEL_GENERAL: "general_price_detailed",
-    CHANNEL_FEED_IN: "feed_in_price_detailed",
-    CHANNEL_CONTROLLED_LOAD: "controlled_load_price_detailed",
 }
 
 
@@ -238,23 +232,15 @@ def _add_site_sensors(
         if api_type in CHANNEL_TYPE_MAP:
             available_channels.add(CHANNEL_TYPE_MAP[api_type])
 
-    for channel in available_channels:
-        entities.append(
-            AmberPriceSensor(
-                coordinator=coordinator,
-                entry=entry,
-                subentry=subentry,
-                channel=channel,
-            )
+    entities.extend(
+        AmberPriceSensor(
+            coordinator=coordinator,
+            entry=entry,
+            subentry=subentry,
+            channel=channel,
         )
-        entities.append(
-            AmberDetailedPriceSensor(
-                coordinator=coordinator,
-                entry=entry,
-                subentry=subentry,
-                channel=channel,
-            )
-        )
+        for channel in available_channels
+    )
 
     if available_channels:
         entities.extend(
@@ -363,6 +349,7 @@ class AmberPriceSensor(AmberBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "$/kWh"
     _attr_suggested_display_precision = 2
+    _unrecorded_attributes = frozenset({ATTR_DETAILED_FORECAST})
 
     def __init__(
         self,
@@ -417,6 +404,19 @@ class AmberPriceSensor(AmberBaseSensor):
             price += demand_window_price
         return price
 
+    def _negate_prices(self, data: ChannelData) -> dict[str, Any]:
+        """Negate price fields for the feed-in channel."""
+        result: dict[str, Any] = dict(data)
+        for key in (ATTR_PER_KWH, ATTR_ADVANCED_PRICE):
+            if key not in result:
+                continue
+            value = result[key]
+            if isinstance(value, int | float):
+                result[key] = value * -1
+            elif isinstance(value, dict):
+                result[key] = {k: v * -1 for k, v in value.items()}
+        return result
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
@@ -444,82 +444,12 @@ class AmberPriceSensor(AmberBaseSensor):
         attrs["interpolation_mode"] = "previous"
         attrs["forecast"] = forecast_list
 
-        return {k: v for k, v in attrs.items() if v is not None}
-
-
-class AmberDetailedPriceSensor(AmberPriceSensor):
-    """Sensor for electricity price with detailed forecast attributes."""
-
-    _attr_entity_registry_enabled_default = False
-
-    _FORECAST_STRIP_FIELDS = (
-        "tariff_period",
-        "tariff_season",
-        "tariff_block",
-        "nem_time",
-        "descriptor",
-        "spike_status",
-        "estimate",
-    )
-
-    def __init__(
-        self,
-        coordinator: AmberDataCoordinator,
-        entry: ConfigEntry,
-        subentry: ConfigSubentry,
-        channel: str,
-    ) -> None:
-        """Initialize the detailed price sensor."""
-        super().__init__(coordinator, entry, subentry, channel)
-        self._attr_unique_id = f"{self._site_id}_{channel}_price_detailed"
-        self._attr_translation_key = CHANNEL_PRICE_DETAILED_TRANSLATION_KEY.get(channel, "general_price_detailed")
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current price (without demand window surcharge)."""
-        channel_data = self.coordinator.get_channel_data(self._channel)
-        if not channel_data:
-            return None
-        return self._get_price(channel_data, self._get_price_key())
-
-    def _negate_prices(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Negate price fields for feed-in channel."""
-        result = data.copy()
-        for key in (ATTR_PER_KWH, ATTR_ADVANCED_PRICE):
-            if key not in result:
-                continue
-            value = result[key]
-            if isinstance(value, int | float):
-                result[key] = value * -1
-            elif isinstance(value, dict):
-                result[key] = {k: v * -1 for k, v in value.items()}
-        return result
-
-    def _strip_forecast_fields(self, forecast: dict[str, Any]) -> dict[str, Any]:
-        """Remove wasteful fields from forecast entry."""
-        return {k: v for k, v in forecast.items() if k not in self._FORECAST_STRIP_FIELDS}
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return all channel data as attributes."""
-        channel_data = self.coordinator.get_channel_data(self._channel)
-        if not channel_data:
-            return {"data_source": self.coordinator.data_source}
-
-        attrs: dict[str, Any] = dict(channel_data)
-
-        if ATTR_FORECASTS in attrs:
-            forecasts = attrs[ATTR_FORECASTS]
-            forecasts = [self._strip_forecast_fields(f) for f in forecasts]
-            if self._channel == CHANNEL_FEED_IN:
-                forecasts = [self._negate_prices(f) for f in forecasts]
-            attrs[ATTR_FORECASTS] = forecasts
-
         if self._channel == CHANNEL_FEED_IN:
-            attrs = self._negate_prices(attrs)
+            attrs[ATTR_DETAILED_FORECAST] = [self._negate_prices(f) for f in forecasts]
+        else:
+            attrs[ATTR_DETAILED_FORECAST] = list(forecasts)
 
-        attrs["data_source"] = self.coordinator.data_source
-        return attrs
+        return {k: v for k, v in attrs.items() if v is not None}
 
 
 # ---------------------------------------------------------------------------

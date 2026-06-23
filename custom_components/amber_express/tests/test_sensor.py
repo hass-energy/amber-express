@@ -19,10 +19,10 @@ from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
+    ATTR_DETAILED_FORECAST,
     ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
     ATTR_PER_KWH,
     ATTR_SPOT_PER_KWH,
     ATTR_START_TIME,
@@ -37,10 +37,8 @@ from custom_components.amber_express.const import (
     SUBENTRY_TYPE_SITE,
 )
 from custom_components.amber_express.sensor import (
-    CHANNEL_PRICE_DETAILED_TRANSLATION_KEY,
     CHANNEL_PRICE_TRANSLATION_KEY,
     SENSOR_DESCRIPTIONS,
-    AmberDetailedPriceSensor,
     AmberForecastHorizonSensor,
     AmberPriceSensor,
     AmberSensor,
@@ -431,181 +429,62 @@ class TestAmberPriceSensor:
         assert attrs["forecast"][0]["value"] == 0.31
 
 
-class TestAmberDetailedPriceSensor:
-    """Tests for AmberDetailedPriceSensor."""
+class TestAmberPriceSensorDetailedForecast:
+    """Tests for the unrecorded detailedForecast attribute on AmberPriceSensor."""
 
-    def test_detailed_price_sensor_init(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test detailed price sensor initialization."""
-        sensor = AmberDetailedPriceSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-            channel=CHANNEL_GENERAL,
-        )
+    def test_detailed_forecast_is_unrecorded(self) -> None:
+        """The detailedForecast attribute is excluded from the recorder."""
+        assert AmberPriceSensor._unrecorded_attributes == frozenset({ATTR_DETAILED_FORECAST})
 
-        assert sensor._attr_unique_id == f"{mock_subentry.data[CONF_SITE_ID]}_{CHANNEL_GENERAL}_price_detailed"
-        assert sensor._attr_translation_key == "general_price_detailed"
-
-    def test_detailed_price_sensor_native_value(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-    ) -> None:
-        """Test detailed price sensor returns current price."""
-        subentry = create_mock_subentry(pricing_mode="aemo")
-
-        sensor = AmberDetailedPriceSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=subentry,
-            channel=CHANNEL_GENERAL,
-        )
-
-        assert sensor.native_value == 0.25
-
-    def test_detailed_price_sensor_feed_in_negated(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-    ) -> None:
-        """Test feed-in detailed price is negated."""
-        subentry = create_mock_subentry(pricing_mode="aemo")
-
-        sensor = AmberDetailedPriceSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=subentry,
-            channel=CHANNEL_FEED_IN,
-        )
-
-        assert sensor.native_value == -0.10
-
-    def test_detailed_price_sensor_no_data(
+    def test_detailed_forecast_exposes_full_unmodified_entries(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test detailed price sensor with no data."""
+        """Detailed forecast exposes full forecast dicts without stripping any fields."""
+        forecast_entry = {
+            ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
+            ATTR_PER_KWH: 0.26,
+            ATTR_DURATION: 30,
+            ATTR_ESTIMATE: True,
+            "descriptor": "neutral",
+            "tariff_period": "peak",
+            "spike_status": "none",
+        }
         coordinator = MagicMock()
-        coordinator.get_channel_data = MagicMock(return_value=None)
-        coordinator.get_forecasts = MagicMock(return_value=[])
         coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(
+            return_value={ATTR_PER_KWH: 0.25, ATTR_START_TIME: "2024-01-01T10:00:00+00:00"}
+        )
+        coordinator.get_forecasts = MagicMock(return_value=[forecast_entry])
 
-        sensor = AmberDetailedPriceSensor(
+        sensor = AmberPriceSensor(
             coordinator=coordinator,
             entry=mock_config_entry,
             subentry=mock_subentry,
             channel=CHANNEL_GENERAL,
         )
 
-        assert sensor.native_value is None
+        assert sensor.extra_state_attributes[ATTR_DETAILED_FORECAST] == [forecast_entry]
 
-    def test_detailed_price_sensor_extra_attributes(
+    def test_detailed_forecast_feed_in_negates_prices(
         self,
         mock_coordinator_with_data: MagicMock,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """Test detailed price sensor extra attributes."""
-        sensor = AmberDetailedPriceSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-            channel=CHANNEL_GENERAL,
-        )
-
-        attrs = sensor.extra_state_attributes
-        assert ATTR_FORECASTS in attrs
-        assert len(attrs[ATTR_FORECASTS]) == 2
-        assert attrs["data_source"] == "polling"
-        assert attrs[ATTR_DURATION] == 30
-        assert attrs[ATTR_FORECASTS][0][ATTR_DURATION] == 30
-
-    def test_detailed_price_sensor_feed_in_inverts_prices(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test feed-in detailed price sensor inverts all prices in attributes."""
-        sensor = AmberDetailedPriceSensor(
+        """Feed-in detailedForecast negates per_kwh and advanced price values."""
+        sensor = AmberPriceSensor(
             coordinator=mock_coordinator_with_data,
             entry=mock_config_entry,
             subentry=mock_subentry,
             channel=CHANNEL_FEED_IN,
         )
 
-        attrs = sensor.extra_state_attributes
-        forecasts = attrs[ATTR_FORECASTS]
-        forecast = forecasts[0]
+        forecast = sensor.extra_state_attributes[ATTR_DETAILED_FORECAST][0]
         assert forecast[ATTR_PER_KWH] == -0.11
         assert forecast[ATTR_SPOT_PER_KWH] == 0.09
         assert forecast[ATTR_ADVANCED_PRICE] == {"low": -0.08, "predicted": -0.12, "high": -0.18}
-
-    def test_detailed_price_sensor_disabled_by_default(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Test detailed price sensor is disabled by default."""
-        sensor = AmberDetailedPriceSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-            channel=CHANNEL_GENERAL,
-        )
-
-        assert sensor._attr_entity_registry_enabled_default is False
-
-    def test_detailed_price_sensor_uses_pricing_mode(
-        self,
-        mock_coordinator_with_data: MagicMock,
-        mock_config_entry: MockConfigEntry,
-    ) -> None:
-        """Test detailed price sensor uses configured pricing mode."""
-        subentry = create_mock_subentry(pricing_mode=PRICING_MODE_APP)
-
-        mock_coordinator_with_data.get_channel_data = MagicMock(
-            return_value={
-                ATTR_PER_KWH: 0.25,
-                ATTR_ADVANCED_PRICE: 0.28,
-            }
-        )
-
-        sensor = AmberDetailedPriceSensor(
-            coordinator=mock_coordinator_with_data,
-            entry=mock_config_entry,
-            subentry=subentry,
-            channel=CHANNEL_GENERAL,
-        )
-
-        assert sensor.native_value == 0.28
-
-    def test_detailed_price_sensor_extra_attributes_when_no_channel_data(
-        self,
-        mock_config_entry: MockConfigEntry,
-        mock_subentry: MagicMock,
-    ) -> None:
-        """Without channel data, attributes only expose data_source."""
-        coordinator = MagicMock()
-        coordinator.get_channel_data = MagicMock(return_value=None)
-        coordinator.get_forecasts = MagicMock(return_value=[])
-        coordinator.data_source = "websocket"
-
-        sensor = AmberDetailedPriceSensor(
-            coordinator=coordinator,
-            entry=mock_config_entry,
-            subentry=mock_subentry,
-            channel=CHANNEL_GENERAL,
-        )
-
-        assert sensor.extra_state_attributes == {"data_source": "websocket"}
 
 
 class TestAmberRenewablesSensor:
@@ -826,8 +705,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # 2 channels x 2 price sensors + description-driven sensors + forecast_horizon
-        assert len(added_entities) == 4 + len(SENSOR_DESCRIPTIONS) + 1
+        # 2 channels x 1 price sensor + description-driven sensors + forecast_horizon
+        assert len(added_entities) == 2 + len(SENSOR_DESCRIPTIONS) + 1
 
     async def test_setup_entry_uses_site_channels(
         self,
@@ -864,8 +743,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # 1 channel x 2 price sensors + description-driven sensors + forecast_horizon
-        assert len(added_entities) == 2 + len(SENSOR_DESCRIPTIONS) + 1
+        # 1 channel x 1 price sensor + description-driven sensors + forecast_horizon
+        assert len(added_entities) == 1 + len(SENSOR_DESCRIPTIONS) + 1
 
     async def test_setup_entry_controlled_load_channel(
         self,
@@ -902,8 +781,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, mock_config_entry, mock_add_entities)
 
-        # 1 channel x 2 price sensors + description-driven sensors + forecast_horizon
-        assert len(added_entities) == 2 + len(SENSOR_DESCRIPTIONS) + 1
+        # 1 channel x 1 price sensor + description-driven sensors + forecast_horizon
+        assert len(added_entities) == 1 + len(SENSOR_DESCRIPTIONS) + 1
 
     async def test_setup_entry_no_runtime_data(
         self,
@@ -1117,12 +996,6 @@ class TestChannelTranslationKeys:
         assert CHANNEL_PRICE_TRANSLATION_KEY[CHANNEL_GENERAL] == "general_price"
         assert CHANNEL_PRICE_TRANSLATION_KEY[CHANNEL_FEED_IN] == "feed_in_price"
         assert CHANNEL_PRICE_TRANSLATION_KEY[CHANNEL_CONTROLLED_LOAD] == "controlled_load_price"
-
-    def test_channel_price_detailed_translation_keys(self) -> None:
-        """Test channel price detailed translation key mapping."""
-        assert CHANNEL_PRICE_DETAILED_TRANSLATION_KEY[CHANNEL_GENERAL] == "general_price_detailed"
-        assert CHANNEL_PRICE_DETAILED_TRANSLATION_KEY[CHANNEL_FEED_IN] == "feed_in_price_detailed"
-        assert CHANNEL_PRICE_DETAILED_TRANSLATION_KEY[CHANNEL_CONTROLLED_LOAD] == "controlled_load_price_detailed"
 
 
 class TestAmberApiStatusSensor:
