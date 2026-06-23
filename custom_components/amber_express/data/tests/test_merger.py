@@ -347,6 +347,21 @@ class TestForecastPreservation:
         assert result.data["general"]["price"] == 0.30
         assert result.data["general"]["forecast"] == forecasts
 
+    def test_winning_websocket_preserves_forecast_only_channel(self) -> None:
+        """A channel only known via polling forecasts survives a winning websocket update."""
+        merger = DataSourceMerger()
+        feed_in_forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.08}]
+
+        merger.update_polling(
+            {"feed_in": {"price": 0.10, "start_time": "2024-01-01T10:00:00+10:00", "forecast": feed_in_forecasts}}
+        )
+        merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
+
+        result = merger.get_merged_data()
+
+        assert result.source == DATA_SOURCE_WEBSOCKET
+        assert result.data["feed_in"] == {"forecast": feed_in_forecasts}
+
     def test_multiple_websocket_updates_preserve_forecasts(self) -> None:
         """Test that multiple websocket updates still preserve forecasts."""
         merger = DataSourceMerger()

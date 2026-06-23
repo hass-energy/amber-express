@@ -486,6 +486,34 @@ class TestAmberPriceSensorDetailedForecast:
         assert forecast[ATTR_SPOT_PER_KWH] == 0.09
         assert forecast[ATTR_ADVANCED_PRICE] == {"low": -0.08, "predicted": -0.12, "high": -0.18}
 
+    def test_detailed_forecast_feed_in_leaves_non_negatable_fields(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Feed-in negation leaves non-numeric and absent price fields untouched."""
+        forecast_entry = {
+            ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
+            ATTR_PER_KWH: "unavailable",
+        }
+        coordinator = MagicMock()
+        coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(
+            return_value={ATTR_PER_KWH: 0.10, ATTR_START_TIME: "2024-01-01T10:00:00+00:00"}
+        )
+        coordinator.get_forecasts = MagicMock(return_value=[forecast_entry])
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_FEED_IN,
+        )
+
+        forecast = sensor.extra_state_attributes[ATTR_DETAILED_FORECAST][0]
+        assert forecast[ATTR_PER_KWH] == "unavailable"
+        assert ATTR_ADVANCED_PRICE not in forecast
+
 
 class TestAmberRenewablesSensor:
     """Tests for AmberRenewablesSensor (description-driven)."""
