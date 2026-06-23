@@ -516,7 +516,7 @@ class TestAmberPriceSensorDetailedForecast:
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """detailedForecast keeps full price precision while the simple forecast rounds."""
+        """The detailedForecast attribute keeps full price precision while the simple forecast rounds."""
         forecast_entry = {
             ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
             ATTR_PER_KWH: 0.123456,
