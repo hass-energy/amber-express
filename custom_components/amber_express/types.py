@@ -32,9 +32,9 @@ class ChannelData(TypedDict, total=False):
     Optional fields (only present when SDK provides them):
     - duration (interval length in minutes, from SDK CurrentInterval / ForecastInterval)
     - advanced_price_predicted, demand_window, tariff_period, tariff_season, tariff_block
-    - forecasts (only on top-level channel entries, not forecast items)
+    - forecast (only on top-level channel entries, not forecast items)
 
-    Note: total=False allows incremental building and partial dicts (e.g., forecasts-only).
+    Note: total=False allows incremental building and partial dicts (e.g., forecast-only).
     """
 
     # Required fields (SDK guarantees these values when interval data exists)
@@ -55,7 +55,7 @@ class ChannelData(TypedDict, total=False):
     tariff_period: str
     tariff_season: str
     tariff_block: float
-    forecasts: list[dict]
+    forecast: list[dict]
 
 
 class RateLimitInfo(TypedDict):

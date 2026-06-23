@@ -24,6 +24,7 @@ from .const import (
     ATTR_DETAILED_FORECAST,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
+    ATTR_FORECAST,
     ATTR_PER_KWH,
     ATTR_START_TIME,
     CHANNEL_CONTROLLED_LOAD,
@@ -442,7 +443,7 @@ class AmberPriceSensor(AmberBaseSensor):
                 value += demand_window_price
             forecast_list.append({"time": time_value, "value": value})
         attrs["interpolation_mode"] = "previous"
-        attrs["forecast"] = forecast_list
+        attrs[ATTR_FORECAST] = forecast_list
 
         if self._channel == CHANNEL_FEED_IN:
             attrs[ATTR_DETAILED_FORECAST] = [self._negate_prices(f) for f in forecasts]

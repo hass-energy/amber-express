@@ -15,7 +15,7 @@ from custom_components.amber_express.const import (
     ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
     ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
@@ -110,16 +110,16 @@ class IntervalProcessor:
             # Build forecasts with current interval prepended
             forecasts = self._build_forecasts(forecast_intervals.get(channel, []))
             # Use extracted channel_data (without forecasts) as the first forecast entry
-            current_as_forecast: dict[str, Any] = {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS}
+            current_as_forecast: dict[str, Any] = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}
             # Cast forecasts list to list[dict] for TypedDict compatibility
-            channel_data[ATTR_FORECASTS] = [current_as_forecast, *forecasts]  # type: ignore[typeddict-item]
+            channel_data[ATTR_FORECAST] = [current_as_forecast, *forecasts]  # type: ignore[typeddict-item]
             data[channel] = channel_data
 
         # If we have forecasts but no current interval for a channel, still include forecasts
         for channel, fcast_list in forecast_intervals.items():
             if channel not in data and fcast_list:
                 data[channel] = {  # type: ignore[typeddict-item]
-                    ATTR_FORECASTS: self._build_forecasts(fcast_list),
+                    ATTR_FORECAST: self._build_forecasts(fcast_list),
                 }
 
         return data

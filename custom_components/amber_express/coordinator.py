@@ -21,7 +21,7 @@ from .const import (
     ATTR_DEMAND_WINDOW,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
     ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
@@ -333,7 +333,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 continue
             if not channel_data or not isinstance(channel_data, dict):
                 continue
-            forecasts = channel_data.get(ATTR_FORECASTS)
+            forecasts = channel_data.get(ATTR_FORECAST)
             if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
                 continue
 
@@ -349,8 +349,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             elif ATTR_DEMAND_WINDOW in channel_data:
                 del channel_data[ATTR_DEMAND_WINDOW]
             channel_data[ATTR_ESTIMATE] = True
-            current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS}
-            channel_data[ATTR_FORECASTS] = [current_snapshot, *forecasts[2:]]
+            current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}
+            channel_data[ATTR_FORECAST] = [current_snapshot, *forecasts[2:]]
             applied_held = True
 
         if not applied_held:
@@ -566,7 +566,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get forecasts for a channel."""
         channel_data = self.get_channel_data(channel)
         if channel_data:
-            return channel_data.get(ATTR_FORECASTS, [])
+            return channel_data.get(ATTR_FORECAST, [])
         return []
 
     def get_renewables(self) -> float | None:

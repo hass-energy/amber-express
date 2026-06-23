@@ -21,7 +21,7 @@ from custom_components.amber_express.const import (
     ATTR_DEMAND_WINDOW,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
@@ -143,7 +143,7 @@ class TestAmberDataCoordinator:
     def test_get_forecasts(self, coordinator: AmberDataCoordinator) -> None:
         """Test get_forecasts."""
         forecasts = [{"start_time": "2024-01-01T10:00:00", "per_kwh": 0.25}]
-        coordinator.current_data = {CHANNEL_GENERAL: {ATTR_FORECASTS: forecasts}}
+        coordinator.current_data = {CHANNEL_GENERAL: {ATTR_FORECAST: forecasts}}
         result = coordinator.get_forecasts(CHANNEL_GENERAL)
         assert result == forecasts
 
@@ -632,7 +632,7 @@ class TestAmberDataCoordinator:
         # Simulate first poll already happened with data
         coordinator._polling_manager._poll_count_this_interval = 1
         coordinator._polling_manager._current_interval_start = datetime.now(UTC)
-        initial_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.20, ATTR_FORECASTS: [{"time": "test"}]}}
+        initial_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.20, ATTR_FORECAST: [{"time": "test"}]}}
         coordinator._data_sources.update_polling(initial_data)
 
         # Create an estimate interval for second poll with different price
@@ -1249,7 +1249,7 @@ class TestHeldPriceAtBoundary:
                 ATTR_ESTIMATE: False,
                 ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
                 ATTR_END_TIME: "2024-01-01T10:05:00+00:00",
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, "estimate": False},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, "estimate": True},
                     {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28, "estimate": True},
@@ -1266,7 +1266,7 @@ class TestHeldPriceAtBoundary:
         assert general is not None
         assert general[ATTR_PER_KWH] == 0.25
         assert general[ATTR_ESTIMATE] is True
-        forecasts = general[ATTR_FORECASTS]
+        forecasts = general[ATTR_FORECAST]
         assert len(forecasts) == 2
         assert forecasts[0]["start_time"] == "2024-01-01T10:05:00+00:00"
         assert forecasts[0][ATTR_PER_KWH] == 0.25
@@ -1279,7 +1279,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                 ],
@@ -1308,7 +1308,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                 ],
             },
@@ -1327,7 +1327,7 @@ class TestHeldPriceAtBoundary:
                 ATTR_PER_KWH: 0.25,
                 ATTR_RENEWABLES: 50.0,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_RENEWABLES: 80.0},
                     {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
@@ -1341,8 +1341,8 @@ class TestHeldPriceAtBoundary:
         assert general[ATTR_START_TIME] == "2024-01-01T10:05:00+00:00"
         assert general[ATTR_PER_KWH] == 0.25
         assert general.get(ATTR_RENEWABLES) == 50.0
-        assert general[ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
-        assert general[ATTR_FORECASTS][1]["start_time"] == "2024-01-01T10:10:00+00:00"
+        assert general[ATTR_FORECAST][0]["start_time"] == "2024-01-01T10:05:00+00:00"
+        assert general[ATTR_FORECAST][1]["start_time"] == "2024-01-01T10:10:00+00:00"
 
     def test_held_price_preserves_all_price_fields(self, hass: HomeAssistant) -> None:
         """Test held price preserves per_kwh, spot_per_kwh, advanced_price_predicted."""
@@ -1354,7 +1354,7 @@ class TestHeldPriceAtBoundary:
                 ATTR_SPOT_PER_KWH: 0.22,
                 ATTR_ADVANCED_PRICE: advanced,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, "spot_per_kwh": 0.28},
                 ],
@@ -1375,7 +1375,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, "estimate": False},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, "estimate": True},
                 ],
@@ -1393,7 +1393,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                 ],
@@ -1401,7 +1401,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_FEED_IN: {
                 ATTR_PER_KWH: 0.10,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.10},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.08},
                 ],
@@ -1412,8 +1412,8 @@ class TestHeldPriceAtBoundary:
 
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.25
         assert coordinator.current_data[CHANNEL_FEED_IN][ATTR_PER_KWH] == 0.10
-        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
-        assert coordinator.current_data[CHANNEL_FEED_IN][ATTR_FORECASTS][0]["start_time"] == "2024-01-01T10:05:00+00:00"
+        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_FORECAST][0]["start_time"] == "2024-01-01T10:05:00+00:00"
+        assert coordinator.current_data[CHANNEL_FEED_IN][ATTR_FORECAST][0]["start_time"] == "2024-01-01T10:05:00+00:00"
 
     def test_held_price_overwritten_when_confirmed_arrives(self, hass: HomeAssistant) -> None:
         """Test held price is overwritten when confirmed price is received."""
@@ -1422,7 +1422,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: True,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
                 ],
@@ -1433,7 +1433,7 @@ class TestHeldPriceAtBoundary:
                 CHANNEL_GENERAL: {
                     ATTR_PER_KWH: 0.27,
                     ATTR_ESTIMATE: False,
-                    ATTR_FORECASTS: [
+                    ATTR_FORECAST: [
                         {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.27},
                         {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
                     ],
@@ -1453,7 +1453,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: True,
-                ATTR_FORECASTS: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.25}],
+                ATTR_FORECAST: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.25}],
             },
         }
         coordinator._data_sources.update_polling(
@@ -1461,7 +1461,7 @@ class TestHeldPriceAtBoundary:
                 CHANNEL_GENERAL: {
                     ATTR_PER_KWH: 0.30,
                     ATTR_ESTIMATE: True,
-                    ATTR_FORECASTS: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30}],
+                    ATTR_FORECAST: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30}],
                 },
             }
         )
@@ -1479,7 +1479,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                 ],
@@ -1513,7 +1513,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                 ],
@@ -1538,7 +1538,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                 ],
@@ -1562,7 +1562,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                 ],
@@ -1591,7 +1591,7 @@ class TestHeldPriceAtBoundary:
             CHANNEL_GENERAL: {
                 ATTR_PER_KWH: 0.25,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_DEMAND_WINDOW: True},
                     {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
@@ -1612,7 +1612,7 @@ class TestHeldPriceAtBoundary:
                 ATTR_PER_KWH: 0.25,
                 ATTR_DEMAND_WINDOW: True,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, ATTR_DEMAND_WINDOW: True},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_DEMAND_WINDOW: False},
                     {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
@@ -1633,7 +1633,7 @@ class TestHeldPriceAtBoundary:
                 ATTR_PER_KWH: 0.25,
                 ATTR_DEMAND_WINDOW: True,
                 ATTR_ESTIMATE: False,
-                ATTR_FORECASTS: [
+                ATTR_FORECAST: [
                     {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, ATTR_DEMAND_WINDOW: True},
                     {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
                     {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},

@@ -337,7 +337,7 @@ class TestForecastPreservation:
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": forecasts}}
         )
         merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
 
@@ -345,7 +345,7 @@ class TestForecastPreservation:
 
         assert result.source == DATA_SOURCE_WEBSOCKET
         assert result.data["general"]["price"] == 0.30
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts
 
     def test_multiple_websocket_updates_preserve_forecasts(self) -> None:
         """Test that multiple websocket updates still preserve forecasts."""
@@ -353,7 +353,7 @@ class TestForecastPreservation:
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": forecasts}}
         )
         merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
         merger.update_websocket({"general": {"price": 0.35, "start_time": "2024-01-01T11:00:00+10:00"}})
@@ -361,7 +361,7 @@ class TestForecastPreservation:
         result = merger.get_merged_data()
 
         assert result.data["general"]["price"] == 0.35
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts
 
     def test_forecasts_preserved_for_all_channels(self) -> None:
         """Test that forecasts are preserved for all channels."""
@@ -371,8 +371,8 @@ class TestForecastPreservation:
 
         merger.update_polling(
             {
-                "general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": general_forecasts},
-                "feed_in": {"price": 0.10, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": feed_in_forecasts},
+                "general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": general_forecasts},
+                "feed_in": {"price": 0.10, "start_time": "2024-01-01T10:00:00+10:00", "forecast": feed_in_forecasts},
             }
         )
         merger.update_websocket(
@@ -384,8 +384,8 @@ class TestForecastPreservation:
 
         result = merger.get_merged_data()
 
-        assert result.data["general"]["forecasts"] == general_forecasts
-        assert result.data["feed_in"]["forecasts"] == feed_in_forecasts
+        assert result.data["general"]["forecast"] == general_forecasts
+        assert result.data["feed_in"]["forecast"] == feed_in_forecasts
 
     def test_new_polling_updates_forecasts(self) -> None:
         """Test that new polling data updates forecasts."""
@@ -394,18 +394,18 @@ class TestForecastPreservation:
         new_forecasts = [{"time": "2024-01-01T12:00:00", "price": 0.32}]
 
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": old_forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": old_forecasts}}
         )
         merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
         merger.update_polling(
-            {"general": {"price": 0.27, "start_time": "2024-01-01T11:00:00+10:00", "forecasts": new_forecasts}}
+            {"general": {"price": 0.27, "start_time": "2024-01-01T11:00:00+10:00", "forecast": new_forecasts}}
         )
 
         result = merger.get_merged_data()
 
         assert result.source == DATA_SOURCE_POLLING
         assert result.data["general"]["price"] == 0.27
-        assert result.data["general"]["forecasts"] == new_forecasts
+        assert result.data["general"]["forecast"] == new_forecasts
 
     def test_forecasts_property(self) -> None:
         """Test the forecasts property returns stored forecasts."""
@@ -413,7 +413,7 @@ class TestForecastPreservation:
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": forecasts}}
         )
 
         assert merger.forecasts == {"general": forecasts}
@@ -424,7 +424,7 @@ class TestForecastPreservation:
 
         assert merger.forecasts_timestamp is None
 
-        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": []}})
+        merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": []}})
 
         assert merger.forecasts_timestamp == datetime.fromisoformat("2024-01-01T10:00:00+10:00")
 
@@ -434,26 +434,26 @@ class TestForecastPreservation:
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": forecasts}}
         )
         merger.update_polling({"general": {"price": 0.27, "start_time": "2024-01-01T10:00:00+10:00"}})
 
         result = merger.get_merged_data()
 
         assert result.data["general"]["price"] == 0.27
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts
 
     def test_forecasts_only_creates_channel_entry(self) -> None:
         """Test that forecasts without current data still creates channel entry."""
         merger = DataSourceMerger()
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
-        merger.update_polling({"general": {"forecasts": forecasts}})
+        merger.update_polling({"general": {"forecast": forecasts}})
 
         result = merger.get_merged_data()
 
         assert "general" in result.data
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts
 
     def test_websocket_first_then_polling_same_interval(self) -> None:
         """Test WebSocket price arrives first, polling arrives for same interval."""
@@ -462,7 +462,7 @@ class TestForecastPreservation:
 
         merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:00:00+10:00"}})
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": forecasts}}
         )
 
         result = merger.get_merged_data()
@@ -470,7 +470,7 @@ class TestForecastPreservation:
         # Same interval: polling wins (has confirmed data + forecasts)
         assert result.source == DATA_SOURCE_POLLING
         assert result.data["general"]["price"] == 0.25
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts
 
     def test_polling_then_websocket_then_polling_newer(self) -> None:
         """Test API price, WebSocket price, then API with newer interval."""
@@ -480,14 +480,14 @@ class TestForecastPreservation:
         merger.update_polling({"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00"}})
         merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
         merger.update_polling(
-            {"general": {"price": 0.27, "start_time": "2024-01-01T11:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.27, "start_time": "2024-01-01T11:00:00+10:00", "forecast": forecasts}}
         )
 
         result = merger.get_merged_data()
 
         assert result.source == DATA_SOURCE_POLLING
         assert result.data["general"]["price"] == 0.27
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts
 
     def test_websocket_newer_interval_with_polling_forecasts(self) -> None:
         """Test WebSocket price is used when it has a newer interval, with forecasts preserved."""
@@ -495,7 +495,7 @@ class TestForecastPreservation:
         forecasts = [{"time": "2024-01-01T11:00:00", "price": 0.28}]
 
         merger.update_polling(
-            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecasts": forecasts}}
+            {"general": {"price": 0.25, "start_time": "2024-01-01T10:00:00+10:00", "forecast": forecasts}}
         )
         merger.update_websocket({"general": {"price": 0.30, "start_time": "2024-01-01T10:30:00+10:00"}})
 
@@ -503,4 +503,4 @@ class TestForecastPreservation:
 
         assert result.source == DATA_SOURCE_WEBSOCKET
         assert result.data["general"]["price"] == 0.30
-        assert result.data["general"]["forecasts"] == forecasts
+        assert result.data["general"]["forecast"] == forecasts

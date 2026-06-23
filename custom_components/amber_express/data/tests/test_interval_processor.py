@@ -20,7 +20,7 @@ from custom_components.amber_express.const import (
     ATTR_DESCRIPTOR,
     ATTR_DURATION,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
@@ -261,7 +261,7 @@ class TestProcessIntervals:
         assert CHANNEL_GENERAL in result
         assert result[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.25
         assert result[CHANNEL_GENERAL][ATTR_DURATION] == 30
-        assert ATTR_FORECASTS in result[CHANNEL_GENERAL]
+        assert ATTR_FORECAST in result[CHANNEL_GENERAL]
 
     def test_process_intervals_with_wrapper(self, processor: IntervalProcessor) -> None:
         """Test process_intervals unwraps Interval wrapper."""

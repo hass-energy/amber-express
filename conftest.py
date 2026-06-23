@@ -25,7 +25,7 @@ from custom_components.amber_express.const import (
     ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
@@ -267,7 +267,7 @@ def mock_channel_data_general() -> dict:
         ATTR_DESCRIPTOR: "neutral",
         ATTR_SPIKE_STATUS: "none",
         ATTR_RENEWABLES: 45.5,
-        ATTR_FORECASTS: [
+        ATTR_FORECAST: [
             {
                 ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
                 ATTR_PER_KWH: 0.26,
@@ -295,7 +295,7 @@ def mock_channel_data_feed_in() -> dict:
         ATTR_ESTIMATE: False,
         ATTR_DESCRIPTOR: "low",
         ATTR_SPIKE_STATUS: "none",
-        ATTR_FORECASTS: [
+        ATTR_FORECAST: [
             {
                 ATTR_START_TIME: "2024-01-01T10:05:00+00:00",
                 ATTR_PER_KWH: 0.11,
@@ -328,7 +328,7 @@ def mock_coordinator_with_data(
     def get_forecasts(channel: str) -> list:
         channel_data = data.get(channel)
         if channel_data:
-            return channel_data.get(ATTR_FORECASTS, [])
+            return channel_data.get(ATTR_FORECAST, [])
         return []
 
     def get_renewables() -> float | None:

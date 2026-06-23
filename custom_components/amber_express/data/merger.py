@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from custom_components.amber_express.const import (
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
     ATTR_START_TIME,
     DATA_SOURCE_POLLING,
     DATA_SOURCE_WEBSOCKET,
@@ -88,14 +88,14 @@ class DataSourceMerger:
                 continue
 
             # Extract forecasts if present
-            forecasts = channel_data.get(ATTR_FORECASTS)
+            forecasts = channel_data.get(ATTR_FORECAST)
             if forecasts is not None:
                 self._forecasts[channel] = forecasts
                 if data_time is not None:
                     self._forecasts_timestamp = data_time
 
             # Store current interval without forecasts
-            current_only = cast("ChannelData", {k: v for k, v in channel_data.items() if k != ATTR_FORECASTS})
+            current_only = cast("ChannelData", {k: v for k, v in channel_data.items() if k != ATTR_FORECAST})
             self._polling_current[channel] = current_only
 
     def update_websocket(self, data: dict[str, ChannelData]) -> None:
@@ -155,11 +155,11 @@ class DataSourceMerger:
         # Attach forecasts from polling to each channel
         for channel, forecasts in self._forecasts.items():
             if channel in current_data:
-                current_data[channel][ATTR_FORECASTS] = forecasts
+                current_data[channel][ATTR_FORECAST] = forecasts
             elif forecasts:
                 # Channel exists in forecasts but not in current data
                 # Create channel entry with just forecasts
-                current_data[channel] = {ATTR_FORECASTS: forecasts}
+                current_data[channel] = {ATTR_FORECAST: forecasts}
 
         # Add metadata
         current_data["_source"] = data_source
@@ -179,7 +179,7 @@ class DataSourceMerger:
         for channel, data in self._polling_current.items():
             result[channel] = cast("ChannelData", dict(data))
             if channel in self._forecasts:
-                result[channel][ATTR_FORECASTS] = self._forecasts[channel]
+                result[channel][ATTR_FORECAST] = self._forecasts[channel]
         return result
 
     @property
