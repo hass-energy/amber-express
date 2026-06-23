@@ -472,6 +472,29 @@ class TestAmberPriceSensor:
         attrs = sensor.extra_state_attributes
         assert attrs["forecast"][0]["value"] == 0.31
 
+    def test_price_sensor_demand_window_surcharge_strips_float_artifacts(
+        self,
+        mock_config_entry: MockConfigEntry,
+    ) -> None:
+        """Adding the demand window surcharge stays at the genuine price precision."""
+        subentry = create_mock_subentry()
+        subentry.data[CONF_DEMAND_WINDOW_PRICE] = 0.2
+        mock_config_entry.subentries = {subentry.subentry_id: subentry}
+
+        coordinator = MagicMock()
+        coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(return_value={ATTR_PER_KWH: 0.1, ATTR_DEMAND_WINDOW: True})
+        coordinator.get_forecasts = MagicMock(return_value=[])
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        assert sensor.native_value == 0.3
+
 
 class TestAmberPriceSensorDetailedForecast:
     """Tests for the unrecorded detailedForecast attribute on AmberPriceSensor."""

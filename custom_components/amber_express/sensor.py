@@ -43,7 +43,7 @@ from .const import (
 from .coordinator import AmberDataCoordinator
 from .data import CHANNEL_TYPE_MAP
 from .types import ChannelData
-from .utils import get_http_status_label, to_local_iso_minute
+from .utils import AMBER_PRICE_DECIMAL_PLACES, get_http_status_label, to_local_iso_minute
 
 if TYPE_CHECKING:
     from . import AmberConfigEntry
@@ -406,7 +406,7 @@ class AmberPriceSensor(AmberBaseSensor):
             return None
         if self._channel == CHANNEL_GENERAL and channel_data.get(ATTR_DEMAND_WINDOW):
             demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
-            price += demand_window_price
+            return round(price + demand_window_price, AMBER_PRICE_DECIMAL_PLACES)
         return price
 
     def _negate_prices(self, data: ChannelData) -> dict[str, Any]:
