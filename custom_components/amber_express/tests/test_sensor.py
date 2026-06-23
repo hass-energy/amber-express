@@ -128,12 +128,12 @@ class TestAmberPriceSensor:
 
         assert sensor.native_value == -0.10
 
-    def test_price_sensor_native_value_is_rounded(
+    def test_price_sensor_native_value_keeps_full_precision(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
-        """The recorded current price is rounded to four decimal places."""
+        """The current price is reported at full precision; display precision handles rounding."""
         coordinator = MagicMock()
         coordinator.data_source = "polling"
         coordinator.get_channel_data = MagicMock(return_value={ATTR_PER_KWH: 0.123456})
@@ -146,7 +146,7 @@ class TestAmberPriceSensor:
             channel=CHANNEL_GENERAL,
         )
 
-        assert sensor.native_value == 0.1235
+        assert sensor.native_value == 0.123456
 
     def test_price_sensor_forecast_value_is_rounded(
         self,

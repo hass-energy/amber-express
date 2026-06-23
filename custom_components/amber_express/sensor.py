@@ -407,7 +407,7 @@ class AmberPriceSensor(AmberBaseSensor):
         if self._channel == CHANNEL_GENERAL and channel_data.get(ATTR_DEMAND_WINDOW):
             demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
             price += demand_window_price
-        return round(price, PRICE_DECIMAL_PLACES)
+        return price
 
     def _negate_prices(self, data: ChannelData) -> dict[str, Any]:
         """Negate price fields for the feed-in channel."""
