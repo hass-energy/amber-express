@@ -5,14 +5,20 @@ from http import HTTPStatus
 
 from homeassistant.util import dt as dt_util
 
-PRICE_DECIMAL_PLACES = 4
+# Amber prices are 5dp in cents, +2 for the cents->dollars conversion. Rounding to
+# this precision is lossless for real values while removing float division artifacts.
+AMBER_PRICE_DECIMAL_PLACES = 7
 
 
 def cents_to_dollars(cents: float | None) -> float | None:
-    """Convert cents to dollars, rounded to avoid floating point artifacts."""
+    """Convert cents to dollars at Amber's full price precision.
+
+    Rounds to the genuine precision ceiling to strip float division artifacts
+    without losing data.
+    """
     if cents is None:
         return None
-    return round(cents / 100, PRICE_DECIMAL_PLACES)
+    return round(cents / 100, AMBER_PRICE_DECIMAL_PLACES)
 
 
 def to_local_iso_minute(iso_string: str | None) -> str | None:

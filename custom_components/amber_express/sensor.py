@@ -48,6 +48,10 @@ from .utils import get_http_status_label, to_local_iso_minute
 if TYPE_CHECKING:
     from . import AmberConfigEntry
 
+# Decimal places for displayed and recorded prices (state and statistics). The
+# detailed forecast is exempt and keeps the full converted precision instead.
+PRICE_DECIMAL_PLACES = 4
+
 CHANNEL_PRICE_TRANSLATION_KEY = {
     CHANNEL_GENERAL: "general_price",
     CHANNEL_FEED_IN: "feed_in_price",
@@ -403,7 +407,7 @@ class AmberPriceSensor(AmberBaseSensor):
         if self._channel == CHANNEL_GENERAL and channel_data.get(ATTR_DEMAND_WINDOW):
             demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
             price += demand_window_price
-        return price
+        return round(price, PRICE_DECIMAL_PLACES)
 
     def _negate_prices(self, data: ChannelData) -> dict[str, Any]:
         """Negate price fields for the feed-in channel."""
@@ -439,8 +443,10 @@ class AmberPriceSensor(AmberBaseSensor):
         for f in forecasts:
             time_value = to_local_iso_minute(f.get(ATTR_START_TIME))
             value = self._get_price(f, self._get_price_key())
-            if value is not None and self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
-                value += demand_window_price
+            if value is not None:
+                if self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
+                    value += demand_window_price
+                value = round(value, PRICE_DECIMAL_PLACES)
             forecast_list.append({"time": time_value, "value": value})
         attrs["interpolation_mode"] = "previous"
         attrs[ATTR_FORECAST] = forecast_list
