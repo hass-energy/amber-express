@@ -107,6 +107,59 @@ Amber Express includes forecast attributes for both import and feed-in channels.
 - Forecast sensors update with each polling cycle and can be consumed directly by automations
 - Forecast entities are designed to integrate easily with optimizers such as [HAEO](https://haeo.io/)
 
+## Entity Attributes
+
+Each entity exposes additional state attributes alongside its main value. This is where pricing forecasts are available.
+
+### Price sensors (`general`, `feed_in`, `controlled_load`)
+
+| Attribute            | Type     | Description                                                        |
+| -------------------- | ---------| ------------------------------------------------------------------ |
+| `start_time`         | datetime | Current interval start in local time (minute precision)            |
+| `end_time`           | datetime | Current interval end in local time (minute precision)              |
+| `estimate`           | boolean  | Whether the current price is an estimate (not yet confirmed)       |
+| `descriptor`         | string   | Amber's price descriptor (e.g. `low`, `high`, `spike`)             |
+| `data_source`        | string   | Where the price came from, either `polling` or `websocket`         |
+| `interpolation_mode` | string   | Always `previous`; describes how to interpolate the forecast curve |
+| `forecast`           | list     | Simple `{ time, value }` points for automations and optimizers     |
+| `detailedForecast`   | list     | Full raw forecast intervals (ignored by HA recorder)               |
+
+
+### `site` sensor (diagnostic)
+
+| Attribute         | Type    | Description                                          |
+| ----------------- | ------- | ---------------------------------------------------- |
+| `id`              | string  | Amber site identifier                                |
+| `nmi`             | string  | National Metering Identifier                         |
+| `network`         | string  | Distribution network name                            |
+| `status`          | string  | Site status (e.g. `active`)                          |
+| `interval_length` | integer | Pricing interval length in minutes                   |
+| `channels`        | list    | `{ identifier, type, tariff }` per available channel |
+
+### `api_status` sensor (diagnostic)
+
+| Attribute                   | Type     | Description                                    |
+| --------------------------- | -------- | ---------------------------------------------- |
+| `status_code`               | integer  | Most recent HTTP status code from the API      |
+| `rate_limit_quota`          | integer  | Maximum requests allowed in the window         |
+| `rate_limit_remaining`      | integer  | Requests remaining in the current window       |
+| `rate_limit_reset_at`       | datetime | When the rate-limit quota resets               |
+| `rate_limit_window_seconds` | integer  | Rate-limit window size in seconds              |
+| `rate_limit_policy`         | string   | Raw rate-limit policy string (e.g. `50;w=300`) |
+
+### `next_poll` sensor (diagnostic)
+
+| Attribute       | Type    | Description                                        |
+| --------------- | ------- | -------------------------------------------------- |
+| `poll_schedule` | list    | Scheduled poll offsets (seconds into the interval) |
+| `poll_count`    | integer | Total polls planned for this interval              |
+
+### `forecast_horizon` sensor (diagnostic)
+
+| Attribute      | Type     | Description                                  |
+| -------------- | -------- | -------------------------------------------- |
+| `forecast_end` | datetime | Timestamp of the furthest available forecast |
+
 ## WebSocket Support
 
 The integration will (optionally) connect to Amber's WebSocket API for real-time push updates. This is an alpha feature from Amber and cannot be currently relied upon, so it is used in tandem, getting prices from whichever API is faster.
