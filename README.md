@@ -107,13 +107,23 @@ Export Price: sensor.amber_express_feed_in_forecast
 
 ## Smart Polling
 
-Amber Express learns when confirmed prices typically arrive and schedules its polling at the most likely times.
+Each interval opens with an _estimate_ price, then Amber publishes the _confirmed_ price some 10s of seconds later. Smart polling exists to catch that confirmed price as fast as possible without exhausting the API rate limit, so rather than poll on a fixed schedule it learns _when_ confirmed prices tend to arrive and aims to focus the majority of its polling quota around that time.
 
-1. At the start of each 5-minute interval, polls to get the initial estimate price and forecast
-2. Tracks when confirmed prices historically arrive and times subsequent polls accordingly
-3. Stops polling once confirmed price is received
+1. **Observe**: Each time a confirmed price arrives, the integration records the window between the last poll that still saw an estimate and the first poll that saw the confirmed value. The most recent 100 of these observations are kept and persisted across restarts.
+2. **Learn**: Those observations are combined into a probability distribution of when confirmation happens across the interval.
+3. **Aim**: Given a budget of how many polls it can afford, it concentrates them around the times confirmation is most likely rather than spreading them evenly. As time passes with no confirmed price, it re-targets the remaining likely window.
+4. **Stop**: The moment a confirmed price arrives, polling pauses until the next interval.
 
-This adaptive approach typically delivers confirmed prices within seconds of publication.
+The poll budget is derived from the API rate limit and recalculated after every response, so the schedule tightens or loosens as quota allows. Polls are also reserved for the interval boundary and for the moment the rate limit resets. In practice this adaptive approach delivers confirmed prices within seconds of publication.
+
+There are two main diagnostic sensors that shows the current state of polling:
+
+1. **Confirmation Delay**: This sensor represents how long it took to receive a confirmed price from the start of an interval. This includes the delay Amber itself has in getting a confirmed price to then pass on.
+2. **Confirmation Lag**: This sensor represents the maximum amount of added delay the act of polling may have caused. It is the time between the last unconfirmed poll and the confirmed poll. The goal is to get this as close to zero as possible with smarter polling.
+
+Here is a video of the algorithm adjusting its polling schedule (red dots) as confirmed prices arrived.
+
+https://github.com/user-attachments/assets/e42414fd-526f-456c-a503-3e6751baedf7
 
 ## Forecasting
 
