@@ -101,8 +101,8 @@ The forecast sensors are designed to work seamlessly with [HAEO](https://haeo.io
 
 ```yaml
 # Example: Use in HAEO
-Import Price: sensor.amber_express_general_forecast
-Export Price: sensor.amber_express_feed_in_forecast
+Import Price: sensor.amber_express_home_general_price
+Export Price: sensor.amber_express_home_feed_in_price
 ```
 
 ## Smart Polling
