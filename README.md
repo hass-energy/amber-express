@@ -79,6 +79,22 @@ Amber Express supports the following per-site options:
 
 Adding a demand window price helps optimizers such as [HAEO](https://haeo.io/) avoid importing during the demand window.
 
+## Pricing Modes
+
+There are two pricing modes available that Amber provide, AEMO and Advanced Price Predicted (APP). For the current interval, both pricing modes report the same price as this the real confirmed cost. However, the pricing modes will changes the **forecast** method used for upcoming future intervals.
+
+### AEMO
+
+- This matches the price forecasts shown in the official Amber app
+- Forecasts upcoming prices from AEMO's wholesale prices
+- These forecasts are often aggressively wrong, predicting price spikes that will last for hours
+
+### Advanced Price (default)
+
+- Amber's own prediction of upcoming prices, built to be more realistic than AEMO
+- Despite the Amber app displaying AEMO prices, Amber's SmartShift uses this forecast instead
+- Strongly recommended for optimizers such as [HAEO](https://haeo.io/), and the default mode in Amber Express
+
 ## HAEO Integration
 
 The forecast sensors are designed to work seamlessly with [HAEO](https://haeo.io/). Simply add the forecast sensors to your HAEO Grid element configuration:
@@ -114,7 +130,7 @@ Each entity exposes additional state attributes alongside its main value. This i
 ### Price sensors (`general`, `feed_in`, `controlled_load`)
 
 | Attribute            | Type     | Description                                                        |
-| -------------------- | ---------| ------------------------------------------------------------------ |
+| -------------------- | -------- | ------------------------------------------------------------------ |
 | `start_time`         | datetime | Current interval start in local time (minute precision)            |
 | `end_time`           | datetime | Current interval end in local time (minute precision)              |
 | `estimate`           | boolean  | Whether the current price is an estimate (not yet confirmed)       |
@@ -123,7 +139,6 @@ Each entity exposes additional state attributes alongside its main value. This i
 | `interpolation_mode` | string   | Always `previous`; describes how to interpolate the forecast curve |
 | `forecast`           | list     | Simple `{ time, value }` points for automations and optimizers     |
 | `detailedForecast`   | list     | Full raw forecast intervals (ignored by HA recorder)               |
-
 
 ### `site` sensor (diagnostic)
 
