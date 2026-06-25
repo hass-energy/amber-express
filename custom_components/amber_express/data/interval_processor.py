@@ -176,7 +176,7 @@ class IntervalProcessor:
         # Sort by start time
         sorted_intervals = sorted(
             forecast_intervals,
-            key=lambda x: x.start_time if x.start_time else datetime.min.replace(tzinfo=UTC),
+            key=lambda x: x.start_time or datetime.min.replace(tzinfo=UTC),
         )
 
         # Reuse _extract_interval_data to get all fields for each forecast

@@ -305,7 +305,7 @@ class AmberWebSocketClient:
             if processed:
                 result[channel] = processed
 
-        return result if result else None
+        return result or None
 
     def _extract_channel_data(self, interval: CurrentInterval) -> ChannelData:
         """Extract data from a parsed CurrentInterval object."""

@@ -45,7 +45,7 @@ async def render_svg_to_png(
         page = await context.new_page()
 
         # Read the SVG content
-        svg_content = svg_path.read_text(encoding="utf-8")
+        svg_content = svg_path.read_text(encoding="utf-8")  # noqa: ASYNC240
 
         # Create HTML that properly scales the SVG
         html = f"""

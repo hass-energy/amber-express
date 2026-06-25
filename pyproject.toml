@@ -18,13 +18,13 @@ dev = [
     "pyright>=1.1.408",
     "pytest>=9.0.0",
     "pytest-cov>=7.0.0",
-    "pytest-homeassistant-custom-component>=0.13.300",
-    "ruff>=0.14.0",
+    "pytest-homeassistant-custom-component>=0.13.316",
+    "ruff>=0.15.10",
     "syrupy>=5.0.0",
 ]
 
 [tool.ruff]
-required-version = ">=0.14.0"
+required-version = ">=0.15.10"
 line-length = 120
 target-version = "py313"
 
