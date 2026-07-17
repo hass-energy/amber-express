@@ -232,6 +232,24 @@ class TestRecordRateLimit:
         assert limiter.current_backoff == 10
 
 
+class TestRecordServerError:
+    """Tests for record_server_error method."""
+
+    def test_consecutive_server_errors_back_off_exponentially(self) -> None:
+        """Test repeated server errors use exponential backoff after one grace."""
+        limiter = ExponentialBackoffRateLimiter(initial_backoff=10, max_backoff=300)
+
+        limiter.record_server_error()
+        assert limiter.current_backoff == 0
+
+        limiter.record_server_error()
+        assert limiter.current_backoff == 10
+
+        limiter._rate_limit_until = None
+        limiter.record_server_error()
+        assert limiter.current_backoff == 20
+
+
 class TestBackoffSequence:
     """Tests for complete backoff sequences."""
 

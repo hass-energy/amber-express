@@ -359,12 +359,17 @@ class TestAmberDataCoordinator:
 
     async def test_fetch_amber_data_api_error(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data handles API errors."""
-        with patch.object(
-            coordinator._api_client,
-            "fetch_current_prices",
-            new=AsyncMock(side_effect=AmberApiError("API error", 500)),
+        with (
+            patch.object(
+                coordinator._api_client,
+                "fetch_current_prices",
+                new=AsyncMock(side_effect=AmberApiError("API error", 500)),
+            ),
+            patch.object(coordinator._polling_manager, "update_budget") as mock_update_budget,
         ):
             await coordinator._fetch_amber_data()
+
+        mock_update_budget.assert_not_called()
 
     async def test_fetch_amber_data_uses_configured_forecast_intervals(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data uses forecast interval count from subentry config."""

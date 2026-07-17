@@ -173,6 +173,25 @@ class TestAmberApiClient:
             assert exc_info.value.status == 500
             assert api_client.last_status == 500
 
+    async def test_fetch_sites_server_errors_trigger_backoff(
+        self,
+        api_client: AmberApiClient,
+        rate_limiter: ExponentialBackoffRateLimiter,
+    ) -> None:
+        """Test consecutive site server errors trigger exponential backoff."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=ApiException(status=502)),
+        ):
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_sites()
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_sites()
+
+        assert rate_limiter.current_backoff == 1
+        assert rate_limiter.is_limited() is True
+
     @pytest.mark.parametrize(
         "network_error",
         [
@@ -197,6 +216,25 @@ class TestAmberApiClient:
 
             assert exc_info.value.status == 0
             assert api_client.last_status == 0
+
+    async def test_fetch_sites_network_errors_trigger_backoff(
+        self,
+        api_client: AmberApiClient,
+        rate_limiter: ExponentialBackoffRateLimiter,
+    ) -> None:
+        """Test consecutive site network errors trigger exponential backoff."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=OSError("Network is unreachable")),
+        ):
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_sites()
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_sites()
+
+        assert rate_limiter.current_backoff == 1
+        assert rate_limiter.is_limited() is True
 
     async def test_fetch_sites_rate_limited(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
@@ -302,6 +340,25 @@ class TestAmberApiClient:
             assert exc_info.value.status == 503
             assert api_client.last_status == 503
 
+    async def test_fetch_current_prices_server_errors_trigger_backoff(
+        self,
+        api_client: AmberApiClient,
+        rate_limiter: ExponentialBackoffRateLimiter,
+    ) -> None:
+        """Test consecutive server errors trigger exponential backoff."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=ApiException(status=500)),
+        ):
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_current_prices("test_site")
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_current_prices("test_site")
+
+        assert rate_limiter.current_backoff == 1
+        assert rate_limiter.is_limited() is True
+
     @pytest.mark.parametrize(
         "network_error",
         [
@@ -326,6 +383,25 @@ class TestAmberApiClient:
 
             assert exc_info.value.status == 0
             assert api_client.last_status == 0
+
+    async def test_fetch_current_prices_network_errors_trigger_backoff(
+        self,
+        api_client: AmberApiClient,
+        rate_limiter: ExponentialBackoffRateLimiter,
+    ) -> None:
+        """Test consecutive network errors trigger exponential backoff."""
+        with patch.object(
+            api_client._hass,
+            "async_add_executor_job",
+            new=AsyncMock(side_effect=OSError("Network is unreachable")),
+        ):
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_current_prices("test_site")
+            with pytest.raises(AmberApiError):
+                await api_client.fetch_current_prices("test_site")
+
+        assert rate_limiter.current_backoff == 1
+        assert rate_limiter.is_limited() is True
 
     async def test_fetch_current_prices_rate_limit_triggers_backoff(
         self, api_client: AmberApiClient, rate_limiter: ExponentialBackoffRateLimiter
