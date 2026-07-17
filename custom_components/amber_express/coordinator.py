@@ -461,14 +461,12 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 next_intervals=next_intervals,
                 resolution=resolution,
             )
+            self._polling_manager.update_budget(self._api_client.rate_limit_info)
         except RateLimitedError:
             return
         except AmberApiError as err:
             _LOGGER.warning("API error: %s", err)
             return
-        finally:
-            # Update polling manager with rate limit info regardless of success/failure
-            self._polling_manager.update_budget(self._api_client.rate_limit_info)
 
         # Process the intervals
         data = self._interval_processor.process_intervals(intervals)

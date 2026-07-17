@@ -165,10 +165,12 @@ class AmberApiClient:
                 self._rate_limiter.record_rate_limit(reset_at, remaining=remaining)
                 raise RateLimitedError(reset_at) from err
 
+            self._rate_limiter.record_server_error()
             msg = f"Failed to fetch sites: {err}"
             raise AmberApiError(msg, status) from err
         except (urllib3.exceptions.HTTPError, OSError) as err:
             self._last_api_status = HTTP_NETWORK_ERROR
+            self._rate_limiter.record_server_error()
             msg = f"Network error talking to Amber: {type(err).__name__}: {err}"
             raise AmberApiError(msg, HTTP_NETWORK_ERROR) from err
 
@@ -242,10 +244,12 @@ class AmberApiClient:
                 self._rate_limiter.record_rate_limit(reset_at, remaining=remaining)
                 raise RateLimitedError(reset_at) from err
 
+            self._rate_limiter.record_server_error()
             msg = f"Amber API error ({status}): {err.reason}"
             raise AmberApiError(msg, status) from err
         except (urllib3.exceptions.HTTPError, OSError) as err:
             self._last_api_status = HTTP_NETWORK_ERROR
+            self._rate_limiter.record_server_error()
             msg = f"Network error talking to Amber: {type(err).__name__}: {err}"
             raise AmberApiError(msg, HTTP_NETWORK_ERROR) from err
 

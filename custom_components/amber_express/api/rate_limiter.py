@@ -11,21 +11,22 @@ _QUOTA_WARNING_THRESHOLD = 5
 
 
 class ExponentialBackoffRateLimiter:
-    """Manages exponential backoff for rate-limited API calls.
+    """Manage exponential backoff for rate-limited and failed API calls.
 
     Responsibilities:
     - Tracking whether we're currently in a rate-limit backoff period
     - Recording rate limit events (429 responses) and calculating backoff duration
+    - Recording server and network errors
     - Using API-provided reset time when available, falling back to exponential backoff
-    - Resetting backoff on successful API calls
+    - Resetting all failure state on successful API calls
     - Providing remaining seconds until rate limit expires
 
     The backoff strategy:
-    1. First consecutive 429 is ignored (no backoff) to tolerate spurious server-load 429s
-    2. Second consecutive 429: if API provides ratelimit-reset header, use that + 2s buffer;
-       otherwise start at initial_backoff (1s) and double on each further consecutive 429
+    1. First consecutive error is ignored to tolerate a transient failure
+    2. Second consecutive error starts at initial_backoff (1s) and doubles on each
+       further error; a 429-provided reset time takes precedence
     3. Cap at max_backoff (300s / 5 minutes)
-    4. Reset to 0 on any successful API call (including resetting the consecutive counter)
+    4. Reset to 0 on any successful API call
 
     This class is shared between AmberApiClient (which records events) and the
     coordinator (which checks before scheduling polls).
@@ -40,7 +41,7 @@ class ExponentialBackoffRateLimiter:
         """Initialize the rate limiter.
 
         Args:
-            initial_backoff: Initial backoff duration in seconds (used from 2nd 429 onward)
+            initial_backoff: Initial backoff duration in seconds (used from 2nd error onward)
             max_backoff: Maximum backoff duration in seconds
 
         """
@@ -48,7 +49,7 @@ class ExponentialBackoffRateLimiter:
         self._max_backoff = max_backoff
         self._backoff_seconds = 0
         self._rate_limit_until: datetime | None = None
-        self._consecutive_429s = 0
+        self._consecutive_errors = 0
 
     def is_limited(self) -> bool:
         """Check if we're currently rate limited.
@@ -74,10 +75,10 @@ class ExponentialBackoffRateLimiter:
         return max(0, remaining)
 
     def record_success(self) -> None:
-        """Record a successful API call, resetting backoff and consecutive 429 count."""
+        """Record a successful API call and reset failure state."""
         self._backoff_seconds = 0
         self._rate_limit_until = None
-        self._consecutive_429s = 0
+        self._consecutive_errors = 0
 
     def record_rate_limit(self, reset_at: datetime | None, *, remaining: int | None = None) -> datetime | None:
         """Record a rate limit event and set backoff.
@@ -97,10 +98,10 @@ class ExponentialBackoffRateLimiter:
             When the rate limit expires, or None if first 429 was ignored
 
         """
-        self._consecutive_429s += 1
+        self._consecutive_errors += 1
         now = datetime.now(UTC)
 
-        if self._consecutive_429s == 1:
+        if self._consecutive_errors == 1:
             _LOGGER.debug("Rate limited (429), ignoring first occurrence")
             return None
 
@@ -114,22 +115,36 @@ class ExponentialBackoffRateLimiter:
                 "Rate limited (429). Waiting until %s (from API reset header)",
                 self._rate_limit_until.strftime("%H:%M:%S"),
             )
-        elif self._backoff_seconds == 0:
-            self._backoff_seconds = self._initial_backoff
-            self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
-            log(
-                "Rate limited (429). Backing off for %d seconds",
-                self._backoff_seconds,
-            )
         else:
-            self._backoff_seconds = min(self._backoff_seconds * 2, self._max_backoff)
-            self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
+            was_backing_off = self._backoff_seconds > 0
+            self._start_exponential_backoff(now)
             log(
-                "Rate limited (429). Backing off for %d seconds (exponential)",
+                "Rate limited (429). Backing off for %d seconds%s",
                 self._backoff_seconds,
+                " (exponential)" if was_backing_off else "",
             )
 
         return self._rate_limit_until
+
+    def record_server_error(self) -> datetime | None:
+        """Record a server error and apply exponential backoff."""
+        self._consecutive_errors += 1
+
+        if self._consecutive_errors == 1:
+            _LOGGER.debug("Server error, ignoring first occurrence")
+            return None
+
+        self._start_exponential_backoff(datetime.now(UTC))
+        _LOGGER.warning("Server error, backing off for %d seconds", self._backoff_seconds)
+        return self._rate_limit_until
+
+    def _start_exponential_backoff(self, now: datetime) -> None:
+        """Start or increase exponential backoff."""
+        if self._backoff_seconds == 0:
+            self._backoff_seconds = self._initial_backoff
+        else:
+            self._backoff_seconds = min(self._backoff_seconds * 2, self._max_backoff)
+        self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
 
     @property
     def rate_limit_until(self) -> datetime | None:
