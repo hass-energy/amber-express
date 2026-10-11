@@ -68,11 +68,9 @@
       "confirmation_delay": { "name": "Confirmation Delay" },
       "confirmation_lag": { "name": "Confirmation Lag" },
       "controlled_load_price": { "name": "Controlled Load Price" },
-      "controlled_load_price_detailed": { "name": "Controlled Load Price Detailed" },
       "feed_in_price": { "name": "Feed In Price" },
-      "feed_in_price_detailed": { "name": "Feed In Price Detailed" },
+      "forecast_horizon": { "name": "Forecast Horizon" },
       "general_price": { "name": "General Price" },
-      "general_price_detailed": { "name": "General Price Detailed" },
       "next_poll": { "name": "Next Poll" },
       "rate_limit_remaining": { "name": "Rate Limit Remaining" },
       "rate_limit_reset": { "name": "Rate Limit Reset" },
@@ -83,11 +81,7 @@
     "select": {
       "pricing_mode": {
         "name": "Pricing Mode",
-        "state": {
-          "advanced_price_predicted": "Advanced Price Predicted",
-          "all": "Both",
-          "per_kwh": "AEMO (including tariffs)"
-        }
+        "state": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
       }
     }
   },
@@ -102,6 +96,7 @@
             "confirmation_timeout": "Confirmation timeout (seconds)",
             "demand_window_price": "Demand Window Price ($/kWh)",
             "enable_websocket": "Enable WebSocket (Real-time updates)",
+            "forecast_intervals": "Forecast intervals to fetch",
             "pricing_mode": "Pricing Mode",
             "site_name": "Site Name",
             "wait_for_confirmed": "Wait for confirmed prices"
@@ -110,7 +105,8 @@
             "confirmation_timeout": "Maximum seconds to wait for confirmed price before using estimates. Set to 0 to wait indefinitely.",
             "demand_window_price": "Price to add to general channel during demand windows. Set high (e.g. $50) to prevent imports during demand periods.",
             "enable_websocket": "Enable WebSocket for real-time price updates (alpha feature)",
-            "pricing_mode": "Advanced Price uses Amber's predicted price (advanced_price_predicted). AEMO uses per_kwh pricing. Both includes both values in forecasts.",
+            "forecast_intervals": "How many future intervals to request from the Amber API (maps to the `next` parameter). Range: 1 to 2048. Availability may be capped by the API.",
+            "pricing_mode": "AEMO uses AEMO-based pricing (per_kwh). APP uses Amber's Advanced Price forecast (advanced_price_predicted), as shown on the Amber app's Live Prices screen.",
             "site_name": "A friendly name for this site",
             "wait_for_confirmed": "When enabled, sensors only update when a confirmed (non-estimated) price is received."
           }
@@ -138,13 +134,22 @@
       "initiate_flow": { "reconfigure": "Site", "user": "Site" }
     }
   },
+  "issues": {
+    "legacy_pricing_mode_all": {
+      "title": "Migrate removed pricing mode",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Migrate pricing mode for {site_name}",
+            "description": "The \"Both\" pricing mode has been removed. This repair will update the site to APP pricing mode (`advanced_price_predicted`)."
+          }
+        }
+      }
+    }
+  },
   "selector": {
     "pricing_mode": {
-      "options": {
-        "advanced_price_predicted": "Advanced Price Predicted",
-        "all": "Both",
-        "per_kwh": "AEMO (including tariffs)"
-      }
+      "options": { "advanced_price_predicted": "Advanced Price Predicted", "per_kwh": "AEMO (including tariffs)" }
     }
   }
 }

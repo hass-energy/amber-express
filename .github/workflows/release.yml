@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -21,36 +21,34 @@ jobs:
       - name: Extract and validate version from release tag
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
           echo "Tag: $TAG"
-          echo "Version: $VERSION"
 
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release tag '$TAG' does not match semantic versioning format (vX.Y.Z)"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+)?$ ]]; then
+            echo "::error::Release tag '$TAG' does not match expected format (vX.Y.Z or vX.Y.Zrc#)"
             exit 1
           fi
 
       - name: Check pyproject.toml version matches tag
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          TAG_VERSION="${TAG#v}"
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
           PYPROJECT_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          echo "Tag version: $TAG_VERSION"
+          echo "Version: $VERSION"
           echo "pyproject.toml version: $PYPROJECT_VERSION"
-          if [[ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]]; then
-            echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml version ($PYPROJECT_VERSION)"
+          if [[ "$VERSION" != "$PYPROJECT_VERSION" ]]; then
+            echo "::error::Tag version ($VERSION) does not match pyproject.toml version ($PYPROJECT_VERSION)"
             exit 1
           fi
 
       - name: Check manifest.json version matches tag
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          TAG_VERSION="${TAG#v}"
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
           MANIFEST_VERSION=$(jq -r '.version' custom_components/amber_express/manifest.json)
-          echo "Tag version: $TAG_VERSION"
+          echo "Version: $VERSION"
           echo "manifest.json version: $MANIFEST_VERSION"
-          if [[ "$TAG_VERSION" != "$MANIFEST_VERSION" ]]; then
-            echo "::error::Tag version ($TAG_VERSION) does not match manifest.json version ($MANIFEST_VERSION)"
+          if [[ "$VERSION" != "$MANIFEST_VERSION" ]]; then
+            echo "::error::Tag version ($VERSION) does not match manifest.json version ($MANIFEST_VERSION)"
             exit 1
           fi
 
@@ -60,15 +58,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Create release package
         run: |
-          cd custom_components
-          zip -r ../amber_express.zip amber_express
+          cd custom_components/amber_express
+          zip -r ../../amber_express.zip . \
+            --exclude "tests/" "tests/*" "*/tests/" "*/tests/*" \
+            --exclude "*/__pycache__/" "*/__pycache__/*"
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             amber_express.zip

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -16,16 +16,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from .api_client import AmberApiClient, AmberApiError, RateLimitedError
-from .cdf_polling import CDFPollingStats, IntervalObservation
-from .cdf_storage import CDFObservationStore
+from .api import AmberApiClient, AmberApiError, ExponentialBackoffRateLimiter, RateLimitedError
 from .const import (
     ATTR_DEMAND_WINDOW,
+    ATTR_END_TIME,
     ATTR_ESTIMATE,
-    ATTR_FORECASTS,
+    ATTR_FORECAST,
+    ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
+    ATTR_START_TIME,
     ATTR_TARIFF_BLOCK,
     ATTR_TARIFF_PERIOD,
     ATTR_TARIFF_SEASON,
@@ -34,26 +35,34 @@ from .const import (
     CHANNEL_GENERAL,
     CONF_API_TOKEN,
     CONF_CONFIRMATION_TIMEOUT,
+    CONF_FORECAST_INTERVALS,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_WAIT_FOR_CONFIRMED,
     DATA_SOURCE_POLLING,
     DEFAULT_CONFIRMATION_TIMEOUT,
+    DEFAULT_FORECAST_INTERVALS,
     DEFAULT_PRICING_MODE,
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
-    FORECAST_INTERVALS,
 )
-from .data_source import DataSourceMerger
-from .interval_processor import IntervalProcessor
-from .rate_limiter import ExponentialBackoffRateLimiter
-from .smart_polling import SmartPollingManager
+from .data import DataSourceMerger, IntervalProcessor
+from .polling import CDFObservationStore, CDFPollingStats, IntervalObservation, SmartPollingManager
 from .types import ChannelData, CoordinatorData, RateLimitInfo
 
 _LOGGER = logging.getLogger(__name__)
 
 # Interval detection - check every second to detect interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
+
+# Minimum forecast entries needed to push held price (current + next interval)
+_MIN_FORECASTS_FOR_HELD = 2
+
+# Time attributes to take from the next forecast so the held entry is time-aligned
+_INTERVAL_TIME_ATTRS = (ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME)
+
+# Push held price this many seconds before the boundary so HAEO sees aligned data
+_PRE_BOUNDARY_LEAD_SECONDS = 1
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -93,7 +102,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             hass,
             _LOGGER,
             name=f"{DOMAIN}_{subentry.subentry_id}",
-            update_interval=None,  # Polling is handled by async_track_time_change for clock alignment
+            # Clock-aligned polling is still handled separately; this is a watchdog
+            # retry if the normal polling path stalls or fails repeatedly.
+            update_interval=timedelta(minutes=5),
         )
         self.entry = entry
         self.subentry = subentry
@@ -139,6 +150,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Confirmation timeout state
         self._cancel_confirmation_timeout: Callable[[], None] | None = None
         self._confirmation_timeout_expired: bool = False
+
+        # Pre-boundary held price: True once we've pushed for the upcoming boundary
+        self._held_price_pushed: bool = False
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
@@ -286,11 +300,81 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._on_scheduled_poll,
         )
 
+    def _seconds_until_next_boundary(self) -> float:
+        """Seconds until the next interval boundary (same logic as SmartPollingManager)."""
+        now = datetime.now(UTC)
+        length = int(self._site.interval_length)
+        current_minute = (now.minute // length) * length
+        current_start = now.replace(minute=current_minute, second=0, microsecond=0)
+        next_boundary = current_start + timedelta(minutes=length)
+        return (next_boundary - now).total_seconds()
+
+    def _push_held_price_at_boundary(self) -> bool:
+        """Push a sensor update at interval boundary using previous confirmed price.
+
+        Shifts the forecast list forward and holds the previous interval's price
+        for the new current interval so HAEO sees time-aligned data with zero
+        API latency. Only runs when wait_for_confirmed is True.
+
+        Returns:
+            True if the held price was applied and listeners were notified, False otherwise.
+
+        """
+        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
+        confirmation_timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
+        if not wait_for_confirmed or confirmation_timeout <= 0:
+            return False
+        if not self.current_data:
+            return False
+
+        applied_held = False
+        for channel, channel_data in self.current_data.items():
+            if channel.startswith("_"):
+                continue
+            if not channel_data or not isinstance(channel_data, dict):
+                continue
+            forecasts = channel_data.get(ATTR_FORECAST)
+            if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
+                continue
+
+            next_entry = forecasts[1]
+            for attr in _INTERVAL_TIME_ATTRS:
+                val = next_entry.get(attr)
+                if val is not None:
+                    channel_data[attr] = val
+            # Forward-project demand window from the next interval so the
+            # sensor applies (or stops applying) the demand window surcharge
+            if ATTR_DEMAND_WINDOW in next_entry:
+                channel_data[ATTR_DEMAND_WINDOW] = next_entry[ATTR_DEMAND_WINDOW]
+            elif ATTR_DEMAND_WINDOW in channel_data:
+                del channel_data[ATTR_DEMAND_WINDOW]
+            channel_data[ATTR_ESTIMATE] = True
+            current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}
+            channel_data[ATTR_FORECAST] = [current_snapshot, *forecasts[2:]]
+            applied_held = True
+
+        if not applied_held:
+            return False
+
+        self.async_set_updated_data(self.current_data)
+        _LOGGER.debug("Pushed held price at interval boundary")
+        return True
+
     async def _on_interval_check(self, _now: object) -> None:
         """Check for new interval and start sub-second polling chain."""
-        # Check if this is a new interval
+        # Pre-boundary: push held price before the boundary crosses so HAEO sees aligned data
+        if (
+            not self._held_price_pushed
+            and self._seconds_until_next_boundary() <= _PRE_BOUNDARY_LEAD_SECONDS
+            and self._push_held_price_at_boundary()
+        ):
+            self._held_price_pushed = True
+
+        # Detect actual boundary
         if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
             return
+
+        self._held_price_pushed = False
 
         # New interval - cancel any pending poll from previous interval
         self._cancel_pending_poll()
@@ -371,19 +455,18 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         try:
+            next_intervals = int(self._get_subentry_option(CONF_FORECAST_INTERVALS, DEFAULT_FORECAST_INTERVALS))
             intervals = await self._api_client.fetch_current_prices(
                 self.site_id,
-                next_intervals=FORECAST_INTERVALS,
+                next_intervals=next_intervals,
                 resolution=resolution,
             )
+            self._polling_manager.update_budget(self._api_client.rate_limit_info)
         except RateLimitedError:
             return
         except AmberApiError as err:
-            _LOGGER.debug("API error: %s", err)
+            _LOGGER.warning("API error: %s", err)
             return
-        finally:
-            # Update polling manager with rate limit info regardless of success/failure
-            self._polling_manager.update_budget(self._api_client.rate_limit_info)
 
         # Process the intervals
         data = self._interval_processor.process_intervals(intervals)
@@ -481,7 +564,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Get forecasts for a channel."""
         channel_data = self.get_channel_data(channel)
         if channel_data:
-            return channel_data.get(ATTR_FORECASTS, [])
+            return channel_data.get(ATTR_FORECAST, [])
         return []
 
     def get_renewables(self) -> float | None:
@@ -553,6 +636,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def get_api_status(self) -> int:
         """Get last API status code (200 = OK)."""
         return self._api_client.last_status
+
+    def get_forecasts_timestamp(self) -> datetime | None:
+        """Get the start_time of the interval whose polling response included forecasts."""
+        return self._data_sources.forecasts_timestamp
 
     def get_rate_limit_info(self) -> RateLimitInfo:
         """Get rate limit information from last API response."""

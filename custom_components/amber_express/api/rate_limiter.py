@@ -1,0 +1,157 @@
+"""Exponential backoff rate limiter for API calls."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+import logging
+
+_LOGGER = logging.getLogger(__name__)
+
+_QUOTA_WARNING_THRESHOLD = 5
+
+
+class ExponentialBackoffRateLimiter:
+    """Manage exponential backoff for rate-limited and failed API calls.
+
+    Responsibilities:
+    - Tracking whether we're currently in a rate-limit backoff period
+    - Recording rate limit events (429 responses) and calculating backoff duration
+    - Recording server and network errors
+    - Using API-provided reset time when available, falling back to exponential backoff
+    - Resetting all failure state on successful API calls
+    - Providing remaining seconds until rate limit expires
+
+    The backoff strategy:
+    1. First consecutive error is ignored to tolerate a transient failure
+    2. Second consecutive error starts at initial_backoff (1s) and doubles on each
+       further error; a 429-provided reset time takes precedence
+    3. Cap at max_backoff (300s / 5 minutes)
+    4. Reset to 0 on any successful API call
+
+    This class is shared between AmberApiClient (which records events) and the
+    coordinator (which checks before scheduling polls).
+    """
+
+    def __init__(
+        self,
+        *,
+        initial_backoff: int = 1,
+        max_backoff: int = 300,
+    ) -> None:
+        """Initialize the rate limiter.
+
+        Args:
+            initial_backoff: Initial backoff duration in seconds (used from 2nd error onward)
+            max_backoff: Maximum backoff duration in seconds
+
+        """
+        self._initial_backoff = initial_backoff
+        self._max_backoff = max_backoff
+        self._backoff_seconds = 0
+        self._rate_limit_until: datetime | None = None
+        self._consecutive_errors = 0
+
+    def is_limited(self) -> bool:
+        """Check if we're currently rate limited.
+
+        Returns:
+            True if rate limited, False otherwise
+
+        """
+        if self._rate_limit_until is None:
+            return False
+        return datetime.now(UTC) < self._rate_limit_until
+
+    def remaining_seconds(self) -> float:
+        """Get remaining seconds until rate limit expires.
+
+        Returns:
+            Seconds remaining, or 0 if not rate limited
+
+        """
+        if self._rate_limit_until is None:
+            return 0
+        remaining = (self._rate_limit_until - datetime.now(UTC)).total_seconds()
+        return max(0, remaining)
+
+    def record_success(self) -> None:
+        """Record a successful API call and reset failure state."""
+        self._backoff_seconds = 0
+        self._rate_limit_until = None
+        self._consecutive_errors = 0
+
+    def record_rate_limit(self, reset_at: datetime | None, *, remaining: int | None = None) -> datetime | None:
+        """Record a rate limit event and set backoff.
+
+        First consecutive 429 is ignored (no backoff). From the second onward,
+        uses reset_at from API header if provided, otherwise exponential backoff.
+
+        Log severity depends on remaining quota: server-side load shedding (high
+        remaining) logs at debug, while client-caused rate limits (low/no remaining)
+        log at warning.
+
+        Args:
+            reset_at: When quota resets (from API header), or None to use backoff
+            remaining: Remaining API quota from rate limit headers, or None if unknown
+
+        Returns:
+            When the rate limit expires, or None if first 429 was ignored
+
+        """
+        self._consecutive_errors += 1
+        now = datetime.now(UTC)
+
+        if self._consecutive_errors == 1:
+            _LOGGER.debug("Rate limited (429), ignoring first occurrence")
+            return None
+
+        server_side = remaining is not None and remaining > _QUOTA_WARNING_THRESHOLD
+        log = _LOGGER.debug if server_side else _LOGGER.warning
+
+        if reset_at is not None:
+            self._backoff_seconds = int((reset_at - now).total_seconds()) + 2
+            self._rate_limit_until = reset_at + timedelta(seconds=2)
+            log(
+                "Rate limited (429). Waiting until %s (from API reset header)",
+                self._rate_limit_until.strftime("%H:%M:%S"),
+            )
+        else:
+            was_backing_off = self._backoff_seconds > 0
+            self._start_exponential_backoff(now)
+            log(
+                "Rate limited (429). Backing off for %d seconds%s",
+                self._backoff_seconds,
+                " (exponential)" if was_backing_off else "",
+            )
+
+        return self._rate_limit_until
+
+    def record_server_error(self) -> datetime | None:
+        """Record a server error and apply exponential backoff."""
+        self._consecutive_errors += 1
+
+        if self._consecutive_errors == 1:
+            _LOGGER.debug("Server error, ignoring first occurrence")
+            return None
+
+        self._start_exponential_backoff(datetime.now(UTC))
+        _LOGGER.warning("Server error, backing off for %d seconds", self._backoff_seconds)
+        return self._rate_limit_until
+
+    def _start_exponential_backoff(self, now: datetime) -> None:
+        """Start or increase exponential backoff."""
+        if self._backoff_seconds == 0:
+            self._backoff_seconds = self._initial_backoff
+        else:
+            self._backoff_seconds = min(self._backoff_seconds * 2, self._max_backoff)
+        self._rate_limit_until = now + timedelta(seconds=self._backoff_seconds)
+
+    @property
+    def rate_limit_until(self) -> datetime | None:
+        """Get when rate limit expires, or None if not limited."""
+        return self._rate_limit_until
+
+    @property
+    def current_backoff(self) -> int:
+        """Get the current backoff duration in seconds."""
+        return self._backoff_seconds

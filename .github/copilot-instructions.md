@@ -14,7 +14,7 @@ Amber Express provides fast, real-time electricity pricing for Amber Electric cu
 - **Smart polling**: Cron-based polling inspired by amber2mqtt - polls frequently at interval start, stops once confirmed price received
 - **WebSocket redundancy**: Optional connection to Amber's WebSocket API with automatic fallback to polling
 - **HAEO compatibility**: Forecast sensors designed to work seamlessly with HAEO for energy optimization
-- **Flexible pricing**: Choose between AEMO-based (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
+- **Flexible pricing**: Choose between AEMO-based (per_kwh) or Amber's Advanced Price forecast (advanced_price_predicted), as shown on the Amber app's Live Prices screen
 
 ### Core components
 

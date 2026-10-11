@@ -1,0 +1,293 @@
+"""Smart polling manager for optimized API polling."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+import logging
+
+from custom_components.amber_express.types import RateLimitInfo
+
+from .cdf_polling import CDFPollingStats, CDFPollingStrategy, IntervalObservation
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class PollingState:
+    """Current state of the polling manager."""
+
+    current_interval_start: datetime | None
+    has_confirmed_price: bool
+    poll_count_this_interval: int
+    first_interval_after_startup: bool
+    last_estimate_elapsed: float | None
+
+
+class SmartPollingManager:
+    """Manages smart polling decisions based on interval timing and confirmation status.
+
+    Responsibilities:
+    - Detecting interval boundaries and resetting state
+    - Tracking whether confirmed price has been received this interval
+    - Deciding IF we should poll (based on has_confirmed_price)
+    - Delegating WHEN to poll to CDFPollingStrategy
+    - Recording observations when confirmed prices are received
+    - Dynamically updating poll budget based on rate limit quota
+
+    This class is the bridge between the coordinator (which asks "should I poll?")
+    and the CDF strategy (which calculates optimal poll times). It maintains
+    interval-level state while the CDF strategy handles the statistical learning.
+    """
+
+    def __init__(
+        self,
+        interval_length: int,
+        observations: list[IntervalObservation],
+    ) -> None:
+        """Initialize the polling manager.
+
+        Args:
+            interval_length: Site interval length in minutes (5 or 30)
+            observations: Pre-loaded observations (from storage or cold start)
+
+        """
+        self._interval_length = interval_length
+        self._current_interval_start: datetime | None = None
+        self._has_confirmed_price = False
+        self._poll_count_this_interval = 0
+        self._first_interval_after_startup = True
+        self._last_estimate_elapsed: float | None = None
+        self._cdf_strategy = CDFPollingStrategy(observations)
+
+    def _get_current_interval_start(self) -> datetime:
+        """Get the start of the current interval."""
+        now = datetime.now(UTC)
+        minutes = (now.minute // self._interval_length) * self._interval_length
+        return now.replace(minute=minutes, second=0, microsecond=0)
+
+    # Reserve some polls as a buffer to avoid exhausting the rate limit
+    RATE_LIMIT_BUFFER = 5
+
+    def _calculate_polls_per_interval(self, rate_limit_info: RateLimitInfo) -> int:
+        """Calculate polls per interval based on rate limit quota.
+
+        Args:
+            rate_limit_info: Current rate limit information from API
+
+        Returns:
+            Number of confirmatory polls (remaining quota minus buffer)
+
+        """
+        return max(0, rate_limit_info["remaining"] - self.RATE_LIMIT_BUFFER)
+
+    def check_new_interval(self, *, has_data: bool) -> bool:
+        """Check if we've entered a new interval and reset state if so.
+
+        Args:
+            has_data: Whether we have any existing data (for first-run detection)
+
+        Returns:
+            True if this is a new interval (should poll immediately), False otherwise
+
+        """
+        current_interval = self._get_current_interval_start()
+
+        # Not a new interval
+        if self._current_interval_start == current_interval:
+            return False
+
+        # New interval - reset state
+        is_first_run = not has_data
+        self._current_interval_start = current_interval
+        self._has_confirmed_price = False
+        self._poll_count_this_interval = 0
+        self._last_estimate_elapsed = None
+
+        self._cdf_strategy.reset_for_new_interval()
+
+        if is_first_run:
+            _LOGGER.debug("First poll - fetching initial data")
+        else:
+            # Clear the first-interval flag now that we're in a real new interval
+            self._first_interval_after_startup = False
+            _LOGGER.debug(
+                "New %d-minute interval started: %s",
+                self._interval_length,
+                current_interval,
+            )
+
+        return True
+
+    def should_poll(self, *, has_data: bool) -> bool:
+        """Determine if we should poll using smart CDF-based polling.
+
+        Args:
+            has_data: Whether we have any existing data (for first-run detection)
+
+        Returns:
+            True if we should poll now, False otherwise
+
+        """
+        # Check for new interval first
+        if self.check_new_interval(has_data=has_data):
+            return True  # Always poll at start of new interval for estimate
+
+        now = datetime.now(UTC)
+
+        # Don't poll if we already have confirmed price
+        if self._has_confirmed_price:
+            return False
+
+        # Use CDF strategy for confirmatory polling
+        if self._current_interval_start is None:
+            # Should never happen - _current_interval_start is set when interval changes
+            return True
+        elapsed = (now - self._current_interval_start).total_seconds()
+        return self._cdf_strategy.should_poll_for_confirmed(elapsed)
+
+    def get_next_poll_delay(self) -> float | None:
+        """Get the delay in seconds until the next scheduled poll.
+
+        Returns:
+            Seconds until next poll, or None if no more polls scheduled
+            or we already have confirmed price.
+
+        """
+        if self._has_confirmed_price:
+            return None
+
+        if self._current_interval_start is None:
+            return None
+
+        now = datetime.now(UTC)
+        elapsed = (now - self._current_interval_start).total_seconds()
+        return self._cdf_strategy.get_next_poll_delay(elapsed)
+
+    def get_next_poll_time(self) -> datetime | None:
+        """Get the absolute timestamp of the next scheduled poll."""
+        if self._current_interval_start is None:
+            return None
+
+        # If we have confirmed price or no more polls scheduled, next poll is at next interval
+        if self._has_confirmed_price:
+            return self._current_interval_start + timedelta(minutes=self._interval_length)
+
+        next_poll_seconds = self._cdf_strategy.get_next_poll_seconds()
+        if next_poll_seconds is None:
+            # No more polls scheduled this interval, next poll is at next interval
+            return self._current_interval_start + timedelta(minutes=self._interval_length)
+
+        return self._current_interval_start + timedelta(seconds=next_poll_seconds)
+
+    def on_poll_started(self) -> None:
+        """Record that a poll has started."""
+        self._poll_count_this_interval += 1
+
+        # Track confirmatory polls (polls after the first estimate poll)
+        if self._poll_count_this_interval > 1:
+            self._cdf_strategy.increment_confirmatory_poll()
+
+    def on_estimate_received(self) -> None:
+        """Record that an estimated price was received."""
+        if self._current_interval_start is not None:
+            now = datetime.now(UTC)
+            self._last_estimate_elapsed = (now - self._current_interval_start).total_seconds()
+
+    def on_confirmed_received(self) -> None:
+        """Record that a confirmed price was received and record observation."""
+        self._has_confirmed_price = True
+
+        # Record observation (skip first interval after startup if no estimate seen)
+        if self._current_interval_start is not None and not self._first_interval_after_startup:
+            now = datetime.now(UTC)
+            confirmed_elapsed = (now - self._current_interval_start).total_seconds()
+
+            if self._last_estimate_elapsed is not None:
+                self._cdf_strategy.record_observation(
+                    start=self._last_estimate_elapsed,
+                    end=confirmed_elapsed,
+                )
+                _LOGGER.debug(
+                    "Recorded observation [%.1fs, %.1fs]",
+                    self._last_estimate_elapsed,
+                    confirmed_elapsed,
+                )
+            else:
+                _LOGGER.debug(
+                    "Confirmed at %.1fs but no estimate seen, skipping observation",
+                    confirmed_elapsed,
+                )
+        elif self._first_interval_after_startup:
+            _LOGGER.debug("Skipping observation on first interval after startup")
+
+    def update_budget(self, rate_limit_info: RateLimitInfo) -> None:
+        """Update the poll budget based on new rate limit info.
+
+        Called after each API response to dynamically adjust the schedule
+        based on the current remaining quota.
+
+        Args:
+            rate_limit_info: Current rate limit information from API
+
+        """
+        if self._current_interval_start is None:
+            return
+
+        polls_per_interval = self._calculate_polls_per_interval(rate_limit_info)
+        now = datetime.now(UTC)
+        elapsed = (now - self._current_interval_start).total_seconds()
+        reset_at = rate_limit_info["reset_at"]
+
+        old_schedule = self._cdf_strategy.scheduled_polls.copy()
+        self._cdf_strategy.update_budget(
+            polls_per_interval,
+            elapsed,
+            reset_at,
+            self._interval_length * 60,
+        )
+
+        if self._cdf_strategy.scheduled_polls != old_schedule:
+            reset_in = (reset_at - now).total_seconds()
+            _LOGGER.debug(
+                "Poll schedule: remaining=%d, k=%d, reset_at=%s (in %.0fs), polls: %s",
+                rate_limit_info["remaining"],
+                polls_per_interval,
+                reset_at.strftime("%H:%M:%S"),
+                reset_in,
+                [f"{t:.1f}s ({t - elapsed:+.0f}s)" for t in self._cdf_strategy.scheduled_polls],
+            )
+
+    @property
+    def has_confirmed_price(self) -> bool:
+        """Return whether we have a confirmed price for this interval."""
+        return self._has_confirmed_price
+
+    @property
+    def poll_count_this_interval(self) -> int:
+        """Return the number of polls this interval."""
+        return self._poll_count_this_interval
+
+    @property
+    def first_interval_after_startup(self) -> bool:
+        """Return whether this is the first interval after startup."""
+        return self._first_interval_after_startup
+
+    def get_cdf_stats(self) -> CDFPollingStats:
+        """Get CDF polling statistics for diagnostics."""
+        return self._cdf_strategy.get_stats()
+
+    @property
+    def observations(self) -> list[IntervalObservation]:
+        """Get current observations for persistence."""
+        return self._cdf_strategy.observations
+
+    def get_state(self) -> PollingState:
+        """Get current polling state for testing/debugging."""
+        return PollingState(
+            current_interval_start=self._current_interval_start,
+            has_confirmed_price=self._has_confirmed_price,
+            poll_count_this_interval=self._poll_count_this_interval,
+            first_interval_after_startup=self._first_interval_after_startup,
+            last_estimate_elapsed=self._last_estimate_elapsed,
+        )

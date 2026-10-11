@@ -18,7 +18,6 @@ from .const import (
     DEFAULT_PRICING_MODE,
     DOMAIN,
     PRICING_MODE_AEMO,
-    PRICING_MODE_ALL,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
@@ -58,7 +57,7 @@ class PricingModeSelect(SelectEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "pricing_mode"
-    _attr_options: ClassVar[list[str]] = [PRICING_MODE_APP, PRICING_MODE_AEMO, PRICING_MODE_ALL]
+    _attr_options: ClassVar[list[str]] = [PRICING_MODE_APP, PRICING_MODE_AEMO]
 
     def __init__(
         self,

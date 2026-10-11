@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Amber Express" width="500">
+  <img src="https://github.com/hass-energy/amber-express/raw/main/images/logo.png" alt="Amber Express" width="500">
 </p>
 
 <p align="center">
@@ -10,19 +10,29 @@
   <a href="https://github.com/hass-energy/amber-express/releases"><img src="https://img.shields.io/github/v/release/hass-energy/amber-express?style=flat-square" alt="Release"></a>
   <a href="https://github.com/hass-energy/amber-express/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hass-energy/amber-express?style=flat-square" alt="License"></a>
   <a href="https://github.com/custom-components/hacs"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat-square" alt="HACS"></a>
+  <a href="https://buymeacoffee.com/haeo.io"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square" alt="Buy Me A Coffee"></a>
 </p>
 
 ---
 
-A Home Assistant custom integration for [Amber Electric](https://www.amber.com.au/) that provides real-time electricity pricing with smart polling and WebSocket support.
+A Home Assistant custom integration for [Amber Electric](https://www.amber.com.au/) that provides faster real-time electricity pricing with smart polling and WebSocket support.
 
 ## Features
 
 - **Simple Setup**: Just like the official integration - enter your API key, select a site, and you're done
-- **Smart Polling**: Intelligent adaptive polling at the start of each 5-minute interval and stops once a confirmed price is received
+- **Smart Polling**: Adapts and learns when confirmed prices typically arrive and polls at those times to fetch latest prices as fast as possible
+- **Forecasting**: Provides price forecasts for both import and feed-in channels for automations and optimizers
+- **Flexible Pricing**: Choose between AEMO-based pricing (`per_kwh`) or Amber's Advanced Price forecast (`advanced_price_predicted`)
+- **Waits for Confirmation**: Holds previous prices until confirmed values arrive, with configurable timeout control
+- **Demand Window Pricing**: Optionally add a surcharge during demand windows for optimization-focused automations
 - **WebSocket Support**: Supports real-time updates via Amber's WebSocket API (alpha feature) as a redundant data source to polling
-- **Flexible Pricing**: Use Amber's Advanced Price forecast (`advanced_price_predicted`), AEMO-based pricing (`per_kwh`), or both
 - **HAEO Compatible**: Forecast sensors are fully compatible with [HAEO](https://haeo.io/) for energy optimization
+
+## Screenshots
+
+| Sensors                                                                                                                        | Diagnostics                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="https://github.com/hass-energy/amber-express/raw/main/images/sensors.png" alt="Amber Express sensors" width="317px"> | <img src="https://github.com/hass-energy/amber-express/raw/main/images/diagnostics.png" alt="Amber Express diagnostics" width="317px"> |
 
 ## Installation
 
@@ -50,8 +60,39 @@ Or manually:
 2. Click **Add Integration**
 3. Search for "Amber Express"
 4. Enter your Amber API token (get one from [Amber Developer Settings](https://app.amber.com.au/developers/))
-5. Select your site from the dropdown
+5. Select your site
 6. Optionally configure the integration options
+
+## Options
+
+Amber Express supports the following per-site options:
+
+- **Site name**: Display name used for the Home Assistant device and entities
+- **Pricing mode**: Choose the price field used by sensors
+  - `per_kwh`: AEMO-based pricing
+  - `advanced_price_predicted`: Amber's Advanced Price forecast (used by the Amber app's Live Prices screen and SmartShift, and recommended for optimizers)
+- **Enable WebSocket**: Enables Amber WebSocket updates as a secondary real-time data source
+- **Wait for confirmed prices**: Enabled by default; holds previous interval price until confirmation
+- **Confirmation timeout (seconds)**: Maximum wait before publishing falling back to estimate price
+- **Forecast intervals**: Number of future intervals returned by forecast sensors
+- **Demand Window Price ($/kWh)**: Adds a configurable surcharge to general channel prices during demand windows
+
+Adding a demand window price helps optimizers such as [HAEO](https://haeo.io/) avoid importing during the demand window.
+
+## Pricing Modes
+
+There are two pricing modes available that Amber provide, AEMO and Advanced Price Predicted (APP). For the current interval, both pricing modes report the same price as this the real confirmed cost. However, the pricing modes will changes the **forecast** method used for upcoming future intervals.
+
+### AEMO
+
+- Forecasts upcoming prices from AEMO's wholesale prices
+- These forecasts are often aggressively wrong, predicting price spikes that will last for hours
+
+### Advanced Price (default)
+
+- Amber's own prediction of upcoming prices, built to be more realistic than AEMO
+- Used for forecasts on the Amber app's Live Prices screen and by SmartShift
+- Strongly recommended for optimizers such as [HAEO](https://haeo.io/), and the default mode in Amber Express
 
 ## HAEO Integration
 
@@ -59,32 +100,103 @@ The forecast sensors are designed to work seamlessly with [HAEO](https://haeo.io
 
 ```yaml
 # Example: Use in HAEO
-Import Price: sensor.amber_express_general_forecast
-Export Price: sensor.amber_express_feed_in_forecast
+Import Price: sensor.amber_express_home_general_price
+Export Price: sensor.amber_express_home_feed_in_price
 ```
 
 ## Smart Polling
 
-Amber Express uses adaptive polling to minimize API calls while ensuring timely price updates:
+Each interval opens with an _estimate_ price, then Amber publishes the _confirmed_ price some 10s of seconds later. Smart polling exists to catch that confirmed price as fast as possible without exhausting the API rate limit, so rather than poll on a fixed schedule it learns _when_ confirmed prices tend to arrive and aims to focus the majority of its polling quota around that time.
 
-1. At the start of each 5-minute interval, it polls to get the initial estimate
-2. It learns when confirmed prices typically arrive and times the next poll accordingly
-3. Once a confirmed price is received, polling stops for that interval
-4. Full forecasts are fetched after the confirmed price arrives
+1. **Observe**: Each time a confirmed price arrives, the integration records the window between the last poll that still saw an estimate and the first poll that saw the confirmed value. The most recent 100 of these observations are kept and persisted across restarts.
+2. **Learn**: Those observations are combined into a probability distribution of when confirmation happens across the interval.
+3. **Aim**: Given a budget of how many polls it can afford, it concentrates them around the times confirmation is most likely rather than spreading them evenly. As time passes with no confirmed price, it re-targets the remaining likely window.
+4. **Stop**: The moment a confirmed price arrives, polling pauses until the next interval.
 
-The integration tracks when confirmed prices historically arrive and adjusts its timing automatically. This typically results in fast price updates with only a few API calls per interval rather than continuous polling.
+The poll budget is derived from the API rate limit and recalculated after every response, so the schedule tightens or loosens as quota allows. Polls are also reserved for the interval boundary and for the moment the rate limit resets. In practice this adaptive approach delivers confirmed prices within seconds of publication.
+
+There are two main diagnostic sensors that shows the current state of polling:
+
+1. **Confirmation Delay**: This sensor represents how long it took to receive a confirmed price from the start of an interval. This includes the delay Amber itself has in getting a confirmed price to then pass on.
+2. **Confirmation Lag**: This sensor represents the maximum amount of added delay the act of polling may have caused. It is the time between the last unconfirmed poll and the confirmed poll. The goal is to get this as close to zero as possible with smarter polling.
+
+Here is a video of the algorithm adjusting its polling schedule (red dots) as confirmed prices arrived.
+
+https://github.com/user-attachments/assets/e42414fd-526f-456c-a503-3e6751baedf7
+
+## Forecasting
+
+Amber Express includes forecast attributes for both import and feed-in channels.
+
+- Forecast length is configurable using the **Forecast intervals** option
+- Forecast sensors update with each polling cycle and can be consumed directly by automations
+- Forecast entities are designed to integrate easily with optimizers such as [HAEO](https://haeo.io/)
+
+## Entity Attributes
+
+Each entity exposes additional state attributes alongside its main value. This is where pricing forecasts are available.
+
+### Price sensors (`general`, `feed_in`, `controlled_load`)
+
+| Attribute            | Type     | Description                                                        |
+| -------------------- | -------- | ------------------------------------------------------------------ |
+| `start_time`         | datetime | Current interval start in local time (minute precision)            |
+| `end_time`           | datetime | Current interval end in local time (minute precision)              |
+| `estimate`           | boolean  | Whether the current price is an estimate (not yet confirmed)       |
+| `descriptor`         | string   | Amber's price descriptor (e.g. `low`, `high`, `spike`)             |
+| `data_source`        | string   | Where the price came from, either `polling` or `websocket`         |
+| `interpolation_mode` | string   | Always `previous`; describes how to interpolate the forecast curve |
+| `forecast`           | list     | Simple `{ time, value }` points for automations and optimizers     |
+| `detailedForecast`   | list     | Full raw forecast intervals (ignored by HA recorder)               |
+
+### `site` sensor (diagnostic)
+
+| Attribute         | Type    | Description                                          |
+| ----------------- | ------- | ---------------------------------------------------- |
+| `id`              | string  | Amber site identifier                                |
+| `nmi`             | string  | National Metering Identifier                         |
+| `network`         | string  | Distribution network name                            |
+| `status`          | string  | Site status (e.g. `active`)                          |
+| `interval_length` | integer | Pricing interval length in minutes                   |
+| `channels`        | list    | `{ identifier, type, tariff }` per available channel |
+
+### `api_status` sensor (diagnostic)
+
+| Attribute                   | Type     | Description                                    |
+| --------------------------- | -------- | ---------------------------------------------- |
+| `status_code`               | integer  | Most recent HTTP status code from the API      |
+| `rate_limit_quota`          | integer  | Maximum requests allowed in the window         |
+| `rate_limit_remaining`      | integer  | Requests remaining in the current window       |
+| `rate_limit_reset_at`       | datetime | When the rate-limit quota resets               |
+| `rate_limit_window_seconds` | integer  | Rate-limit window size in seconds              |
+| `rate_limit_policy`         | string   | Raw rate-limit policy string (e.g. `50;w=300`) |
+
+### `next_poll` sensor (diagnostic)
+
+| Attribute       | Type    | Description                                        |
+| --------------- | ------- | -------------------------------------------------- |
+| `poll_schedule` | list    | Scheduled poll offsets (seconds into the interval) |
+| `poll_count`    | integer | Total polls planned for this interval              |
+
+### `forecast_horizon` sensor (diagnostic)
+
+| Attribute      | Type     | Description                                  |
+| -------------- | -------- | -------------------------------------------- |
+| `forecast_end` | datetime | Timestamp of the furthest available forecast |
 
 ## WebSocket Support
 
 The integration will (optionally) connect to Amber's WebSocket API for real-time push updates. This is an alpha feature from Amber and cannot be currently relied upon, so it is used in tandem, getting prices from whichever API is faster.
 
-## Comparison with Official Integration
+## Comparison
 
-| Feature         | Official       | Amber Express                       |
-| --------------- | -------------- | ----------------------------------- |
-| Polling         | Fixed 1-minute | Adaptive (typically 2 per interval) |
-| WebSocket       | No             | Optional (alpha)                    |
-| Pricing Options | per_kwh only   | per_kwh or advanced_price           |
+| Feature           | Amber Express            | amber2mqtt                | Amber Electric     |
+| ----------------- | ------------------------ | ------------------------- | ------------------ |
+| Polling           | Adaptive (learns timing) | Scheduled (you configure) | Fixed 1-minute     |
+| Update Speed      | Fastest                  | Fast                      | Slow               |
+| Waits for Confirm | Configurable             | Always                    | No                 |
+| WebSocket         | Optional (alpha)         | No                        | No                 |
+| Environment       | Native Integration       | Addon + Requires MQTT     | Native Integration |
 
 ## Credits
 

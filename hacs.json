@@ -1,5 +1,7 @@
 {
   "name": "Amber Express",
   "homeassistant": "2026.1.1",
-  "render_readme": true
+  "filename": "amber_express.zip",
+  "render_readme": true,
+  "zip_release": true
 }

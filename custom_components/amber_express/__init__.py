@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import warnings
+
+# amberelectric uses pydantic.v1 which warns on Python 3.14+ (no upstream fix available)
+warnings.filterwarnings("ignore", message="Core Pydantic V1", category=UserWarning)
+
 from dataclasses import dataclass, field
 import logging
 
@@ -9,19 +14,27 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .cdf_storage import CDFObservationStore
+from .api import AmberWebSocketClient
 from .const import (
     CONF_API_TOKEN,
     CONF_ENABLE_WEBSOCKET,
+    CONF_FORECAST_INTERVALS,
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     DEFAULT_ENABLE_WEBSOCKET,
+    DEFAULT_FORECAST_INTERVALS,
+    DEFAULT_PRICING_MODE,
     PRICING_MODE_AEMO,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
 from .coordinator import AmberDataCoordinator
-from .websocket import AmberWebSocketClient
+from .polling import CDFObservationStore
+from .repairs import (
+    LEGACY_PRICING_MODE_ALL,
+    async_create_legacy_pricing_mode_all_issue,
+    async_delete_legacy_pricing_mode_all_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,21 +64,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> boo
     runtime_data = AmberRuntimeData()
     entry.runtime_data = runtime_data
 
-    # Migrate legacy pricing mode values
+    # Migrate legacy subentry data
     legacy_pricing_modes = {"aemo": PRICING_MODE_AEMO, "app": PRICING_MODE_APP}
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_TYPE_SITE:
             continue
+
+        updated_data: dict | None = None
+
         current_mode = subentry.data.get(CONF_PRICING_MODE)
         if current_mode in legacy_pricing_modes:
             updated_data = dict(subentry.data)
             updated_data[CONF_PRICING_MODE] = legacy_pricing_modes[current_mode]
+
+        if CONF_FORECAST_INTERVALS not in subentry.data:
+            if updated_data is None:
+                updated_data = dict(subentry.data)
+            updated_data[CONF_FORECAST_INTERVALS] = DEFAULT_FORECAST_INTERVALS
+
+        if updated_data is not None:
             hass.config_entries.async_update_subentry(entry, subentry, data=updated_data)
 
     # Set up each site subentry
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_TYPE_SITE:
             continue
+
+        pricing_mode = subentry.data.get(CONF_PRICING_MODE, DEFAULT_PRICING_MODE)
+        if pricing_mode == LEGACY_PRICING_MODE_ALL:
+            async_create_legacy_pricing_mode_all_issue(
+                hass=hass,
+                entry_id=entry.entry_id,
+                subentry_id=subentry.subentry_id,
+                site_name=subentry.title,
+            )
+            continue
+        async_delete_legacy_pricing_mode_all_issue(hass, subentry.subentry_id)
 
         await _setup_site(hass, entry, subentry, runtime_data)
 

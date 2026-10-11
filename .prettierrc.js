@@ -4,7 +4,7 @@ module.exports = {
   bracketSpacing: true,
   endOfLine: "lf",
   jsonRecursiveSort: true,
-  plugins: ["prettier-plugin-sort-json"],
+  plugins: ["prettier-plugin-sort-json", "@prettier/plugin-xml"],
   printWidth: 120,
   proseWrap: "preserve",
   quoteProps: "as-needed",
