@@ -21,8 +21,10 @@ A Home Assistant custom integration for [Amber Electric](https://www.amber.com.a
 - **Simple Setup**: Just like the official integration - enter your API key, select a site, and you're done
 - **Smart Polling**: Intelligent adaptive polling at the start of each 5-minute interval and stops once a confirmed price is received
 - **WebSocket Support**: Supports real-time updates via Amber's WebSocket API (alpha feature) as a redundant data source to polling
-- **Flexible Pricing**: Choose between AEMO-based pricing (per_kwh) or Amber's predicted pricing (advanced_price_predicted)
+- **Flexible Pricing**: Use Amber's Advanced Price forecast (`advanced_price_predicted`), AEMO-based pricing (`per_kwh`), or both
 - **HAEO Compatible**: Forecast sensors are fully compatible with [HAEO](https://haeo.io/) for energy optimization
+
+Amber Express uses Advanced Price by default, matching the forecast now shown on Amber's app Live Prices screen. Amber announced this change in its [Amber updates](https://www.amber.com.au/blog/amber-updates); see also [how Amber's Advanced Price Forecast works](https://help.amber.com.au/hc/en-us/articles/28605992738445-How-Amber-s-Advanced-Price-Forecasts-work). If Advanced Price is unavailable for an interval, Amber Express falls back to `per_kwh`.
 
 ## Installation
 
@@ -84,7 +86,7 @@ The integration will (optionally) connect to Amber's WebSocket API for real-time
 | --------------- | -------------- | ----------------------------------- |
 | Polling         | Fixed 1-minute | Adaptive (typically 2 per interval) |
 | WebSocket       | No             | Optional (alpha)                    |
-| Pricing Options | per_kwh only   | per_kwh or advanced_price           |
+| Pricing Options | per_kwh only   | Advanced Price (default), AEMO, or both |
 
 ## Credits
 
