@@ -119,6 +119,10 @@ class SmartPollingManager:
 
         return True
 
+    def is_stale(self, interval_start: datetime) -> bool:
+        """Check whether data for interval_start predates the interval being polled."""
+        return self._current_interval_start is not None and interval_start < self._current_interval_start
+
     def should_poll(self, *, has_data: bool) -> bool:
         """Determine if we should poll using smart CDF-based polling.
 

@@ -55,9 +55,6 @@ _LOGGER = logging.getLogger(__name__)
 # Interval detection - check every second to detect interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
-# Minimum forecast entries needed to push held price (current + next interval)
-_MIN_FORECASTS_FOR_HELD = 2
-
 # Time attributes to take from the next forecast so the held entry is time-aligned
 _INTERVAL_TIME_ATTRS = (ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME)
 
@@ -307,44 +304,55 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._on_scheduled_poll,
         )
 
-    def _seconds_until_next_boundary(self) -> float:
-        """Seconds until the next interval boundary (same logic as SmartPollingManager)."""
+    def _next_boundary(self) -> datetime:
+        """Start of the next interval (same logic as SmartPollingManager)."""
         now = datetime.now(UTC)
         length = int(self._site.interval_length)
         current_minute = (now.minute // length) * length
         current_start = now.replace(minute=current_minute, second=0, microsecond=0)
-        next_boundary = current_start + timedelta(minutes=length)
-        return (next_boundary - now).total_seconds()
+        return current_start + timedelta(minutes=length)
+
+    def _seconds_until_next_boundary(self) -> float:
+        """Seconds until the next interval boundary."""
+        return (self._next_boundary() - datetime.now(UTC)).total_seconds()
 
     def _push_held_price_at_boundary(self) -> bool:
         """Push a sensor update at interval boundary using previous confirmed price.
 
-        Shifts the forecast list forward and holds the previous interval's price
-        for the new current interval so HAEO sees time-aligned data with zero
-        API latency. Only runs when wait_for_confirmed is True.
+        Shifts the forecast list forward to the interval about to start and holds
+        the previous interval's price for it so HAEO sees time-aligned data with
+        zero API latency. Only runs when wait_for_confirmed is True.
 
         Returns:
             True if the held price was applied and listeners were notified, False otherwise.
 
         """
-        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
-        confirmation_timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
-        if not wait_for_confirmed or confirmation_timeout <= 0:
+        if not self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED):
             return False
         if not self.current_data:
             return False
 
+        upcoming = self._next_boundary()
         applied_held = False
         for channel, channel_data in self.current_data.items():
             if channel.startswith("_"):
                 continue
             if not channel_data or not isinstance(channel_data, dict):
                 continue
-            forecasts = channel_data.get(ATTR_FORECAST)
-            if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
+            forecasts = channel_data.get(ATTR_FORECAST) or []
+            upcoming_index = next(
+                (
+                    index
+                    for index, forecast in enumerate(forecasts)
+                    if isinstance(start := forecast.get(ATTR_START_TIME), str)
+                    and datetime.fromisoformat(start) == upcoming
+                ),
+                None,
+            )
+            if upcoming_index is None:
                 continue
 
-            next_entry = forecasts[1]
+            next_entry = forecasts[upcoming_index]
             for attr in _INTERVAL_TIME_ATTRS:
                 val = next_entry.get(attr)
                 if val is not None:
@@ -357,7 +365,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 del channel_data[ATTR_DEMAND_WINDOW]
             channel_data[ATTR_ESTIMATE] = True
             current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}
-            channel_data[ATTR_FORECAST] = [current_snapshot, *forecasts[2:]]
+            channel_data[ATTR_FORECAST] = [current_snapshot, *forecasts[upcoming_index + 1 :]]
             applied_held = True
 
         if not applied_held:
@@ -486,11 +494,14 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
             return
 
+        if self._polling_manager.is_stale(datetime.fromisoformat(general_data[ATTR_START_TIME])):
+            _LOGGER.debug("Ignoring response for previous interval starting %s", general_data[ATTR_START_TIME])
+            return
+
         # Log using centralized format
         self._log_price_data(data, f"Poll #{self._polling_manager.poll_count_this_interval}")
 
         is_estimate = general_data.get(ATTR_ESTIMATE, True)
-        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
 
         # Always store latest data in data sources
         self._data_sources.update_polling(data)
@@ -505,11 +516,16 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         else:
             # Estimated price: only push to sensors if not waiting or timeout expired
             self._polling_manager.on_estimate_received()
-            if not wait_for_confirmed or self._confirmation_timeout_expired:
+            if self._estimates_publishable():
                 self._update_from_sources()
                 _LOGGER.debug("Estimate received, updating sensors")
             else:
                 _LOGGER.debug("Estimate received, waiting for confirmed before updating sensors")
+
+    def _estimates_publishable(self) -> bool:
+        """Check whether estimated prices may reach sensors under the wait-for-confirmed setting."""
+        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
+        return not wait_for_confirmed or self._confirmation_timeout_expired
 
     def _update_from_sources(self) -> None:
         """Update current_data from the merged data sources."""
@@ -543,6 +559,11 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._log_price_data(data, "WebSocket")
 
         self._data_sources.update_websocket(data)
+
+        is_estimate = data.get(CHANNEL_GENERAL, {}).get(ATTR_ESTIMATE, True)
+        if is_estimate and not self._estimates_publishable():
+            _LOGGER.debug("WebSocket estimate received, waiting for confirmed before updating sensors")
+            return
 
         # Merge and notify listeners
         self._update_from_sources()
