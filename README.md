@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/hass-energy/amber-express/raw/main/images/logo.png" alt="Amber Express" width="500">
+  <img src="https://github.com/hass-energy/amber-express/raw/main/custom_components/amber_express/brand/logo@2x.png" alt="Amber Express" width="500">
 </p>
 
 <p align="center">
