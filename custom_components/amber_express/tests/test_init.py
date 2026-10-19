@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -152,6 +153,41 @@ class TestAsyncSetupEntry:
             assert result is True
             assert entry.runtime_data.sites["test_subentry_id"].websocket_client is None
             mock_ws_class.assert_not_called()
+
+    async def test_failed_site_setup_stops_already_started_sites(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """When one site fails to set up, sites that already started are stopped before setup is retried."""
+        entry = create_mock_entry_with_subentry(hass)
+        entry.subentries = {
+            "home": create_mock_subentry(site_id="home_site", subentry_id="home"),
+            "office": create_mock_subentry(site_id="office_site", subentry_id="office"),
+        }
+        home_coordinator = MagicMock(start=AsyncMock(), stop=AsyncMock())
+        office_coordinator = MagicMock(
+            start=AsyncMock(side_effect=ConfigEntryNotReady("Site office_site not found")),
+            stop=AsyncMock(),
+        )
+        home_websocket = MagicMock(start=AsyncMock(), stop=AsyncMock())
+        office_websocket = MagicMock(start=AsyncMock(), stop=AsyncMock())
+
+        with (
+            patch(
+                "custom_components.amber_express.AmberDataCoordinator",
+                side_effect=[home_coordinator, office_coordinator],
+            ),
+            patch(
+                "custom_components.amber_express.AmberWebSocketClient",
+                side_effect=[home_websocket, office_websocket],
+            ),
+            patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()),
+            pytest.raises(ConfigEntryNotReady),
+        ):
+            await async_setup_entry(hass, entry)
+
+        home_coordinator.stop.assert_called_once()
+        home_websocket.stop.assert_called_once()
 
 
 class TestAsyncUnloadEntry:
