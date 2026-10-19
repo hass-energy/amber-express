@@ -146,6 +146,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Poll scheduling state (managed by start/stop)
         self._unsub_time_change: Callable[[], None] | None = None
         self._cancel_next_poll: Callable[[], None] | None = None
+        self._stopped: bool = False
 
         # Confirmation timeout state
         self._cancel_confirmation_timeout: Callable[[], None] | None = None
@@ -194,6 +195,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def stop(self) -> None:
         """Stop the coordinator polling lifecycle."""
+        # Polls already in flight must not schedule further polls when they finish
+        self._stopped = True
+
         # Cancel any pending scheduled poll
         if self._cancel_next_poll:
             self._cancel_next_poll()
@@ -267,6 +271,9 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def _schedule_next_poll(self) -> None:
         """Schedule the next poll using sub-second precision."""
         self._cancel_pending_poll()
+
+        if self._stopped:
+            return
 
         # Don't schedule if we have confirmed price
         if self._polling_manager.has_confirmed_price:

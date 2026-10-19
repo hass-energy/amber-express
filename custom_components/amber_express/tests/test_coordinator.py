@@ -2,9 +2,10 @@
 
 # pyright: reportArgumentType=false
 
+import asyncio
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from amberelectric.models.channel_type import ChannelType
@@ -13,6 +14,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+
+if TYPE_CHECKING:
+    from freezegun.api import FrozenDateTimeFactory
 
 from conftest import make_current_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
 from custom_components.amber_express.api import AmberApiError
@@ -78,6 +82,34 @@ def create_mock_subentry_for_coordinator(
         CONF_CONFIRMATION_TIMEOUT: confirmation_timeout,
     }
     return subentry
+
+
+def create_coordinator(
+    hass: HomeAssistant,
+    *,
+    wait_for_confirmed: bool = False,
+    confirmation_timeout: int = 60,
+) -> AmberDataCoordinator:
+    """Create a coordinator for a 5-minute site, as if start() had fetched site info."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Test", data={CONF_API_TOKEN: "test"}, options={})
+    entry.add_to_hass(hass)
+    subentry = create_mock_subentry_for_coordinator(
+        wait_for_confirmed=wait_for_confirmed,
+        confirmation_timeout=confirmation_timeout,
+    )
+    coordinator = AmberDataCoordinator(
+        hass, entry, subentry, cdf_store=create_mock_cdf_store(), observations=get_cold_start_observations()
+    )
+    coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
+    coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
+    coordinator._api_client._rate_limit_info = {
+        "remaining": 45,
+        "limit": 50,
+        "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+        "window_seconds": 300,
+        "policy": "50;w=300",
+    }
+    return coordinator
 
 
 class TestAmberDataCoordinator:
@@ -1650,3 +1682,32 @@ class TestHeldPriceAtBoundary:
 
         general = coordinator.current_data[CHANNEL_GENERAL]
         assert ATTR_DEMAND_WINDOW not in general
+
+
+class TestShutdown:
+    """A stopped coordinator must not keep polling."""
+
+    async def test_in_flight_poll_does_not_reschedule_after_stop(
+        self, hass: HomeAssistant, freezer: "FrozenDateTimeFactory"
+    ) -> None:
+        """A poll that is mid-request when stop() runs does not schedule another poll."""
+        freezer.move_to("2024-01-01T10:02:30+00:00")
+        coordinator = create_coordinator(hass)
+        coordinator._polling_manager.check_new_interval(has_data=True)
+        coordinator._polling_manager.update_budget(coordinator.get_rate_limit_info())
+        request_finished = asyncio.Event()
+
+        async def slow_refresh() -> None:
+            await request_finished.wait()
+
+        with (
+            patch.object(coordinator, "async_refresh", new=slow_refresh),
+            patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later,
+        ):
+            poll = hass.async_create_task(coordinator._do_scheduled_poll())
+            await asyncio.sleep(0)
+            await coordinator.stop()
+            request_finished.set()
+            await poll
+
+        mock_call_later.assert_not_called()
