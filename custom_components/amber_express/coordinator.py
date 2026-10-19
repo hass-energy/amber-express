@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.event import async_call_later, async_track_time_change
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -243,7 +243,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._confirmation_timeout_expired = True
         _LOGGER.debug("Confirmation timeout expired, updating sensors with estimate")
         self._update_from_sources()
-        self.async_set_updated_data(self.current_data)
+        self.async_update_listeners()
 
     async def _do_scheduled_poll(self) -> None:
         """Execute the scheduled poll."""
@@ -371,7 +371,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if not applied_held:
             return False
 
-        self.async_set_updated_data(self.current_data)
+        self.async_update_listeners()
         _LOGGER.debug("Pushed held price at interval boundary")
         return True
 
@@ -477,11 +477,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 resolution=resolution,
             )
             self._polling_manager.update_budget(self._api_client.rate_limit_info)
-        except RateLimitedError:
-            return
         except AmberApiError as err:
-            _LOGGER.warning("API error: %s", err)
-            return
+            raise UpdateFailed(str(err)) from err
 
         # Process the intervals
         data = self._interval_processor.process_intervals(intervals)

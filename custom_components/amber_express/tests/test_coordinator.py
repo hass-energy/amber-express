@@ -12,6 +12,7 @@ from amberelectric.models.channel_type import ChannelType
 from amberelectric.rest import ApiException
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.update_coordinator import UpdateFailed
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
@@ -357,42 +358,54 @@ class TestAmberDataCoordinator:
         coordinator._rate_limiter.record_rate_limit(None)  # Consume grace
         coordinator._rate_limiter.record_rate_limit(datetime.now(UTC) + timedelta(seconds=60))  # Sets rate limit
 
-        with patch.object(coordinator.hass, "async_add_executor_job") as mock_job:
+        with (
+            patch.object(coordinator.hass, "async_add_executor_job") as mock_job,
+            pytest.raises(UpdateFailed, match="Rate limited"),
+        ):
             await coordinator._fetch_amber_data()
-            mock_job.assert_not_called()
+        mock_job.assert_not_called()
 
     async def test_fetch_amber_data_429_error(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data handles 429 error with backoff."""
         coordinator._rate_limiter.record_rate_limit(None)  # Consume grace so mock 429 is second
         err = ApiException(status=429)
         err.headers = make_rate_limit_headers(reset=60)
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
+        with (
+            patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)),
+            pytest.raises(UpdateFailed, match="Rate limited"),
+        ):
             await coordinator._fetch_amber_data()
-            # 60 + 2 buffer = 62 (may be 61-62 due to timing)
-            assert 61 <= coordinator._rate_limiter.current_backoff <= 62
-            assert coordinator._rate_limiter.is_limited() is True
+        # 60 + 2 buffer = 62 (may be 61-62 due to timing)
+        assert 61 <= coordinator._rate_limiter.current_backoff <= 62
+        assert coordinator._rate_limiter.is_limited() is True
 
     async def test_fetch_amber_data_429_uses_reset_header(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data uses reset header from 429 response."""
         coordinator._rate_limiter.record_rate_limit(None)  # Consume grace so mock 429 is second
         err = ApiException(status=429)
         err.headers = make_rate_limit_headers(reset=120)
-        with patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)):
+        with (
+            patch.object(coordinator.hass, "async_add_executor_job", new=AsyncMock(side_effect=err)),
+            pytest.raises(UpdateFailed, match="Rate limited"),
+        ):
             await coordinator._fetch_amber_data()
-            # 120 + 2 buffer = 122 (may be 121-122 due to timing)
-            assert 121 <= coordinator._rate_limiter.current_backoff <= 122
+        # 120 + 2 buffer = 122 (may be 121-122 due to timing)
+        assert 121 <= coordinator._rate_limiter.current_backoff <= 122
 
     async def test_fetch_amber_data_other_api_error(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data handles other API errors."""
-        with patch.object(
-            coordinator.hass,
-            "async_add_executor_job",
-            new=AsyncMock(side_effect=ApiException(status=500, reason="Server Error")),
+        """Test _fetch_amber_data reports other API errors as a failed update."""
+        with (
+            patch.object(
+                coordinator.hass,
+                "async_add_executor_job",
+                new=AsyncMock(side_effect=ApiException(status=500, reason="Server Error")),
+            ),
+            pytest.raises(UpdateFailed, match="Server Error"),
         ):
             await coordinator._fetch_amber_data()
 
     async def test_fetch_amber_data_api_error(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data handles API errors."""
+        """Test _fetch_amber_data reports API errors as a failed update without updating the budget."""
         with (
             patch.object(
                 coordinator._api_client,
@@ -400,6 +413,7 @@ class TestAmberDataCoordinator:
                 new=AsyncMock(side_effect=AmberApiError("API error", 500)),
             ),
             patch.object(coordinator._polling_manager, "update_budget") as mock_update_budget,
+            pytest.raises(UpdateFailed, match="API error"),
         ):
             await coordinator._fetch_amber_data()
 
@@ -1096,7 +1110,7 @@ class TestConfirmationTimeout:
         # Put some data in the data sources
         coordinator_with_timeout._data_sources.update_polling({CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25}})
 
-        with patch.object(coordinator_with_timeout, "async_set_updated_data") as mock_update:
+        with patch.object(coordinator_with_timeout, "async_update_listeners") as mock_update:
             coordinator_with_timeout._on_confirmation_timeout(datetime.now(UTC))
 
             assert coordinator_with_timeout._confirmation_timeout_expired is True
@@ -1288,7 +1302,7 @@ class TestHeldPriceAtBoundary:
             "_source": DATA_SOURCE_POLLING,
         }
 
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
+        with patch.object(coordinator, "async_update_listeners") as mock_update:
             coordinator._push_held_price_at_boundary()
 
             mock_update.assert_called_once()
@@ -1316,7 +1330,7 @@ class TestHeldPriceAtBoundary:
             },
         }
 
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
+        with patch.object(coordinator, "async_update_listeners") as mock_update:
             coordinator._push_held_price_at_boundary()
 
             mock_update.assert_not_called()
@@ -1326,7 +1340,7 @@ class TestHeldPriceAtBoundary:
         coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
         coordinator.current_data = {}
 
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
+        with patch.object(coordinator, "async_update_listeners") as mock_update:
             coordinator._push_held_price_at_boundary()
 
             mock_update.assert_not_called()
@@ -1344,7 +1358,7 @@ class TestHeldPriceAtBoundary:
             },
         }
 
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
+        with patch.object(coordinator, "async_update_listeners") as mock_update:
             coordinator._push_held_price_at_boundary()
 
             mock_update.assert_not_called()
@@ -1750,6 +1764,60 @@ class TestPriceIntegrity:
 
         assert coordinator.has_confirmed_price is False
         assert coordinator.current_data == {}
+
+    async def test_api_error_marks_update_failed(self, hass: HomeAssistant) -> None:
+        """An API outage makes the coordinator report failure so entities become unavailable."""
+        coordinator = create_coordinator(hass)
+
+        with patch.object(
+            coordinator._api_client,
+            "fetch_current_prices",
+            new=AsyncMock(side_effect=AmberApiError("Network error talking to Amber", 0)),
+        ):
+            await coordinator.async_refresh()
+
+        assert coordinator.last_update_success is False
+
+    async def test_held_price_push_does_not_mask_api_outage(
+        self, hass: HomeAssistant, freezer: "FrozenDateTimeFactory"
+    ) -> None:
+        """Projecting held data across a boundary does not mark a failing coordinator healthy."""
+        freezer.move_to("2024-01-01T10:04:59.500+00:00")
+        coordinator = create_coordinator(hass, wait_for_confirmed=True)
+        coordinator.current_data = {
+            CHANNEL_GENERAL: {
+                ATTR_PER_KWH: 0.25,
+                ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
+                ATTR_FORECAST: [
+                    {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_PER_KWH: 0.25},
+                    {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_PER_KWH: 0.30},
+                ],
+            }
+        }
+        with patch.object(
+            coordinator._api_client,
+            "fetch_current_prices",
+            new=AsyncMock(side_effect=AmberApiError("Network error talking to Amber", 0)),
+        ):
+            await coordinator.async_refresh()
+
+        coordinator._push_held_price_at_boundary()
+
+        assert coordinator.last_update_success is False
+
+    async def test_confirmation_timeout_does_not_mask_api_outage(self, hass: HomeAssistant) -> None:
+        """Falling back to the estimate on timeout does not mark a failing coordinator healthy."""
+        coordinator = create_coordinator(hass, wait_for_confirmed=True)
+        with patch.object(
+            coordinator._api_client,
+            "fetch_current_prices",
+            new=AsyncMock(side_effect=AmberApiError("Network error talking to Amber", 0)),
+        ):
+            await coordinator.async_refresh()
+
+        coordinator._on_confirmation_timeout(datetime.now(UTC))
+
+        assert coordinator.last_update_success is False
 
     async def test_websocket_estimate_not_published_while_waiting_for_confirmed(self, hass: HomeAssistant) -> None:
         """With wait_for_confirmed, a WebSocket estimate for a new interval does not reach sensors."""
