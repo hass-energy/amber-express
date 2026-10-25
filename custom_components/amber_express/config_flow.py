@@ -668,7 +668,7 @@ class SiteSubentryFlowHandler(ConfigSubentryFlow):
                     vol.Required(
                         CONF_CONFIRMATION_TIMEOUT,
                         default=current_data.get(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT),
-                    ): vol.Coerce(int),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0)),
                     vol.Required(
                         CONF_FORECAST_INTERVALS,
                         default=current_data.get(CONF_FORECAST_INTERVALS, DEFAULT_FORECAST_INTERVALS),

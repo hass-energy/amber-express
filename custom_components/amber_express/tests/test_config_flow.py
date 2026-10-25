@@ -503,10 +503,21 @@ async def test_no_sites_selected_error(hass: HomeAssistant, mock_amber_api_multi
     assert result["errors"] == {"base": "no_sites_selected"}
 
 
-async def test_site_subentry_reconfigure_updates_forecast_intervals(
-    hass: HomeAssistant, mock_amber_api: MagicMock
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (CONF_FORECAST_INTERVALS, 576),
+        (CONF_CONFIRMATION_TIMEOUT, 0),
+        (CONF_CONFIRMATION_TIMEOUT, 1800),
+    ],
+)
+async def test_site_subentry_reconfigure_saves_values(
+    hass: HomeAssistant,
+    mock_amber_api: MagicMock,
+    field: str,
+    value: int,
 ) -> None:
-    """Test reconfiguring a site subentry updates forecast interval count."""
+    """Test reconfiguring a site subentry saves the submitted value."""
     with (
         patch("custom_components.amber_express.async_setup_entry", return_value=True),
         patch("custom_components.amber_express.async_unload_entry", return_value=True),
@@ -527,7 +538,7 @@ async def test_site_subentry_reconfigure_updates_forecast_intervals(
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "reconfigure"
 
-        # Submit existing values, changing only forecast interval count
+        # Submit existing values, changing only the field under test
         user_input = {
             CONF_SITE_NAME: subentry.data[CONF_SITE_NAME],
             CONF_PRICING_MODE: subentry.data[CONF_PRICING_MODE],
@@ -535,7 +546,8 @@ async def test_site_subentry_reconfigure_updates_forecast_intervals(
             CONF_WAIT_FOR_CONFIRMED: subentry.data[CONF_WAIT_FOR_CONFIRMED],
             CONF_CONFIRMATION_TIMEOUT: subentry.data[CONF_CONFIRMATION_TIMEOUT],
             CONF_DEMAND_WINDOW_PRICE: subentry.data.get(CONF_DEMAND_WINDOW_PRICE, 0.0),
-            CONF_FORECAST_INTERVALS: 576,
+            CONF_FORECAST_INTERVALS: subentry.data[CONF_FORECAST_INTERVALS],
+            field: value,
         }
 
         result = await hass.config_entries.subentries.async_configure(result["flow_id"], user_input=user_input)
@@ -543,25 +555,26 @@ async def test_site_subentry_reconfigure_updates_forecast_intervals(
         assert result["reason"] == "reconfigure_successful"
 
         updated_subentry = entry.subentries[subentry.subentry_id]
-        assert updated_subentry.data[CONF_FORECAST_INTERVALS] == 576
+        assert updated_subentry.data[field] == value
 
         await hass.config_entries.async_remove(entry.entry_id)
 
 
 @pytest.mark.parametrize(
-    ("forecast_intervals", "expected_error_field"),
+    ("invalid_field", "invalid_value"),
     [
-        (0, "forecast_intervals"),
-        (2049, "forecast_intervals"),
+        (CONF_FORECAST_INTERVALS, 0),
+        (CONF_FORECAST_INTERVALS, 2049),
+        (CONF_CONFIRMATION_TIMEOUT, -1),
     ],
 )
-async def test_site_subentry_reconfigure_validates_forecast_intervals(
+async def test_site_subentry_reconfigure_validates_ranges(
     hass: HomeAssistant,
     mock_amber_api: MagicMock,
-    forecast_intervals: int,
-    expected_error_field: str,
+    invalid_field: str,
+    invalid_value: int,
 ) -> None:
-    """Test forecast interval count validation in site subentry reconfigure."""
+    """Test numeric range validation in site subentry reconfigure."""
     with (
         patch("custom_components.amber_express.async_setup_entry", return_value=True),
         patch("custom_components.amber_express.async_unload_entry", return_value=True),
@@ -586,13 +599,14 @@ async def test_site_subentry_reconfigure_validates_forecast_intervals(
             CONF_WAIT_FOR_CONFIRMED: subentry.data[CONF_WAIT_FOR_CONFIRMED],
             CONF_CONFIRMATION_TIMEOUT: subentry.data[CONF_CONFIRMATION_TIMEOUT],
             CONF_DEMAND_WINDOW_PRICE: subentry.data.get(CONF_DEMAND_WINDOW_PRICE, 0.0),
-            CONF_FORECAST_INTERVALS: forecast_intervals,
+            CONF_FORECAST_INTERVALS: subentry.data[CONF_FORECAST_INTERVALS],
+            invalid_field: invalid_value,
         }
 
         with pytest.raises(InvalidData) as err:
             await hass.config_entries.subentries.async_configure(result["flow_id"], user_input=user_input)
 
-        assert err.value.path == [expected_error_field]
-        assert expected_error_field in err.value.schema_errors
+        assert err.value.path == [invalid_field]
+        assert invalid_field in err.value.schema_errors
 
         await hass.config_entries.async_remove(entry.entry_id)
