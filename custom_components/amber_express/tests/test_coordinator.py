@@ -51,6 +51,7 @@ from custom_components.amber_express.const import (
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
+from custom_components.amber_express.data.price_store import HoldPolicy
 from custom_components.amber_express.polling import CDFObservationStore
 from custom_components.amber_express.polling.cdf_cold_start import get_cold_start_observations
 from custom_components.amber_express.types import ChannelData, RateLimitInfo
@@ -965,6 +966,18 @@ class TestConfirmationTimeout:
             coordinator._schedule_confirmation_timeout()
 
         mock_call_later.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("confirmation_timeout", "expected_timeout"),
+        [(299, timedelta(seconds=299)), (300, None), (1800, None)],
+    )
+    def test_timeout_of_an_interval_or_longer_holds_until_confirmed(
+        self, hass: HomeAssistant, confirmation_timeout: int, expected_timeout: timedelta | None
+    ) -> None:
+        """The timer is reset every interval, so a timeout that can't expire within one means no timeout."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True, confirmation_timeout=confirmation_timeout)
+
+        assert coordinator._hold_policy() == HoldPolicy(timeout=expected_timeout)
 
     async def test_new_interval_schedules_timeout(self, hass: HomeAssistant) -> None:
         """Each new interval starts its own timeout."""

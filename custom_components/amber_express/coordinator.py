@@ -179,11 +179,15 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._prices = PriceStore(timedelta(minutes=interval_minutes), hold=self._hold_policy())
 
     def _hold_policy(self) -> HoldPolicy | None:
-        """Translate the wait-for-confirmed options into a hold policy."""
+        """Translate the wait-for-confirmed options into a hold policy.
+
+        The timeout restarts every interval, so one that can't expire within an interval means no timeout.
+        """
         if not self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED):
             return None
-        timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
-        return HoldPolicy(timeout=timedelta(seconds=timeout) if timeout > 0 else None)
+        timeout = timedelta(seconds=self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT))
+        interval = timedelta(minutes=int(self._site.interval_length))
+        return HoldPolicy(timeout=timeout if timedelta(0) < timeout < interval else None)
 
     async def stop(self) -> None:
         """Stop the coordinator polling lifecycle."""
