@@ -30,6 +30,7 @@ from custom_components.amber_express.const import (
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECAST,
+    ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
@@ -798,6 +799,7 @@ def websocket_price(start: datetime, per_kwh: float, *, estimate: bool) -> dict[
             ATTR_ESTIMATE: estimate,
             ATTR_START_TIME: (start + timedelta(seconds=1)).isoformat(),
             ATTR_END_TIME: (start + timedelta(minutes=5)).isoformat(),
+            ATTR_NEM_TIME: (start + timedelta(minutes=5)).isoformat(),
         }
     }
 

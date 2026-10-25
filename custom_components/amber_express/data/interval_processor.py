@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
-from typing import Any
 
 from amberelectric.models import CurrentInterval, ForecastInterval, Interval
 
@@ -110,15 +109,14 @@ class IntervalProcessor:
             # Build forecasts with current interval prepended
             forecasts = self._build_forecasts(forecast_intervals.get(channel, []))
             # Use extracted channel_data (without forecasts) as the first forecast entry
-            current_as_forecast: dict[str, Any] = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}
-            # Cast forecasts list to list[dict] for TypedDict compatibility
-            channel_data[ATTR_FORECAST] = [current_as_forecast, *forecasts]  # type: ignore[typeddict-item]
+            current_as_forecast = channel_data.copy()
+            channel_data[ATTR_FORECAST] = [current_as_forecast, *forecasts]
             data[channel] = channel_data
 
         # If we have forecasts but no current interval for a channel, still include forecasts
         for channel, fcast_list in forecast_intervals.items():
             if channel not in data and fcast_list:
-                data[channel] = {  # type: ignore[typeddict-item]
+                data[channel] = {
                     ATTR_FORECAST: self._build_forecasts(fcast_list),
                 }
 

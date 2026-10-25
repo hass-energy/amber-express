@@ -295,7 +295,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def _refresh_view(self) -> CoordinatorData:
         """Derive current_data from the price store at the display time."""
         view = self._prices.view(datetime.now(UTC) + _DISPLAY_LEAD)
-        self.current_data = view.channels  # type: ignore[assignment]
+        self.current_data = view.channels
         self.data_source = view.source
         self.current_interval_start = view.interval_start
         return self.current_data

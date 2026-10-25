@@ -17,9 +17,6 @@ from custom_components.amber_express.const import (
 )
 from custom_components.amber_express.types import ChannelData
 
-# Attributes that describe the interval rather than its price; a held price takes these from the current interval
-_INTERVAL_ATTRS = frozenset({ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME, ATTR_DEMAND_WINDOW})
-
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -85,12 +82,13 @@ class PriceStore:
         """Record the intervals in a polling or WebSocket response."""
         for channel, channel_data in data.items():
             records = self._records.setdefault(channel, {})
-            current: ChannelData = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}  # type: ignore[assignment]
+            current = channel_data.copy()
+            current.pop(ATTR_FORECAST, None)
             if ATTR_START_TIME in current:
                 rank = Rank.ESTIMATE if current[ATTR_ESTIMATE] else Rank.CONFIRMED
                 _keep_best(records, IntervalRecord(current, rank, source))
             for forecast in channel_data.get(ATTR_FORECAST, []):
-                _keep_best(records, IntervalRecord(forecast, Rank.FORECAST, source))  # type: ignore[arg-type]
+                _keep_best(records, IntervalRecord(forecast, Rank.FORECAST, source))
 
     def discard_before(self, interval_start: datetime) -> None:
         """Forget intervals that start before interval_start."""
@@ -153,6 +151,12 @@ def _channel_view(
 
 def _held(previous: IntervalRecord, current: IntervalRecord) -> IntervalRecord:
     """Show the previous interval's final price with the current interval's timing."""
-    held = {k: v for k, v in previous.data.items() if k not in _INTERVAL_ATTRS}
-    held.update({k: v for k, v in current.data.items() if k in _INTERVAL_ATTRS})
-    return IntervalRecord({**held, ATTR_ESTIMATE: True}, Rank.ESTIMATE, previous.source)  # type: ignore[arg-type]
+    held = previous.data.copy()
+    held.pop(ATTR_DEMAND_WINDOW, None)
+    held[ATTR_START_TIME] = current.data[ATTR_START_TIME]
+    held[ATTR_END_TIME] = current.data[ATTR_END_TIME]
+    held[ATTR_NEM_TIME] = current.data[ATTR_NEM_TIME]
+    if ATTR_DEMAND_WINDOW in current.data:
+        held[ATTR_DEMAND_WINDOW] = current.data[ATTR_DEMAND_WINDOW]
+    held[ATTR_ESTIMATE] = True
+    return IntervalRecord(held, Rank.ESTIMATE, previous.source)

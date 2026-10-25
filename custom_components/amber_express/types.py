@@ -55,7 +55,7 @@ class ChannelData(TypedDict, total=False):
     tariff_period: str
     tariff_season: str
     tariff_block: float
-    forecast: list[dict]
+    forecast: list[ChannelData]
 
 
 class RateLimitInfo(TypedDict):
