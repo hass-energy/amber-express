@@ -7,6 +7,7 @@ import warnings
 # amberelectric uses pydantic.v1 which warns on Python 3.14+ (no upstream fix available)
 warnings.filterwarnings("ignore", message="Core Pydantic V1", category=UserWarning)
 
+import asyncio
 from dataclasses import dataclass, field
 import logging
 
@@ -85,7 +86,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> boo
         if updated_data is not None:
             hass.config_entries.async_update_subentry(entry, subentry, data=updated_data)
 
-    # Set up each site subentry
+    # Set up each site subentry; a failed setup is never unloaded, so stop any sites already started
+    try:
+        await _setup_sites(hass, entry, runtime_data)
+    except Exception:
+        await asyncio.gather(*(_teardown_site(site_data) for site_data in runtime_data.sites.values()))
+        raise
+
+    # Set up platforms
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register update listener for subentry changes
+    entry.async_on_unload(entry.add_update_listener(async_update_listener))
+
+    return True
+
+
+async def _setup_sites(hass: HomeAssistant, entry: ConfigEntry, runtime_data: AmberRuntimeData) -> None:
+    """Set up every site subentry, skipping sites with an unsupported pricing mode."""
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_TYPE_SITE:
             continue
@@ -102,14 +120,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: AmberConfigEntry) -> boo
         async_delete_legacy_pricing_mode_all_issue(hass, subentry.subentry_id)
 
         await _setup_site(hass, entry, subentry, runtime_data)
-
-    # Set up platforms
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Register update listener for subentry changes
-    entry.async_on_unload(entry.add_update_listener(async_update_listener))
-
-    return True
 
 
 async def _setup_site(
