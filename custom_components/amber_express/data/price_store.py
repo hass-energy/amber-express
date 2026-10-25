@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import IntEnum
 
 from custom_components.amber_express.const import (
@@ -20,11 +20,23 @@ from custom_components.amber_express.types import ChannelData
 # Attributes that describe the interval rather than its price; a held price takes these from the current interval
 _INTERVAL_ATTRS = frozenset({ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME, ATTR_DEMAND_WINDOW})
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
 
 def interval_key(start_time: str) -> datetime:
     """Key an interval by its start time rounded to the minute (Amber starts intervals at :01)."""
     start = datetime.fromisoformat(start_time)
     return (start + timedelta(seconds=30)).replace(second=0, microsecond=0)
+
+
+def confirms_interval(data: dict[str, ChannelData], interval_start: datetime) -> bool:
+    """Whether every channel in a response has a confirmed price for the interval starting at interval_start."""
+    return bool(data) and all(
+        ATTR_START_TIME in channel_data
+        and interval_key(channel_data[ATTR_START_TIME]) == interval_start
+        and channel_data[ATTR_ESTIMATE] is False
+        for channel_data in data.values()
+    )
 
 
 class Rank(IntEnum):
@@ -33,6 +45,13 @@ class Rank(IntEnum):
     FORECAST = 0
     ESTIMATE = 1
     CONFIRMED = 2
+
+
+@dataclass(frozen=True)
+class HoldPolicy:
+    """Hold the previous price while the current one is unconfirmed, giving up after timeout (never when None)."""
+
+    timeout: timedelta | None
 
 
 @dataclass(frozen=True)
@@ -46,8 +65,9 @@ class IntervalRecord:
 
 @dataclass(frozen=True)
 class PriceView:
-    """What sensors should show for one interval."""
+    """What sensors should show during one interval."""
 
+    interval_start: datetime
     channels: dict[str, ChannelData]
     source: str | None
 
@@ -55,11 +75,13 @@ class PriceView:
 class PriceStore:
     """Records every interval Amber reports, keyed by channel and interval start."""
 
-    def __init__(self) -> None:
-        """Initialize an empty store."""
+    def __init__(self, interval_length: timedelta, *, hold: HoldPolicy | None) -> None:
+        """Initialize an empty store for a site with the given interval length."""
+        self._interval_length = interval_length
+        self._hold = hold
         self._records: dict[str, dict[datetime, IntervalRecord]] = {}
 
-    def record(self, data: dict[str, ChannelData], *, source: str) -> None:
+    def record(self, data: dict[str, ChannelData], source: str) -> None:
         """Record the intervals in a polling or WebSocket response."""
         for channel, channel_data in data.items():
             records = self._records.setdefault(channel, {})
@@ -70,31 +92,47 @@ class PriceStore:
             for forecast in channel_data.get(ATTR_FORECAST, []):
                 _keep_best(records, IntervalRecord(forecast, Rank.FORECAST, source))  # type: ignore[arg-type]
 
-    def is_confirmed(self, interval_start: datetime) -> bool:
-        """Whether the general channel has a confirmed price for the interval starting at interval_start."""
-        record = self._records.get(CHANNEL_GENERAL, {}).get(interval_start)
-        return record is not None and record.rank is Rank.CONFIRMED
-
     def discard_before(self, interval_start: datetime) -> None:
         """Forget intervals that start before interval_start."""
         for records in self._records.values():
             for start in [start for start in records if start < interval_start]:
                 del records[start]
 
-    def view(self, interval_start: datetime, *, publish_estimates: bool) -> PriceView:
-        """Derive what sensors should show for the interval starting at interval_start."""
-        shown = {
-            channel: _shown_record(records, interval_start, publish_estimates=publish_estimates)
-            for channel, records in self._records.items()
-        }
+    def interval_start(self, now: datetime) -> datetime:
+        """Start of the interval containing now."""
+        return _EPOCH + (now - _EPOCH) // self._interval_length * self._interval_length
+
+    def view(self, now: datetime) -> PriceView:
+        """Derive what sensors should show at the given time."""
+        interval_start = self.interval_start(now)
+        elapsed = now - interval_start
+        shown = {channel: self._shown(records, interval_start, elapsed) for channel, records in self._records.items()}
         general = shown.get(CHANNEL_GENERAL)
         return PriceView(
+            interval_start=interval_start,
             channels={
                 channel: _channel_view(shown[channel], records, interval_start)
                 for channel, records in self._records.items()
             },
             source=general.source if general else None,
         )
+
+    def _publishes_estimates(self, elapsed: timedelta) -> bool:
+        return self._hold is None or (self._hold.timeout is not None and elapsed >= self._hold.timeout)
+
+    def _shown(
+        self, records: dict[datetime, IntervalRecord], interval_start: datetime, elapsed: timedelta
+    ) -> IntervalRecord | None:
+        current = records.get(interval_start)
+        if current is None:
+            return None
+        if current.rank is Rank.CONFIRMED or self._publishes_estimates(elapsed):
+            return current
+        previous_start = interval_start - self._interval_length
+        previous_final = self._shown(records, previous_start, self._interval_length)
+        if previous_final is None:
+            return None
+        return _held(previous_final, current)
 
 
 def _keep_best(records: dict[datetime, IntervalRecord], record: IntervalRecord) -> None:
@@ -113,22 +151,8 @@ def _channel_view(
     return {**shown.data, ATTR_FORECAST: [shown.data, *upcoming]}
 
 
-def _shown_record(
-    records: dict[datetime, IntervalRecord], interval_start: datetime, *, publish_estimates: bool
-) -> IntervalRecord | None:
-    now = records.get(interval_start)
-    if now is None:
-        return None
-    if now.rank is Rank.CONFIRMED or (publish_estimates and now.rank is Rank.ESTIMATE):
-        return now
-    earlier_prices = [start for start, r in records.items() if start < interval_start and r.rank > Rank.FORECAST]
-    if not earlier_prices:
-        return None
-    return _held(records[max(earlier_prices)], now)
-
-
-def _held(previous: IntervalRecord, now: IntervalRecord) -> IntervalRecord:
-    """Hold the previous price for the current interval until the current price is publishable."""
+def _held(previous: IntervalRecord, current: IntervalRecord) -> IntervalRecord:
+    """Show the previous interval's final price with the current interval's timing."""
     held = {k: v for k, v in previous.data.items() if k not in _INTERVAL_ATTRS}
-    held.update({k: v for k, v in now.data.items() if k in _INTERVAL_ATTRS})
+    held.update({k: v for k, v in current.data.items() if k in _INTERVAL_ATTRS})
     return IntervalRecord({**held, ATTR_ESTIMATE: True}, Rank.ESTIMATE, previous.source)  # type: ignore[arg-type]
