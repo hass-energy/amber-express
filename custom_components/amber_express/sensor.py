@@ -20,6 +20,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
+    ATTR_DEMAND_WINDOW_PRICE,
     ATTR_DESCRIPTOR,
     ATTR_DETAILED_FORECAST,
     ATTR_END_TIME,
@@ -437,17 +438,31 @@ class AmberPriceSensor(AmberBaseSensor):
             "data_source": self.coordinator.data_source,
         }
 
+        # Recording the surcharge alongside the prices lets history tell the
+        # genuine price apart from the demand window penalty.
+        surcharge = (
+            self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
+            if self._channel == CHANNEL_GENERAL
+            else 0.0
+        )
+        if surcharge:
+            attrs[ATTR_DEMAND_WINDOW] = bool(channel_data.get(ATTR_DEMAND_WINDOW))
+            attrs[ATTR_DEMAND_WINDOW_PRICE] = surcharge
+
         forecasts = self.coordinator.get_forecasts(self._channel)
         forecast_list: list[dict[str, Any]] = []
-        demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
         for f in forecasts:
-            time_value = to_local_iso_minute(f.get(ATTR_START_TIME))
+            point: dict[str, Any] = {"time": to_local_iso_minute(f.get(ATTR_START_TIME))}
             value = self._get_price(f, self._get_price_key())
+            in_window = bool(surcharge and f.get(ATTR_DEMAND_WINDOW))
             if value is not None:
-                if self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
-                    value += demand_window_price
+                if in_window:
+                    value += surcharge
                 value = round(value, PRICE_DECIMAL_PLACES)
-            forecast_list.append({"time": time_value, "value": value})
+            point["value"] = value
+            if in_window:
+                point[ATTR_DEMAND_WINDOW] = True
+            forecast_list.append(point)
         attrs["interpolation_mode"] = "previous"
         attrs[ATTR_FORECAST] = forecast_list
 
