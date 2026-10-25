@@ -149,6 +149,15 @@ Each entity exposes additional state attributes alongside its main value. This i
 | `forecast`           | list     | Simple `{ time, value }` points for automations and optimizers     |
 | `detailedForecast`   | list     | Full raw forecast intervals (ignored by HA recorder)               |
 
+With a demand window price set, the `general` price sensor also records which prices include the surcharge, so history can tell the genuine price apart from the penalty:
+
+| Attribute             | Type    | Description                                                       |
+| --------------------- | ------- | ----------------------------------------------------------------- |
+| `demand_window`       | boolean | Whether the current price includes the demand window surcharge    |
+| `demand_window_price` | float   | The surcharge, in $/kWh, added to prices inside the demand window |
+
+Each `forecast` point that includes the surcharge also carries `demand_window: true`.
+
 ### `site` sensor (diagnostic)
 
 | Attribute         | Type    | Description                                          |

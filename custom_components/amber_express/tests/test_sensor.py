@@ -495,6 +495,90 @@ class TestAmberPriceSensor:
 
         assert sensor.native_value == 0.3
 
+    def test_price_sensor_records_the_demand_window_surcharge_it_applied(
+        self,
+        mock_config_entry: MockConfigEntry,
+    ) -> None:
+        """The state and each forecast point say whether they include the surcharge, and how much it is."""
+        subentry = create_mock_subentry()
+        subentry.data[CONF_DEMAND_WINDOW_PRICE] = 50.0
+        mock_config_entry.subentries = {subentry.subentry_id: subentry}
+
+        coordinator = MagicMock()
+        coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(return_value={ATTR_PER_KWH: 0.17, ATTR_DEMAND_WINDOW: True})
+        coordinator.get_forecasts = MagicMock(
+            return_value=[
+                {ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_PER_KWH: 0.18, ATTR_DEMAND_WINDOW: True},
+                {ATTR_START_TIME: "2024-01-01T10:10:00+00:00", ATTR_PER_KWH: 0.19, ATTR_DEMAND_WINDOW: False},
+            ]
+        )
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        attrs = sensor.extra_state_attributes
+        assert attrs["demand_window"] is True
+        assert attrs["demand_window_price"] == 50.0
+        assert attrs["forecast"][0]["value"] == 50.18
+        assert attrs["forecast"][0]["demand_window"] is True
+        assert "demand_window" not in attrs["forecast"][1]
+
+    def test_price_sensor_outside_the_demand_window_says_so(
+        self,
+        mock_config_entry: MockConfigEntry,
+    ) -> None:
+        """Outside the window the state carries no surcharge, which the attributes record."""
+        subentry = create_mock_subentry()
+        subentry.data[CONF_DEMAND_WINDOW_PRICE] = 50.0
+        mock_config_entry.subentries = {subentry.subentry_id: subentry}
+
+        coordinator = MagicMock()
+        coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(return_value={ATTR_PER_KWH: 0.17})
+        coordinator.get_forecasts = MagicMock(return_value=[])
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        attrs = sensor.extra_state_attributes
+        assert sensor.native_value == 0.17
+        assert attrs["demand_window"] is False
+        assert attrs["demand_window_price"] == 50.0
+
+    def test_price_sensor_without_a_surcharge_adds_no_demand_window_attributes(
+        self,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Sites without a demand window price keep their attributes unchanged."""
+        coordinator = MagicMock()
+        coordinator.data_source = "polling"
+        coordinator.get_channel_data = MagicMock(return_value={ATTR_PER_KWH: 0.17, ATTR_DEMAND_WINDOW: True})
+        coordinator.get_forecasts = MagicMock(
+            return_value=[{ATTR_START_TIME: "2024-01-01T10:05:00+00:00", ATTR_PER_KWH: 0.18, ATTR_DEMAND_WINDOW: True}]
+        )
+
+        sensor = AmberPriceSensor(
+            coordinator=coordinator,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+        )
+
+        attrs = sensor.extra_state_attributes
+        assert "demand_window" not in attrs
+        assert "demand_window_price" not in attrs
+        assert "demand_window" not in attrs["forecast"][0]
+
 
 class TestAmberPriceSensorDetailedForecast:
     """Tests for the unrecorded detailedForecast attribute on AmberPriceSensor."""
