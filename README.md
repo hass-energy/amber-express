@@ -73,7 +73,7 @@ Amber Express supports the following per-site options:
   - `advanced_price_predicted`: Amber's Advanced Price forecast (used by the Amber app's Live Prices screen and SmartShift, and recommended for optimizers)
 - **Enable WebSocket**: Enables Amber WebSocket updates as a secondary real-time data source
 - **Wait for confirmed prices**: Enabled by default; holds previous interval price until confirmation
-- **Confirmation timeout (seconds)**: Maximum wait before falling back to the best estimate for the current interval: Amber's estimate, otherwise the latest forecast. Set to 0 to wait indefinitely
+- **Confirmation timeout (seconds)**: Maximum wait before falling back to the best estimate for the current interval: Amber's estimate, otherwise the latest forecast
 - **Forecast intervals**: Number of future intervals returned by forecast sensors
 - **Demand Window Price ($/kWh)**: Adds a configurable surcharge to general channel prices during demand windows
 
