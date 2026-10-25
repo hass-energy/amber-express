@@ -65,8 +65,8 @@ class AmberWebSocketClient:
     - Invoking callback with processed data for coordinator integration
 
     The WebSocket provides real-time current interval prices but NOT forecasts.
-    Forecasts still come from the polling API. The coordinator merges both sources
-    via DataSourceMerger, using whichever has fresher current interval data.
+    Forecasts still come from the polling API. The coordinator records both sources
+    in the same PriceStore, where the more final record for each interval wins.
 
     Note: The Amber WebSocket API is in alpha and may not be available for all
     accounts. On 403 auth failure, this client stops reconnecting and the

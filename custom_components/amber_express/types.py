@@ -78,6 +78,3 @@ class CoordinatorData(TypedDict, total=False):
     general: ChannelData
     feed_in: ChannelData
     controlled_load: ChannelData
-    _source: str
-    _polling_timestamp: str | None
-    _websocket_timestamp: str | None

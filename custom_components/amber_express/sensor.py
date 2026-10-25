@@ -510,7 +510,7 @@ class AmberForecastHorizonSensor(AmberBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return the forecast horizon in hours."""
-        baseline = self.coordinator.get_forecasts_timestamp()
+        baseline = self.coordinator.current_interval_start
         if baseline is None:
             return None
 
