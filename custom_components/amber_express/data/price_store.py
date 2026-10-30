@@ -13,11 +13,16 @@ from custom_components.amber_express.const import (
     ATTR_FORECAST,
     ATTR_NEM_TIME,
     ATTR_START_TIME,
+    ATTR_TARIFF_BLOCK,
+    ATTR_TARIFF_PERIOD,
+    ATTR_TARIFF_SEASON,
     CHANNEL_GENERAL,
 )
 from custom_components.amber_express.types import ChannelData
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+_TARIFF_ATTRS = (ATTR_DEMAND_WINDOW, ATTR_TARIFF_PERIOD, ATTR_TARIFF_SEASON, ATTR_TARIFF_BLOCK)
 
 
 def interval_key(start_time: str) -> datetime:
@@ -149,13 +154,21 @@ def _channel_view(
 
 
 def _held(previous: IntervalRecord, current: IntervalRecord) -> IntervalRecord:
-    """Show the previous interval's final price with the current interval's timing."""
+    """Show the previous interval's final price with the current interval's timing and tariff."""
+    interval = current.data
     held = previous.data.copy()
-    held.pop(ATTR_DEMAND_WINDOW, None)
-    held[ATTR_START_TIME] = current.data[ATTR_START_TIME]
-    held[ATTR_END_TIME] = current.data[ATTR_END_TIME]
-    held[ATTR_NEM_TIME] = current.data[ATTR_NEM_TIME]
-    if ATTR_DEMAND_WINDOW in current.data:
-        held[ATTR_DEMAND_WINDOW] = current.data[ATTR_DEMAND_WINDOW]
+    for key in _TARIFF_ATTRS:
+        held.pop(key, None)
+    held[ATTR_START_TIME] = interval[ATTR_START_TIME]
+    held[ATTR_END_TIME] = interval[ATTR_END_TIME]
+    held[ATTR_NEM_TIME] = interval[ATTR_NEM_TIME]
+    if ATTR_DEMAND_WINDOW in interval:
+        held[ATTR_DEMAND_WINDOW] = interval[ATTR_DEMAND_WINDOW]
+    if ATTR_TARIFF_PERIOD in interval:
+        held[ATTR_TARIFF_PERIOD] = interval[ATTR_TARIFF_PERIOD]
+    if ATTR_TARIFF_SEASON in interval:
+        held[ATTR_TARIFF_SEASON] = interval[ATTR_TARIFF_SEASON]
+    if ATTR_TARIFF_BLOCK in interval:
+        held[ATTR_TARIFF_BLOCK] = interval[ATTR_TARIFF_BLOCK]
     held[ATTR_ESTIMATE] = True
     return IntervalRecord(held, Rank.ESTIMATE, previous.source)

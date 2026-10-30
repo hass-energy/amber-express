@@ -10,6 +10,9 @@ from custom_components.amber_express.const import (
     ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_START_TIME,
+    ATTR_TARIFF_BLOCK,
+    ATTR_TARIFF_PERIOD,
+    ATTR_TARIFF_SEASON,
     CHANNEL_FEED_IN,
     CHANNEL_GENERAL,
 )
@@ -164,6 +167,23 @@ class TestHeldPrice:
         )
 
         assert ATTR_DEMAND_WINDOW not in general_at(store, WHILE_HOLDING)
+
+    def test_held_price_takes_tariff_from_current_interval(self) -> None:
+        """At a tariff boundary the held price shows the new period alongside the new times."""
+        offpeak: ChannelData = {ATTR_TARIFF_PERIOD: "offPeak", ATTR_TARIFF_SEASON: "winter", ATTR_TARIFF_BLOCK: 1}
+        peak: ChannelData = {ATTR_TARIFF_PERIOD: "peak", ATTR_TARIFF_SEASON: "summer", ATTR_TARIFF_BLOCK: 2}
+        store = PriceStore(FIVE_MINUTES, hold=HOLD_FOR_45S)
+        store.record(
+            polling_response(
+                {**price(T1000, 0.25, estimate=False), **offpeak}, {**price(T1005, 0.40, estimate=True), **peak}
+            ),
+            source="polling",
+        )
+
+        general = general_at(store, WHILE_HOLDING)
+
+        assert general[ATTR_PER_KWH] == 0.25
+        assert {key: general[key] for key in peak} == peak
 
 
 class TestMissingData:
