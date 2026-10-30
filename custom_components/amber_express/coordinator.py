@@ -125,9 +125,10 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Store observations for polling manager creation in start()
         self._observations: list[IntervalObservation] = observations
 
-        # Site info, polling manager and price store are set up in start() by _configure_site
+        # Site info, polling manager, hold policy and price store are set up in start() by _configure_site
         self._site: Site
         self._polling_manager: SmartPollingManager
+        self._hold: HoldPolicy | None
         self._prices: PriceStore
 
         # The published view of the price store
@@ -177,7 +178,8 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._site = site
         interval_minutes = int(site.interval_length)
         self._polling_manager = SmartPollingManager(interval_minutes, self._observations)
-        self._prices = PriceStore(timedelta(minutes=interval_minutes), hold=self._hold_policy())
+        self._hold = self._hold_policy()
+        self._prices = PriceStore(timedelta(minutes=interval_minutes), hold=self._hold)
 
     def _hold_policy(self) -> HoldPolicy | None:
         """Translate the wait-for-confirmed options into a hold policy.
@@ -223,12 +225,13 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Schedule the confirmation timeout callback for this interval."""
         self._cancel_pending_confirmation_timeout()
 
-        hold = self._hold_policy()
-        if hold is None or hold.timeout is None:
+        if self._hold is None or self._hold.timeout is None:
             return
 
-        _LOGGER.debug("Scheduling confirmation timeout in %s", hold.timeout)
-        self._cancel_confirmation_timeout = async_call_later(self.hass, hold.timeout, self._on_confirmation_timeout)
+        _LOGGER.debug("Scheduling confirmation timeout in %s", self._hold.timeout)
+        self._cancel_confirmation_timeout = async_call_later(
+            self.hass, self._hold.timeout, self._on_confirmation_timeout
+        )
 
     @callback
     def _on_confirmation_timeout(self, _now: datetime) -> None:
