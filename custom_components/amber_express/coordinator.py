@@ -19,14 +19,11 @@ if TYPE_CHECKING:
 from .api import AmberApiClient, AmberApiError, ExponentialBackoffRateLimiter, RateLimitedError
 from .const import (
     ATTR_DEMAND_WINDOW,
-    ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECAST,
-    ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
-    ATTR_START_TIME,
     ATTR_TARIFF_BLOCK,
     ATTR_TARIFF_PERIOD,
     ATTR_TARIFF_SEASON,
@@ -40,13 +37,14 @@ from .const import (
     CONF_SITE_ID,
     CONF_WAIT_FOR_CONFIRMED,
     DATA_SOURCE_POLLING,
+    DATA_SOURCE_WEBSOCKET,
     DEFAULT_CONFIRMATION_TIMEOUT,
     DEFAULT_FORECAST_INTERVALS,
     DEFAULT_PRICING_MODE,
     DEFAULT_WAIT_FOR_CONFIRMED,
     DOMAIN,
 )
-from .data import DataSourceMerger, IntervalProcessor
+from .data import HoldPolicy, IntervalProcessor, PriceStore, confirms_interval
 from .polling import CDFObservationStore, CDFPollingStats, IntervalObservation, SmartPollingManager
 from .types import ChannelData, CoordinatorData, RateLimitInfo
 
@@ -55,14 +53,11 @@ _LOGGER = logging.getLogger(__name__)
 # Interval detection - check every second to detect interval boundaries
 _INTERVAL_CHECK_SECONDS = list(range(0, 60, 1))
 
-# Minimum forecast entries needed to push held price (current + next interval)
-_MIN_FORECASTS_FOR_HELD = 2
+# Sensors show the interval this far ahead of the clock so HAEO sees aligned data at the boundary
+_DISPLAY_LEAD = timedelta(seconds=1)
 
-# Time attributes to take from the next forecast so the held entry is time-aligned
-_INTERVAL_TIME_ATTRS = (ATTR_START_TIME, ATTR_END_TIME, ATTR_NEM_TIME)
-
-# Push held price this many seconds before the boundary so HAEO sees aligned data
-_PRE_BOUNDARY_LEAD_SECONDS = 1
+# Holding until confirmed chains back through unconfirmed intervals; this bounds how far
+_HISTORY = timedelta(days=1)
 
 
 class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -72,7 +67,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     - Polling lifecycle management (start/stop, interval detection, scheduling)
     - Deciding WHEN to fetch (first poll vs subsequent, confirmed vs estimate logic)
     - Processing fetched data through IntervalProcessor
-    - Merging data from polling and websocket sources via DataSourceMerger
+    - Recording polling and websocket data in the PriceStore and publishing its view
     - Providing data accessor methods for sensors (get_price, get_forecasts, etc.)
     - Handling WebSocket update callbacks
 
@@ -130,29 +125,22 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Store observations for polling manager creation in start()
         self._observations: list[IntervalObservation] = observations
 
-        # Polling manager is created in start() after site info is fetched
-        self._polling_manager: SmartPollingManager
-
-        # Data source merger for combining polling and websocket data
-        self._data_sources = DataSourceMerger()
-
-        # Site info is fetched in start() - required for operation
+        # Site info, polling manager, hold policy and price store are set up in start() by _configure_site
         self._site: Site
+        self._polling_manager: SmartPollingManager
+        self._hold: HoldPolicy | None
+        self._prices: PriceStore
 
-        # Merged data (exposed via data_sources)
+        # The published view of the price store
         self.current_data: CoordinatorData = {}
-        self.data_source: str = DATA_SOURCE_POLLING
+        self.data_source: str | None = None
+        self.current_interval_start: datetime | None = None
 
         # Poll scheduling state (managed by start/stop)
         self._unsub_time_change: Callable[[], None] | None = None
         self._cancel_next_poll: Callable[[], None] | None = None
-
-        # Confirmation timeout state
         self._cancel_confirmation_timeout: Callable[[], None] | None = None
-        self._confirmation_timeout_expired: bool = False
-
-        # Pre-boundary held price: True once we've pushed for the upcoming boundary
-        self._held_price_pushed: bool = False
+        self._websocket_polled_interval: datetime | None = None
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
@@ -168,14 +156,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         Fetches site info, creates the polling manager, then starts polling.
         Raises ConfigEntryNotReady if site info cannot be fetched.
         """
-        # Fetch site info first to get interval_length and rate limit info
-        self._site = await self._fetch_site_info()
-
-        # Create polling manager with site's interval length
-        self._polling_manager = SmartPollingManager(
-            int(self._site.interval_length),
-            self._observations,
-        )
+        self._configure_site(await self._fetch_site_info())
 
         # Initial fetch
         await self.async_config_entry_first_refresh()
@@ -191,6 +172,25 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._schedule_next_poll()
 
         _LOGGER.debug("Coordinator started for site %s", self.subentry.title)
+
+    def _configure_site(self, site: Site) -> None:
+        """Set up polling and price storage for the site's interval length."""
+        self._site = site
+        interval_minutes = int(site.interval_length)
+        self._polling_manager = SmartPollingManager(interval_minutes, self._observations)
+        self._hold = self._hold_policy()
+        self._prices = PriceStore(timedelta(minutes=interval_minutes), hold=self._hold)
+
+    def _hold_policy(self) -> HoldPolicy | None:
+        """Translate the wait-for-confirmed options into a hold policy.
+
+        The timeout restarts every interval, so one that can't expire within an interval means no timeout.
+        """
+        if not self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED):
+            return None
+        timeout = timedelta(seconds=self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT))
+        interval = timedelta(minutes=int(self._site.interval_length))
+        return HoldPolicy(timeout=timeout if timedelta(0) < timeout < interval else None)
 
     async def stop(self) -> None:
         """Stop the coordinator polling lifecycle."""
@@ -224,25 +224,21 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def _schedule_confirmation_timeout(self) -> None:
         """Schedule the confirmation timeout callback for this interval."""
         self._cancel_pending_confirmation_timeout()
-        self._confirmation_timeout_expired = False
 
-        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
-        timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
-
-        if not wait_for_confirmed or timeout <= 0:
+        if self._hold is None or self._hold.timeout is None:
             return
 
-        _LOGGER.debug("Scheduling confirmation timeout in %ds", timeout)
-        self._cancel_confirmation_timeout = async_call_later(self.hass, timeout, self._on_confirmation_timeout)
+        _LOGGER.debug("Scheduling confirmation timeout in %s", self._hold.timeout)
+        self._cancel_confirmation_timeout = async_call_later(
+            self.hass, self._hold.timeout, self._on_confirmation_timeout
+        )
 
     @callback
     def _on_confirmation_timeout(self, _now: datetime) -> None:
-        """Handle confirmation timeout expiry."""
+        """Republish once the hold has timed out, so sensors switch to the best estimate."""
         self._cancel_confirmation_timeout = None
-        self._confirmation_timeout_expired = True
-        _LOGGER.debug("Confirmation timeout expired, updating sensors with estimate")
-        self._update_from_sources()
-        self.async_set_updated_data(self.current_data)
+        _LOGGER.debug("Confirmation timeout expired, publishing best estimate")
+        self._publish()
 
     async def _do_scheduled_poll(self) -> None:
         """Execute the scheduled poll."""
@@ -300,84 +296,31 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._on_scheduled_poll,
         )
 
-    def _seconds_until_next_boundary(self) -> float:
-        """Seconds until the next interval boundary (same logic as SmartPollingManager)."""
-        now = datetime.now(UTC)
-        length = int(self._site.interval_length)
-        current_minute = (now.minute // length) * length
-        current_start = now.replace(minute=current_minute, second=0, microsecond=0)
-        next_boundary = current_start + timedelta(minutes=length)
-        return (next_boundary - now).total_seconds()
+    def _refresh_view(self) -> CoordinatorData:
+        """Derive current_data from the price store at the display time."""
+        view = self._prices.view(datetime.now(UTC) + _DISPLAY_LEAD)
+        self.current_data = view.channels
+        self.data_source = view.source
+        self.current_interval_start = view.interval_start
+        return self.current_data
 
-    def _push_held_price_at_boundary(self) -> bool:
-        """Push a sensor update at interval boundary using previous confirmed price.
-
-        Shifts the forecast list forward and holds the previous interval's price
-        for the new current interval so HAEO sees time-aligned data with zero
-        API latency. Only runs when wait_for_confirmed is True.
-
-        Returns:
-            True if the held price was applied and listeners were notified, False otherwise.
-
-        """
-        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
-        confirmation_timeout = self._get_subentry_option(CONF_CONFIRMATION_TIMEOUT, DEFAULT_CONFIRMATION_TIMEOUT)
-        if not wait_for_confirmed or confirmation_timeout <= 0:
-            return False
-        if not self.current_data:
-            return False
-
-        applied_held = False
-        for channel, channel_data in self.current_data.items():
-            if channel.startswith("_"):
-                continue
-            if not channel_data or not isinstance(channel_data, dict):
-                continue
-            forecasts = channel_data.get(ATTR_FORECAST)
-            if not forecasts or len(forecasts) < _MIN_FORECASTS_FOR_HELD:
-                continue
-
-            next_entry = forecasts[1]
-            for attr in _INTERVAL_TIME_ATTRS:
-                val = next_entry.get(attr)
-                if val is not None:
-                    channel_data[attr] = val
-            # Forward-project demand window from the next interval so the
-            # sensor applies (or stops applying) the demand window surcharge
-            if ATTR_DEMAND_WINDOW in next_entry:
-                channel_data[ATTR_DEMAND_WINDOW] = next_entry[ATTR_DEMAND_WINDOW]
-            elif ATTR_DEMAND_WINDOW in channel_data:
-                del channel_data[ATTR_DEMAND_WINDOW]
-            channel_data[ATTR_ESTIMATE] = True
-            current_snapshot = {k: v for k, v in channel_data.items() if k != ATTR_FORECAST}
-            channel_data[ATTR_FORECAST] = [current_snapshot, *forecasts[2:]]
-            applied_held = True
-
-        if not applied_held:
-            return False
-
-        self.async_set_updated_data(self.current_data)
-        _LOGGER.debug("Pushed held price at interval boundary")
-        return True
+    @callback
+    def _publish(self) -> None:
+        """Refresh the view and notify listeners."""
+        self.async_set_updated_data(self._refresh_view())
 
     async def _on_interval_check(self, _now: object) -> None:
-        """Check for new interval and start sub-second polling chain."""
-        # Pre-boundary: push held price before the boundary crosses so HAEO sees aligned data
-        if (
-            not self._held_price_pushed
-            and self._seconds_until_next_boundary() <= _PRE_BOUNDARY_LEAD_SECONDS
-            and self._push_held_price_at_boundary()
-        ):
-            self._held_price_pushed = True
+        """Publish when the displayed interval changes and start polling at each new interval."""
+        if self._prices.interval_start(datetime.now(UTC) + _DISPLAY_LEAD) != self.current_interval_start:
+            self._publish()
 
-        # Detect actual boundary
-        if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
+        if not self._polling_manager.check_new_interval():
             return
-
-        self._held_price_pushed = False
 
         # New interval - cancel any pending poll from previous interval
         self._cancel_pending_poll()
+
+        self._prices.discard_before(datetime.now(UTC) - _HISTORY)
 
         # New interval - schedule confirmation timeout
         self._schedule_confirmation_timeout()
@@ -405,7 +348,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from Amber API using smart polling."""
         await self._fetch_amber_data()
-        return self.current_data
+        return self._refresh_view()
 
     async def _fetch_site_info(self) -> Site:
         """Fetch site information from the API.
@@ -468,47 +411,24 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             _LOGGER.warning("API error: %s", err)
             return
 
-        # Process the intervals
         data = self._interval_processor.process_intervals(intervals)
-        general_data = data.get(CHANNEL_GENERAL, {})
-
-        if not general_data:
-            _LOGGER.debug(
-                "Poll %d: No data returned",
-                self._polling_manager.poll_count_this_interval,
-            )
+        if not data:
+            _LOGGER.debug("Poll %d: No data returned", self._polling_manager.poll_count_this_interval)
             return
 
-        # Log using centralized format
         self._log_price_data(data, f"Poll #{self._polling_manager.poll_count_this_interval}")
+        self._prices.record(data, DATA_SOURCE_POLLING)
 
-        is_estimate = general_data.get(ATTR_ESTIMATE, True)
-        wait_for_confirmed = self._get_subentry_option(CONF_WAIT_FOR_CONFIRMED, DEFAULT_WAIT_FOR_CONFIRMED)
-
-        # Always store latest data in data sources
-        self._data_sources.update_polling(data)
-
-        if is_estimate is False:
-            # Confirmed price: cancel timeout, push to sensors and stop polling
-            self._cancel_pending_confirmation_timeout()
+        if confirms_interval(data, self._polling_interval_start()):
             self._polling_manager.on_confirmed_received()
             await self._cdf_store.async_save(self._polling_manager.observations)
-            self._update_from_sources()
             _LOGGER.info("Confirmed price received, stopping polling for this interval")
         else:
-            # Estimated price: only push to sensors if not waiting or timeout expired
             self._polling_manager.on_estimate_received()
-            if not wait_for_confirmed or self._confirmation_timeout_expired:
-                self._update_from_sources()
-                _LOGGER.debug("Estimate received, updating sensors")
-            else:
-                _LOGGER.debug("Estimate received, waiting for confirmed before updating sensors")
 
-    def _update_from_sources(self) -> None:
-        """Update current_data from the merged data sources."""
-        result = self._data_sources.get_merged_data()
-        self.current_data = result.data
-        self.data_source = result.source
+    def _polling_interval_start(self) -> datetime:
+        """Start of the interval polling is working on, by the real clock."""
+        return self._prices.interval_start(datetime.now(UTC))
 
     def _log_price_data(self, data: dict[str, ChannelData], source: str) -> None:
         """Log price data in a consistent format regardless of source."""
@@ -532,14 +452,21 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     @callback
     def update_from_websocket(self, data: dict[str, ChannelData]) -> None:
-        """Update data from websocket."""
+        """Record WebSocket data and publish; the first confirmation each interval triggers a poll for forecasts."""
         self._log_price_data(data, "WebSocket")
+        self._prices.record(data, DATA_SOURCE_WEBSOCKET)
 
-        self._data_sources.update_websocket(data)
+        interval_start = self._polling_interval_start()
+        if (
+            not self.has_confirmed_price
+            and self._websocket_polled_interval != interval_start
+            and confirms_interval(data, interval_start)
+        ):
+            self._websocket_polled_interval = interval_start
+            self._cancel_pending_poll()
+            self._on_scheduled_poll(datetime.now(UTC))
 
-        # Merge and notify listeners
-        self._update_from_sources()
-        self.async_set_updated_data(self.current_data)
+        self._publish()
 
     def get_channel_data(self, channel: str) -> ChannelData | None:
         """Get data for a specific channel."""
@@ -636,10 +563,6 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def get_api_status(self) -> int:
         """Get last API status code (200 = OK)."""
         return self._api_client.last_status
-
-    def get_forecasts_timestamp(self) -> datetime | None:
-        """Get the start_time of the interval whose polling response included forecasts."""
-        return self._data_sources.forecasts_timestamp
 
     def get_rate_limit_info(self) -> RateLimitInfo:
         """Get rate limit information from last API response."""

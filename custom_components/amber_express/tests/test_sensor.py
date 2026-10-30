@@ -1508,7 +1508,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon returns hours from forecasts_timestamp to latest end_time."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
         coordinator.get_forecasts = MagicMock(
             return_value=[
                 {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"},
@@ -1531,7 +1531,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon returns fractional hours."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
         coordinator.get_forecasts = MagicMock(
             return_value=[
                 {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:15:00+00:00"},
@@ -1553,7 +1553,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon skips forecasts with invalid end timestamps."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
         coordinator.get_forecasts = MagicMock(
             return_value=[
                 {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: None},
@@ -1577,7 +1577,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon returns None when there are no forecasts."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
         coordinator.get_forecasts = MagicMock(return_value=[])
 
         sensor = AmberForecastHorizonSensor(
@@ -1588,14 +1588,14 @@ class TestAmberForecastHorizonSensor:
 
         assert sensor.native_value is None
 
-    def test_forecast_horizon_returns_none_when_no_forecasts_timestamp(
+    def test_forecast_horizon_returns_none_before_first_view(
         self,
         mock_config_entry: MockConfigEntry,
         mock_subentry: MagicMock,
     ) -> None:
         """Test forecast horizon returns None when forecasts_timestamp is not set."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = None
+        coordinator.current_interval_start = None
         coordinator.get_forecasts = MagicMock(
             return_value=[
                 {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T10:30:00+00:00"},
@@ -1617,7 +1617,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon takes max across all channels."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
 
         def get_forecasts_for_channel(channel: str) -> list[dict[str, str]]:
             if channel == CHANNEL_GENERAL:
@@ -1643,7 +1643,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon exposes the raw end datetime as an attribute."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
         coordinator.get_forecasts = MagicMock(
             return_value=[
                 {ATTR_START_TIME: "2024-01-01T10:00:00+00:00", ATTR_END_TIME: "2024-01-01T22:00:00+00:00"},
@@ -1666,7 +1666,7 @@ class TestAmberForecastHorizonSensor:
     ) -> None:
         """Test forecast horizon returns empty attributes when no forecasts."""
         coordinator = MagicMock()
-        coordinator.get_forecasts_timestamp.return_value = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+        coordinator.current_interval_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
         coordinator.get_forecasts = MagicMock(return_value=[])
 
         sensor = AmberForecastHorizonSensor(

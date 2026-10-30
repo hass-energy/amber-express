@@ -35,10 +35,10 @@ class TestShouldPoll:
     """Tests for should_poll method."""
 
     def test_first_run_always_polls(self) -> None:
-        """Test that first run (no data) always polls."""
+        """Test that the first check always polls."""
         manager = SmartPollingManager(5, get_cold_start_observations())
 
-        result = manager.should_poll(has_data=False)
+        result = manager.should_poll()
 
         assert result is True
 
@@ -50,7 +50,7 @@ class TestShouldPoll:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # First poll at 10:00
-            result1 = manager.should_poll(has_data=True)
+            result1 = manager.should_poll()
             assert result1 is True
 
             # Same interval, confirmed price
@@ -58,7 +58,7 @@ class TestShouldPoll:
 
             # Move to next interval at 10:05
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-            result2 = manager.should_poll(has_data=True)
+            result2 = manager.should_poll()
             assert result2 is True
 
     def test_confirmed_price_stops_polling(self) -> None:
@@ -69,13 +69,13 @@ class TestShouldPoll:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Start interval
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             # Receive confirmed price
             manager.on_confirmed_received()
 
             # Check if should poll - should be False
-            result = manager.should_poll(has_data=True)
+            result = manager.should_poll()
             assert result is False
 
     def test_cdf_scheduled_polling_after_first_poll(self) -> None:
@@ -105,7 +105,7 @@ class TestShouldPoll:
             }
 
             # First poll starts the interval
-            result1 = manager.should_poll(has_data=True)
+            result1 = manager.should_poll()
             assert result1 is True
 
             # Update budget after first poll
@@ -113,12 +113,12 @@ class TestShouldPoll:
 
             # 5 seconds later - before first scheduled poll at 60s
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC)
-            result2 = manager.should_poll(has_data=True)
+            result2 = manager.should_poll()
             assert result2 is False  # Not yet time
 
             # 60 seconds - first scheduled poll
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 1, 0, tzinfo=UTC)
-            result3 = manager.should_poll(has_data=True)
+            result3 = manager.should_poll()
             assert result3 is True  # Time to poll
 
 
@@ -145,7 +145,7 @@ class TestPollLifecycle:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Start interval
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             # 10 seconds later, receive estimate
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 10, tzinfo=UTC)
@@ -162,7 +162,7 @@ class TestPollLifecycle:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             manager.on_confirmed_received()
 
@@ -179,7 +179,7 @@ class TestIntervalReset:
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             # Start first interval
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
             manager.on_poll_started()
             manager.on_poll_started()
             manager.on_confirmed_received()
@@ -190,27 +190,23 @@ class TestIntervalReset:
 
             # Move to next interval
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             # Verify state is reset
             assert manager.has_confirmed_price is False
             assert manager.poll_count_this_interval == 0
 
-    def test_first_interval_flag_clears_on_second_interval(self) -> None:
-        """Test that first_interval_after_startup clears on second interval."""
+    def test_startup_interval_stays_flagged_until_the_next_interval(self) -> None:
+        """The interval polling starts in is joined part way through, so only the next one counts."""
         manager = SmartPollingManager(5, get_cold_start_observations())
 
-        assert manager.first_interval_after_startup is True
-
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
-            # First interval with has_data=False (first run)
-            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=False)  # First run
-            # Note: first_interval_after_startup remains True until SECOND interval
+            mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 2, 30, tzinfo=UTC)
+            manager.check_new_interval()
+            assert manager.first_interval_after_startup is True
 
-            # Second interval with has_data=True (not first run)
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 5, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)  # Now has data
+            manager.check_new_interval()
             assert manager.first_interval_after_startup is False
 
 
@@ -232,7 +228,7 @@ class TestGetCDFStats:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
             manager.update_budget(rate_limit_info)
 
         stats = manager.get_cdf_stats()
@@ -303,7 +299,7 @@ class TestRateLimitBasedPolling:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Trigger new interval
-            result = manager.should_poll(has_data=True)
+            result = manager.should_poll()
             assert result is True
 
             # Update budget with 45 remaining
@@ -332,7 +328,7 @@ class TestRateLimitBasedPolling:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Trigger new interval
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             # k=40 total: 39 CDF polls + 1 forced at interval end = 40 total
             manager.update_budget(
@@ -373,7 +369,7 @@ class TestGetNextPollDelay:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
             manager.on_confirmed_received()
 
             delay = manager.get_next_poll_delay()
@@ -402,7 +398,7 @@ class TestGetNextPollDelay:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
             manager.update_budget(rate_limit_info)
 
             # Get first scheduled poll time from CDF stats
@@ -450,7 +446,7 @@ class TestObservationRecording:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             # Force past first interval flag
             manager._first_interval_after_startup = False
@@ -469,7 +465,7 @@ class TestObservationRecording:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.should_poll(has_data=True)
+            manager.should_poll()
 
             # Force past first interval flag
             manager._first_interval_after_startup = False
@@ -518,7 +514,7 @@ class TestCheckNewInterval:
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
-            result = manager.check_new_interval(has_data=False)
+            result = manager.check_new_interval()
             assert result is True
 
     def test_check_new_interval_same_interval(self) -> None:
@@ -527,11 +523,11 @@ class TestCheckNewInterval:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            manager.check_new_interval(has_data=True)
+            manager.check_new_interval()
 
             # Same interval
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 2, 30, tzinfo=UTC)
-            result = manager.check_new_interval(has_data=True)
+            result = manager.check_new_interval()
             assert result is False
 
     def test_update_budget_after_new_interval(self) -> None:
@@ -543,7 +539,7 @@ class TestCheckNewInterval:
             mock_datetime.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
             # Start new interval
-            result = manager.check_new_interval(has_data=True)
+            result = manager.check_new_interval()
             assert result is True
 
             # Update budget with remaining=15 gives us 10 polls after buffer

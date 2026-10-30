@@ -7,25 +7,33 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from amberelectric.models import CurrentInterval, ForecastInterval
 from amberelectric.models.channel_type import ChannelType
 from amberelectric.rest import ApiException
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
-from conftest import make_current_interval, make_rate_limit_headers, make_site, wrap_api_response, wrap_interval
+from conftest import (
+    make_current_interval,
+    make_forecast_interval,
+    make_rate_limit_headers,
+    make_site,
+    wrap_api_response,
+    wrap_interval,
+)
 from custom_components.amber_express.api import AmberApiError
 from custom_components.amber_express.const import (
-    ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
     ATTR_FORECAST,
+    ATTR_NEM_TIME,
     ATTR_PER_KWH,
     ATTR_RENEWABLES,
     ATTR_SPIKE_STATUS,
-    ATTR_SPOT_PER_KWH,
     ATTR_START_TIME,
     ATTR_TARIFF_BLOCK,
     ATTR_TARIFF_PERIOD,
@@ -40,12 +48,14 @@ from custom_components.amber_express.const import (
     CONF_SITE_NAME,
     CONF_WAIT_FOR_CONFIRMED,
     DATA_SOURCE_POLLING,
+    DATA_SOURCE_WEBSOCKET,
     DOMAIN,
 )
 from custom_components.amber_express.coordinator import AmberDataCoordinator
-from custom_components.amber_express.polling import CDFObservationStore, SmartPollingManager
+from custom_components.amber_express.data.price_store import HoldPolicy
+from custom_components.amber_express.polling import CDFObservationStore
 from custom_components.amber_express.polling.cdf_cold_start import get_cold_start_observations
-from custom_components.amber_express.types import RateLimitInfo
+from custom_components.amber_express.types import ChannelData, RateLimitInfo
 
 
 def create_mock_cdf_store() -> MagicMock:
@@ -93,9 +103,7 @@ class TestAmberDataCoordinator:
         coord = AmberDataCoordinator(
             hass, mock_config_entry, mock_subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
         )
-        # Create polling manager and set site for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coord._site = make_site(site_id=coord.site_id, interval_length=5)
+        coord._configure_site(make_site(site_id=coord.site_id, interval_length=5))
         coord._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
@@ -109,7 +117,7 @@ class TestAmberDataCoordinator:
         """Test coordinator initialization."""
         assert coordinator.api_token == "test_api_token_12345"  # noqa: S105
         assert coordinator.site_id == "01ABCDEFGHIJKLMNOPQRSTUV"
-        assert coordinator.data_source == DATA_SOURCE_POLLING
+        assert coordinator.data_source is None
         assert coordinator.current_data == {}
 
     def test_coordinator_has_five_minute_update_interval(self, coordinator: AmberDataCoordinator) -> None:
@@ -233,26 +241,6 @@ class TestAmberDataCoordinator:
         result = coordinator.get_site_info()
         assert result.id == "test"
         assert result.network == "Ausgrid"
-
-    def test_update_from_sources_integration(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _update_from_sources correctly integrates with DataSourceMerger."""
-        coordinator._data_sources.update_polling({CHANNEL_GENERAL: {"price": 0.25}})
-
-        coordinator._update_from_sources()
-
-        assert coordinator.current_data[CHANNEL_GENERAL] == {"price": 0.25}
-        assert coordinator.data_source == DATA_SOURCE_POLLING
-
-    def test_update_from_websocket(self, coordinator: AmberDataCoordinator) -> None:
-        """Test update_from_websocket."""
-        data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25, ATTR_START_TIME: "2024-01-01T10:00:00+10:00"}}
-
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
-            coordinator.update_from_websocket(data)
-
-            assert coordinator._data_sources.websocket_data == data
-            assert coordinator._data_sources.websocket_timestamp is not None
-            mock_update.assert_called_once()
 
     async def test_async_update_data(self, coordinator: AmberDataCoordinator) -> None:
         """Test _async_update_data calls fetch and returns current_data."""
@@ -405,148 +393,12 @@ class TestAmberDataCoordinator:
         coordinator.current_data = {CHANNEL_GENERAL: {ATTR_SPIKE_STATUS: None}}
         assert coordinator.is_price_spike() is False
 
-    async def test_fetch_amber_data_confirmed_price_updates_sensors(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test _fetch_amber_data with confirmed price updates sensors and stops polling."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
+    async def test_empty_response_leaves_interval_unconfirmed(self, coordinator: AmberDataCoordinator) -> None:
+        """An empty response records nothing and polling continues."""
+        await poll(coordinator)
 
-        # Create a confirmed interval (estimate=False) using real SDK object
-        interval = make_current_interval(per_kwh=25.0, estimate=False)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            assert coordinator._polling_manager.has_confirmed_price is True
-            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
-            # current_data is updated (sensors see the confirmed price)
-            assert CHANNEL_GENERAL in coordinator.current_data
-
-    async def test_fetch_amber_data_estimated_not_wait(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test _fetch_amber_data with estimated price when wait_for_confirmed is False."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        interval = make_current_interval(per_kwh=25.0, estimate=True)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            # Should update polling data and current_data (sensors see the estimate)
-            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
-            assert CHANNEL_GENERAL in coordinator.current_data
-
-    async def test_fetch_amber_data_estimated_wait_for_confirmed(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test _fetch_amber_data with estimate when wait_for_confirmed is True."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        interval = make_current_interval(per_kwh=25.0, estimate=True)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            # Data sources ARE updated (latest data is stored)
-            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
-            # But current_data is NOT updated (sensors don't see it yet)
-            assert coordinator.current_data == {}
-
-    async def test_fetch_amber_data_no_general_data(self, coordinator: AmberDataCoordinator) -> None:
-        """Test _fetch_amber_data with no general channel data."""
-        # Feed-in only interval
-        interval = make_current_interval(per_kwh=10.0, estimate=False, channel_type=ChannelType.FEEDIN)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            # Should not have updated polling_data (no general channel)
-            assert coordinator._data_sources.polling_data == {}
+        assert coordinator.has_confirmed_price is False
+        assert coordinator.current_data == {}
 
     async def test_fetch_amber_data_success_resets_backoff(self, coordinator: AmberDataCoordinator) -> None:
         """Test _fetch_amber_data resets rate limit backoff on success."""
@@ -567,93 +419,6 @@ class TestAmberDataCoordinator:
             assert coordinator._rate_limiter.current_backoff == 0
             assert coordinator._rate_limiter.is_limited() is False
 
-    async def test_fetch_amber_data_first_poll_fetches_with_forecasts(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test first poll of interval fetches with forecasts and updates data."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        interval = make_current_interval(per_kwh=25.0, estimate=True)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            # Verify first poll updated data
-            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
-
-    async def test_fetch_amber_data_subsequent_estimate_updates_sensors(
-        self,
-        hass: HomeAssistant,
-    ) -> None:
-        """Test subsequent estimate polls update sensors with new data."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        # Simulate first poll already happened with data
-        coordinator._polling_manager._poll_count_this_interval = 1
-        coordinator._polling_manager._current_interval_start = datetime.now(UTC)
-        initial_data = {CHANNEL_GENERAL: {ATTR_PER_KWH: 0.20, ATTR_FORECAST: [{"time": "test"}]}}
-        coordinator._data_sources.update_polling(initial_data)
-
-        # Create an estimate interval for second poll with different price
-        interval = make_current_interval(per_kwh=30.0, estimate=True)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            # Data SHOULD be updated - new price from subsequent poll
-            assert coordinator._data_sources.polling_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
-
 
 class TestCoordinatorLifecycle:
     """Tests for coordinator start/stop lifecycle."""
@@ -668,9 +433,7 @@ class TestCoordinatorLifecycle:
         coord = AmberDataCoordinator(
             hass, mock_config_entry, mock_subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
         )
-        # Create polling manager and set site for tests (normally done in start())
-        coord._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coord._site = make_site(site_id=coord.site_id, interval_length=5)
+        coord._configure_site(make_site(site_id=coord.site_id, interval_length=5))
         coord._api_client._rate_limit_info = {
             "remaining": 45,
             "limit": 50,
@@ -833,7 +596,7 @@ class TestCoordinatorLifecycle:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.should_poll()
             coordinator._polling_manager.update_budget(rate_limit_info)
 
         stats = coordinator.get_cdf_polling_stats()
@@ -932,7 +695,7 @@ class TestCoordinatorLifecycle:
         # Set up interval so we have a next poll delay
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.should_poll()
             coordinator._polling_manager.update_budget(rate_limit_info)
 
         with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
@@ -989,664 +752,273 @@ class TestCoordinatorLifecycle:
                     await created_coro
 
 
-class TestConfirmationTimeout:
-    """Tests for confirmation timeout behavior."""
+T1000 = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+T1005 = datetime(2024, 1, 1, 10, 5, tzinfo=UTC)
+T1010 = datetime(2024, 1, 1, 10, 10, tzinfo=UTC)
 
-    @pytest.fixture
-    def coordinator_with_timeout(self, hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> AmberDataCoordinator:
-        """Create a coordinator with wait_for_confirmed=True and timeout=60."""
-        mock_config_entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=60)
-        mock_cdf_store = create_mock_cdf_store()
-        coord = AmberDataCoordinator(
-            hass, mock_config_entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coord._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coord._site = make_site(site_id=coord.site_id, interval_length=5)
-        coord._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
+
+def make_coordinator(
+    hass: HomeAssistant, *, wait_for_confirmed: bool, confirmation_timeout: int = 45
+) -> AmberDataCoordinator:
+    """Create a coordinator for a 5-minute site, configured as start() would."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Test", data={CONF_API_TOKEN: "test"}, options={})
+    entry.add_to_hass(hass)
+    subentry = create_mock_subentry_for_coordinator(
+        wait_for_confirmed=wait_for_confirmed, confirmation_timeout=confirmation_timeout
+    )
+    coordinator = AmberDataCoordinator(
+        hass, entry, subentry, cdf_store=create_mock_cdf_store(), observations=get_cold_start_observations()
+    )
+    coordinator._configure_site(make_site(site_id=coordinator.site_id, interval_length=5))
+    coordinator._api_client._rate_limit_info = {
+        "remaining": 45,
+        "limit": 50,
+        "reset_at": datetime.now(UTC) + timedelta(seconds=300),
+        "window_seconds": 300,
+        "policy": "50;w=300",
+    }
+    return coordinator
+
+
+async def poll(coordinator: AmberDataCoordinator, *intervals: CurrentInterval | ForecastInterval) -> None:
+    """Run a poll through the coordinator's refresh path with the given API response."""
+    response = AsyncMock(return_value=[wrap_interval(interval) for interval in intervals])
+    with patch.object(coordinator._api_client, "fetch_current_prices", new=response):
+        await coordinator.async_refresh()
+
+
+def start_new_interval(coordinator: AmberDataCoordinator) -> None:
+    """Reset polling for the interval the clock is now in, as the interval check does at a boundary."""
+    coordinator._polling_manager.check_new_interval()
+
+
+def websocket_price(start: datetime, per_kwh: float, *, estimate: bool) -> dict[str, ChannelData]:
+    """Build a WebSocket message for the general channel."""
+    return {
+        CHANNEL_GENERAL: {
+            ATTR_PER_KWH: per_kwh,
+            ATTR_ESTIMATE: estimate,
+            ATTR_START_TIME: (start + timedelta(seconds=1)).isoformat(),
+            ATTR_END_TIME: (start + timedelta(minutes=5)).isoformat(),
+            ATTR_NEM_TIME: (start + timedelta(minutes=5)).isoformat(),
         }
-        return coord
-
-    def test_schedule_confirmation_timeout_schedules_timer(
-        self, coordinator_with_timeout: AmberDataCoordinator
-    ) -> None:
-        """Test _schedule_confirmation_timeout schedules a timer."""
-        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
-            mock_call_later.return_value = MagicMock()
-
-            coordinator_with_timeout._schedule_confirmation_timeout()
-
-            mock_call_later.assert_called_once()
-            args = mock_call_later.call_args
-            delay = args[0][1]
-            assert delay == 60
-
-    def test_schedule_confirmation_timeout_resets_flag(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
-        """Test _schedule_confirmation_timeout resets the expired flag."""
-        coordinator_with_timeout._confirmation_timeout_expired = True
-
-        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
-            mock_call_later.return_value = MagicMock()
-
-            coordinator_with_timeout._schedule_confirmation_timeout()
-
-            assert coordinator_with_timeout._confirmation_timeout_expired is False
-
-    def test_schedule_confirmation_timeout_skips_when_not_waiting(
-        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
-    ) -> None:
-        """Test _schedule_confirmation_timeout does nothing when wait_for_confirmed=False."""
-        mock_config_entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=False)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, mock_config_entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-
-        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
-            coordinator._schedule_confirmation_timeout()
-
-            mock_call_later.assert_not_called()
-
-    def test_schedule_confirmation_timeout_skips_when_timeout_zero(
-        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
-    ) -> None:
-        """Test _schedule_confirmation_timeout does nothing when timeout=0."""
-        mock_config_entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=0)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, mock_config_entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-
-        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
-            coordinator._schedule_confirmation_timeout()
-
-            mock_call_later.assert_not_called()
-
-    def test_on_confirmation_timeout_sets_flag_and_updates(
-        self, coordinator_with_timeout: AmberDataCoordinator
-    ) -> None:
-        """Test _on_confirmation_timeout sets flag and updates sensors."""
-        # Put some data in the data sources
-        coordinator_with_timeout._data_sources.update_polling({CHANNEL_GENERAL: {ATTR_PER_KWH: 0.25}})
-
-        with patch.object(coordinator_with_timeout, "async_set_updated_data") as mock_update:
-            coordinator_with_timeout._on_confirmation_timeout(datetime.now(UTC))
-
-            assert coordinator_with_timeout._confirmation_timeout_expired is True
-            assert CHANNEL_GENERAL in coordinator_with_timeout.current_data
-            mock_update.assert_called_once()
-
-    def test_cancel_pending_confirmation_timeout(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
-        """Test _cancel_pending_confirmation_timeout cancels and clears callback."""
-        mock_cancel = MagicMock()
-        coordinator_with_timeout._cancel_confirmation_timeout = mock_cancel
-
-        coordinator_with_timeout._cancel_pending_confirmation_timeout()
-
-        mock_cancel.assert_called_once()
-        assert coordinator_with_timeout._cancel_confirmation_timeout is None
-
-    def test_cancel_pending_confirmation_timeout_when_none(
-        self, coordinator_with_timeout: AmberDataCoordinator
-    ) -> None:
-        """Test _cancel_pending_confirmation_timeout handles None gracefully."""
-        coordinator_with_timeout._cancel_confirmation_timeout = None
-
-        # Should not raise
-        coordinator_with_timeout._cancel_pending_confirmation_timeout()
-
-    async def test_fetch_amber_data_estimate_updates_after_timeout(self, hass: HomeAssistant) -> None:
-        """Test estimates update sensors after timeout expires."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=60)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        # Simulate timeout has expired
-        coordinator._confirmation_timeout_expired = True
-
-        interval = make_current_interval(per_kwh=25.0, estimate=True)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            # Data should be in both polling data and current_data
-            assert CHANNEL_GENERAL in coordinator._data_sources.polling_data
-            assert CHANNEL_GENERAL in coordinator.current_data
-
-    async def test_fetch_amber_data_confirmed_cancels_timeout(self, hass: HomeAssistant) -> None:
-        """Test confirmed price cancels the timeout timer."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(wait_for_confirmed=True, confirmation_timeout=60)
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-
-        # Set up a pending timeout
-        mock_cancel = MagicMock()
-        coordinator._cancel_confirmation_timeout = mock_cancel
-
-        interval = make_current_interval(per_kwh=25.0, estimate=False)
-        wrapped = wrap_interval(interval)
-        mock_response = wrap_api_response([wrapped])
-        with patch.object(
-            coordinator._api_client._hass,
-            "async_add_executor_job",
-            new=AsyncMock(return_value=mock_response),
-        ):
-            await coordinator._fetch_amber_data()
-
-            mock_cancel.assert_called_once()
-            assert coordinator._cancel_confirmation_timeout is None
-
-    async def test_on_interval_check_schedules_timeout(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
-        """Test _on_interval_check schedules confirmation timeout on new interval."""
-        with (
-            patch.object(coordinator_with_timeout._polling_manager, "check_new_interval", return_value=True),
-            patch.object(coordinator_with_timeout, "async_refresh", new=AsyncMock()),
-            patch.object(coordinator_with_timeout, "_schedule_next_poll"),
-            patch.object(coordinator_with_timeout, "_schedule_confirmation_timeout") as mock_schedule_timeout,
-        ):
-            await coordinator_with_timeout._on_interval_check(None)
-
-            mock_schedule_timeout.assert_called_once()
-
-    async def test_stop_cancels_confirmation_timeout(self, coordinator_with_timeout: AmberDataCoordinator) -> None:
-        """Test stop() cancels pending confirmation timeout."""
-        mock_cancel = MagicMock()
-        coordinator_with_timeout._cancel_confirmation_timeout = mock_cancel
-
-        await coordinator_with_timeout.stop()
-
-        mock_cancel.assert_called_once()
-        assert coordinator_with_timeout._cancel_confirmation_timeout is None
+    }
 
 
-class TestHeldPriceAtBoundary:
-    """Tests for held price push at interval boundary."""
+def shown_start(coordinator: AmberDataCoordinator) -> datetime:
+    """Return the interval start the general channel is labeled with."""
+    return datetime.fromisoformat(coordinator.current_data[CHANNEL_GENERAL][ATTR_START_TIME]).replace(second=0)
 
-    def _coordinator_with_held_config(
-        self,
-        hass: HomeAssistant,
-        *,
-        wait_for_confirmed: bool = True,
-        confirmation_timeout: int = 60,
-    ) -> AmberDataCoordinator:
-        """Create coordinator with optional wait_for_confirmed and timeout."""
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title="Test",
-            data={CONF_API_TOKEN: "test"},
-            options={},
-        )
-        entry.add_to_hass(hass)
-        subentry = create_mock_subentry_for_coordinator(
-            wait_for_confirmed=wait_for_confirmed,
-            confirmation_timeout=confirmation_timeout,
-        )
-        mock_cdf_store = create_mock_cdf_store()
-        coordinator = AmberDataCoordinator(
-            hass, entry, subentry, cdf_store=mock_cdf_store, observations=get_cold_start_observations()
-        )
-        coordinator._polling_manager = SmartPollingManager(5, get_cold_start_observations())
-        coordinator._site = make_site(site_id=coordinator.site_id, interval_length=5)
-        coordinator._api_client._rate_limit_info = {
-            "remaining": 45,
-            "limit": 50,
-            "reset_at": datetime.now(UTC) + timedelta(seconds=300),
-            "window_seconds": 300,
-            "policy": "50;w=300",
-        }
-        return coordinator
 
-    def test_held_price_pushed_when_wait_for_confirmed(self, hass: HomeAssistant) -> None:
-        """Test held price is pushed at boundary when wait_for_confirmed is True."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_SPOT_PER_KWH: 0.20,
-                ATTR_ESTIMATE: False,
-                ATTR_START_TIME: "2024-01-01T10:00:00+00:00",
-                ATTR_END_TIME: "2024-01-01T10:05:00+00:00",
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, "estimate": False},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, "estimate": True},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28, "estimate": True},
-                ],
-            },
-            "_source": DATA_SOURCE_POLLING,
-        }
+class TestPublishedPrices:
+    """Sensors see the store's view of the current interval, whichever path delivered the data."""
 
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
-            coordinator._push_held_price_at_boundary()
+    async def test_confirmed_poll_is_published(self, hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+        """A confirmed price for the current interval reaches sensors."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 + timedelta(seconds=20))
 
-            mock_update.assert_called_once()
-        general = coordinator.current_data.get(CHANNEL_GENERAL)
-        assert general is not None
-        assert general[ATTR_PER_KWH] == 0.25
-        assert general[ATTR_ESTIMATE] is True
-        forecasts = general[ATTR_FORECAST]
-        assert len(forecasts) == 2
-        assert forecasts[0]["start_time"] == "2024-01-01T10:05:00+00:00"
-        assert forecasts[0][ATTR_PER_KWH] == 0.25
-        assert forecasts[1]["start_time"] == "2024-01-01T10:10:00+00:00"
-
-    def test_held_price_not_pushed_when_not_waiting(self, hass: HomeAssistant) -> None:
-        """Test held price is NOT pushed when wait_for_confirmed is False."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=False)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-        }
-
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
-            coordinator._push_held_price_at_boundary()
-
-            mock_update.assert_not_called()
-
-    def test_held_price_not_pushed_when_current_data_empty(self, hass: HomeAssistant) -> None:
-        """Test held price is NOT pushed when current_data is empty."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {}
-
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
-            coordinator._push_held_price_at_boundary()
-
-            mock_update.assert_not_called()
-
-    def test_held_price_not_pushed_when_fewer_than_two_forecasts(self, hass: HomeAssistant) -> None:
-        """Test held price is NOT pushed when forecast list has fewer than 2 entries."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                ],
-            },
-        }
-
-        with patch.object(coordinator, "async_set_updated_data") as mock_update:
-            coordinator._push_held_price_at_boundary()
-
-            mock_update.assert_not_called()
-
-    def test_held_price_shifts_forecasts_forward(self, hass: HomeAssistant) -> None:
-        """Test held price correctly shifts forecasts forward and holds all previous attrs."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_RENEWABLES: 50.0,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_RENEWABLES: 80.0},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                ],
-            },
-        }
-
-        coordinator._push_held_price_at_boundary()
-
-        general = coordinator.current_data[CHANNEL_GENERAL]
-        assert general[ATTR_START_TIME] == "2024-01-01T10:05:00+00:00"
-        assert general[ATTR_PER_KWH] == 0.25
-        assert general.get(ATTR_RENEWABLES) == 50.0
-        assert general[ATTR_FORECAST][0]["start_time"] == "2024-01-01T10:05:00+00:00"
-        assert general[ATTR_FORECAST][1]["start_time"] == "2024-01-01T10:10:00+00:00"
-
-    def test_held_price_preserves_all_price_fields(self, hass: HomeAssistant) -> None:
-        """Test held price preserves per_kwh, spot_per_kwh, advanced_price_predicted."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        advanced = {"low": 0.20, "predicted": 0.25, "high": 0.30}
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_SPOT_PER_KWH: 0.22,
-                ATTR_ADVANCED_PRICE: advanced,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, "spot_per_kwh": 0.28},
-                ],
-            },
-        }
-
-        coordinator._push_held_price_at_boundary()
-
-        general = coordinator.current_data[CHANNEL_GENERAL]
-        assert general[ATTR_PER_KWH] == 0.25
-        assert general[ATTR_SPOT_PER_KWH] == 0.22
-        assert general[ATTR_ADVANCED_PRICE] == advanced
-
-    def test_held_price_sets_estimate_true(self, hass: HomeAssistant) -> None:
-        """Test held price sets estimate=True on the new current interval."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, "estimate": False},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, "estimate": True},
-                ],
-            },
-        }
-
-        coordinator._push_held_price_at_boundary()
-
-        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is True
-
-    def test_held_price_multiple_channels(self, hass: HomeAssistant) -> None:
-        """Test held price works with general and feed_in channels."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-            CHANNEL_FEED_IN: {
-                ATTR_PER_KWH: 0.10,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.10},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.08},
-                ],
-            },
-        }
-
-        coordinator._push_held_price_at_boundary()
+        await poll(coordinator, make_current_interval(start_time=T1005, per_kwh=25.0, estimate=False))
 
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.25
-        assert coordinator.current_data[CHANNEL_FEED_IN][ATTR_PER_KWH] == 0.10
-        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_FORECAST][0]["start_time"] == "2024-01-01T10:05:00+00:00"
-        assert coordinator.current_data[CHANNEL_FEED_IN][ATTR_FORECAST][0]["start_time"] == "2024-01-01T10:05:00+00:00"
-
-    def test_held_price_overwritten_when_confirmed_arrives(self, hass: HomeAssistant) -> None:
-        """Test held price is overwritten when confirmed price is received."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: True,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                ],
-            },
-        }
-        coordinator._data_sources.update_polling(
-            {
-                CHANNEL_GENERAL: {
-                    ATTR_PER_KWH: 0.27,
-                    ATTR_ESTIMATE: False,
-                    ATTR_FORECAST: [
-                        {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.27},
-                        {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                    ],
-                },
-            }
-        )
-
-        coordinator._update_from_sources()
-
-        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.27
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is False
 
-    def test_held_price_overwritten_when_timeout_fires(self, hass: HomeAssistant) -> None:
-        """Test held price is overwritten when confirmation timeout expires."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: True,
-                ATTR_FORECAST: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.25}],
-            },
-        }
-        coordinator._data_sources.update_polling(
-            {
-                CHANNEL_GENERAL: {
-                    ATTR_PER_KWH: 0.30,
-                    ATTR_ESTIMATE: True,
-                    ATTR_FORECAST: [{"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30}],
-                },
-            }
+    async def test_estimate_is_held_while_waiting(self, hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+        """While waiting for confirmed, the previous price is shown with the current interval's timing."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 - timedelta(seconds=30))
+        await poll(coordinator, make_current_interval(start_time=T1000, per_kwh=20.0, estimate=False))
+
+        freezer.move_to(T1005 + timedelta(seconds=10))
+        start_new_interval(coordinator)
+        await poll(coordinator, make_current_interval(start_time=T1005, per_kwh=40.0, estimate=True))
+
+        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.20
+        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is True
+        assert shown_start(coordinator) == T1005
+
+    async def test_timeout_publishes_latest_forecast_when_amber_has_not_reported_interval(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """The timeout shows the best estimate, never the previous interval as confirmed."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True, confirmation_timeout=45)
+        freezer.move_to(T1005 - timedelta(seconds=30))
+        await poll(
+            coordinator,
+            make_current_interval(start_time=T1000, per_kwh=20.0, estimate=False),
+            make_forecast_interval(start_time=T1005, per_kwh=30.0),
         )
 
-        coordinator._confirmation_timeout_expired = True
+        freezer.move_to(T1005 + timedelta(seconds=46))
         coordinator._on_confirmation_timeout(datetime.now(UTC))
 
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_ESTIMATE] is True
+        assert shown_start(coordinator) == T1005
 
-    async def test_on_interval_check_calls_held_price_before_refresh(self, hass: HomeAssistant) -> None:
-        """Test _on_interval_check calls _push_held_price_at_boundary (pre-boundary) before async_refresh."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-        }
-        call_order: list[str] = []
-
-        async def record_refresh() -> None:
-            call_order.append("refresh")
-
-        with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=1.0),
-            patch.object(coordinator._polling_manager, "check_new_interval", return_value=True),
-            patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
-            patch.object(coordinator, "async_refresh", new=AsyncMock(side_effect=record_refresh)),
-            patch.object(coordinator, "_schedule_next_poll"),
-            patch.object(coordinator, "_cancel_pending_poll"),
-            patch.object(coordinator, "_schedule_confirmation_timeout"),
-        ):
-            mock_held.return_value = True
-            mock_held.side_effect = lambda: call_order.append("held") or True
-
-            await coordinator._on_interval_check(None)
-
-            assert call_order == ["held", "refresh"]
-
-    async def test_pre_boundary_push_fires_when_within_lead_window(self, hass: HomeAssistant) -> None:
-        """Test held price is pushed in pre-boundary window when seconds until boundary <= lead."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-        }
-        with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=0.5),
-            patch.object(coordinator._polling_manager, "check_new_interval", return_value=False),
-            patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
-        ):
-            mock_held.return_value = True
-
-            await coordinator._on_interval_check(None)
-
-            mock_held.assert_called_once()
-            assert coordinator._held_price_pushed is True
-
-    async def test_pre_boundary_push_does_not_fire_when_outside_lead_window(self, hass: HomeAssistant) -> None:
-        """Test held price is not pushed when seconds until boundary > lead."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-        }
-        with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=10.0),
-            patch.object(coordinator._polling_manager, "check_new_interval", return_value=False),
-            patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
-        ):
-            await coordinator._on_interval_check(None)
-
-            mock_held.assert_not_called()
-
-    async def test_flag_prevents_double_push_when_pre_boundary_and_boundary_same_tick(
-        self, hass: HomeAssistant
+    async def test_upcoming_interval_is_published_just_before_boundary(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
     ) -> None:
-        """Test _push_held_price_at_boundary only called once when pre-boundary then boundary in same tick."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                ],
-            },
-        }
+        """The interval check publishes the next interval a moment early so consumers see aligned data."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=False)
+        freezer.move_to(T1005 - timedelta(seconds=30))
+        await poll(
+            coordinator,
+            make_current_interval(start_time=T1000, per_kwh=20.0, estimate=False),
+            make_forecast_interval(start_time=T1005, per_kwh=30.0),
+        )
+
+        freezer.move_to(T1005 - timedelta(milliseconds=500))
+        with patch.object(coordinator, "async_set_updated_data") as mock_update:
+            await coordinator._on_interval_check(None)
+
+        mock_update.assert_called_once()
+        assert shown_start(coordinator) == T1005
+        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
+
+    async def test_websocket_estimate_is_held_while_waiting(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """WebSocket data follows the same rules as polling data."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 - timedelta(seconds=30))
+        await poll(coordinator, make_current_interval(start_time=T1000, per_kwh=20.0, estimate=False))
+
+        freezer.move_to(T1005 + timedelta(seconds=10))
+        coordinator.update_from_websocket(websocket_price(T1005, 0.40, estimate=True))
+
+        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.20
+        assert coordinator.data_source == DATA_SOURCE_POLLING
+
+
+class TestPollingUntilConfirmed:
+    """Polling continues until a polling response confirms the current interval."""
+
+    async def test_confirmed_poll_for_current_interval_stops_polling(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """A confirmed polling response carries the confirmed price and fresh forecasts."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 + timedelta(seconds=20))
+
+        await poll(coordinator, make_current_interval(start_time=T1005, estimate=False))
+
+        assert coordinator.has_confirmed_price is True
+
+    async def test_late_confirmed_poll_for_previous_interval_keeps_polling(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """A confirmed response for 10:00 that arrives after the boundary does not confirm 10:05."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 + timedelta(seconds=1))
+
+        await poll(coordinator, make_current_interval(start_time=T1000, estimate=False))
+
+        assert coordinator.has_confirmed_price is False
+
+    async def test_websocket_confirmation_is_published_and_polls_for_forecasts(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """A confirmed WebSocket price is shown at once, and an immediate poll fetches forecasts."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 + timedelta(seconds=15))
+
+        with patch.object(coordinator, "_on_scheduled_poll") as mock_poll:
+            coordinator.update_from_websocket(websocket_price(T1005, 0.30, estimate=False))
+
+        mock_poll.assert_called_once()
+        assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
+        assert coordinator.data_source == DATA_SOURCE_WEBSOCKET
+
+    async def test_websocket_confirmation_polls_once_per_interval(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """Repeated confirmations leave the rest to the polling schedule rather than spending more budget."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+
+        with patch.object(coordinator, "_on_scheduled_poll") as mock_poll:
+            freezer.move_to(T1005 + timedelta(seconds=15))
+            coordinator.update_from_websocket(websocket_price(T1005, 0.30, estimate=False))
+            freezer.move_to(T1005 + timedelta(seconds=20))
+            coordinator.update_from_websocket(websocket_price(T1005, 0.30, estimate=False))
+            freezer.move_to(T1010 + timedelta(seconds=15))
+            coordinator.update_from_websocket(websocket_price(T1010, 0.35, estimate=False))
+
+        assert mock_poll.call_count == 2
+
+    async def test_websocket_confirmation_after_polling_confirmed_does_not_poll(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """Once polling has confirmed the interval, there is nothing left to fetch."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        freezer.move_to(T1005 + timedelta(seconds=15))
+        await poll(coordinator, make_current_interval(start_time=T1005, estimate=False))
+
+        with patch.object(coordinator, "_on_scheduled_poll") as mock_poll:
+            coordinator.update_from_websocket(websocket_price(T1005, 0.30, estimate=False))
+
+        mock_poll.assert_not_called()
+
+
+class TestConfirmationTimeout:
+    """The timeout only re-renders the view; whether it has passed is derived from the clock."""
+
+    def test_timeout_is_scheduled_when_holding_with_timeout(self, hass: HomeAssistant) -> None:
+        """A hold with a timeout schedules a re-render after that many seconds."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True, confirmation_timeout=60)
+
+        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
+            coordinator._schedule_confirmation_timeout()
+
+        assert mock_call_later.call_args[0][1] == timedelta(seconds=60)
+
+    @pytest.mark.parametrize(("wait_for_confirmed", "confirmation_timeout"), [(False, 45), (True, 0)])
+    def test_timeout_is_not_scheduled_without_timed_hold(
+        self, hass: HomeAssistant, wait_for_confirmed: bool, confirmation_timeout: int
+    ) -> None:
+        """Without a hold, or when holding until confirmed, there is nothing to time out."""
+        coordinator = make_coordinator(
+            hass, wait_for_confirmed=wait_for_confirmed, confirmation_timeout=confirmation_timeout
+        )
+
+        with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
+            coordinator._schedule_confirmation_timeout()
+
+        mock_call_later.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("confirmation_timeout", "expected_timeout"),
+        [(299, timedelta(seconds=299)), (300, None), (1800, None)],
+    )
+    def test_timeout_of_an_interval_or_longer_holds_until_confirmed(
+        self, hass: HomeAssistant, confirmation_timeout: int, expected_timeout: timedelta | None
+    ) -> None:
+        """The timer is reset every interval, so a timeout that can't expire within one means no timeout."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True, confirmation_timeout=confirmation_timeout)
+
+        assert coordinator._hold_policy() == HoldPolicy(timeout=expected_timeout)
+
+    async def test_new_interval_schedules_timeout(self, hass: HomeAssistant) -> None:
+        """Each new interval starts its own timeout."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+
         with (
-            patch.object(coordinator, "_seconds_until_next_boundary", return_value=1.0),
             patch.object(coordinator._polling_manager, "check_new_interval", return_value=True),
-            patch.object(coordinator, "_push_held_price_at_boundary") as mock_held,
             patch.object(coordinator, "async_refresh", new=AsyncMock()),
             patch.object(coordinator, "_schedule_next_poll"),
-            patch.object(coordinator, "_cancel_pending_poll"),
-            patch.object(coordinator, "_schedule_confirmation_timeout"),
+            patch.object(coordinator, "_schedule_confirmation_timeout") as mock_schedule_timeout,
         ):
-            mock_held.return_value = True
-
             await coordinator._on_interval_check(None)
 
-            mock_held.assert_called_once()
-            assert coordinator._held_price_pushed is False
+        mock_schedule_timeout.assert_called_once()
 
-    def test_held_price_forward_projects_demand_window_starting(self, hass: HomeAssistant) -> None:
-        """Test held price picks up demand_window=True from the next interval."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_DEMAND_WINDOW: True},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                ],
-            },
-        }
+    async def test_stop_cancels_confirmation_timeout(self, hass: HomeAssistant) -> None:
+        """Stopping the coordinator cancels a pending timeout."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+        mock_cancel = MagicMock()
+        coordinator._cancel_confirmation_timeout = mock_cancel
 
-        coordinator._push_held_price_at_boundary()
+        await coordinator.stop()
 
-        general = coordinator.current_data[CHANNEL_GENERAL]
-        assert general[ATTR_DEMAND_WINDOW] is True
-
-    def test_held_price_forward_projects_demand_window_ending(self, hass: HomeAssistant) -> None:
-        """Test held price clears demand_window when next interval has it False."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_DEMAND_WINDOW: True,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, ATTR_DEMAND_WINDOW: True},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30, ATTR_DEMAND_WINDOW: False},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                ],
-            },
-        }
-
-        coordinator._push_held_price_at_boundary()
-
-        general = coordinator.current_data[CHANNEL_GENERAL]
-        assert general[ATTR_DEMAND_WINDOW] is False
-
-    def test_held_price_removes_demand_window_when_absent_from_next(self, hass: HomeAssistant) -> None:
-        """Test held price removes demand_window when next interval has no tariff info."""
-        coordinator = self._coordinator_with_held_config(hass, wait_for_confirmed=True)
-        coordinator.current_data = {
-            CHANNEL_GENERAL: {
-                ATTR_PER_KWH: 0.25,
-                ATTR_DEMAND_WINDOW: True,
-                ATTR_ESTIMATE: False,
-                ATTR_FORECAST: [
-                    {"start_time": "2024-01-01T10:00:00+00:00", "per_kwh": 0.25, ATTR_DEMAND_WINDOW: True},
-                    {"start_time": "2024-01-01T10:05:00+00:00", "per_kwh": 0.30},
-                    {"start_time": "2024-01-01T10:10:00+00:00", "per_kwh": 0.28},
-                ],
-            },
-        }
-
-        coordinator._push_held_price_at_boundary()
-
-        general = coordinator.current_data[CHANNEL_GENERAL]
-        assert ATTR_DEMAND_WINDOW not in general
+        mock_cancel.assert_called_once()
+        assert coordinator._cancel_confirmation_timeout is None

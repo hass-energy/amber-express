@@ -81,11 +81,8 @@ class SmartPollingManager:
         """
         return max(0, rate_limit_info["remaining"] - self.RATE_LIMIT_BUFFER)
 
-    def check_new_interval(self, *, has_data: bool) -> bool:
+    def check_new_interval(self) -> bool:
         """Check if we've entered a new interval and reset state if so.
-
-        Args:
-            has_data: Whether we have any existing data (for first-run detection)
 
         Returns:
             True if this is a new interval (should poll immediately), False otherwise
@@ -98,7 +95,7 @@ class SmartPollingManager:
             return False
 
         # New interval - reset state
-        is_first_run = not has_data
+        is_first_run = self._current_interval_start is None
         self._current_interval_start = current_interval
         self._has_confirmed_price = False
         self._poll_count_this_interval = 0
@@ -119,18 +116,15 @@ class SmartPollingManager:
 
         return True
 
-    def should_poll(self, *, has_data: bool) -> bool:
+    def should_poll(self) -> bool:
         """Determine if we should poll using smart CDF-based polling.
-
-        Args:
-            has_data: Whether we have any existing data (for first-run detection)
 
         Returns:
             True if we should poll now, False otherwise
 
         """
         # Check for new interval first
-        if self.check_new_interval(has_data=has_data):
+        if self.check_new_interval():
             return True  # Always poll at start of new interval for estimate
 
         now = datetime.now(UTC)
