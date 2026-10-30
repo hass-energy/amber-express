@@ -259,7 +259,7 @@ class TestRetention:
 
 
 class TestConfirmsInterval:
-    """A response confirms an interval only when every channel in it is confirmed for that interval."""
+    """A response confirms an interval only when every channel reporting a current interval is confirmed for it."""
 
     def test_confirmed_response_for_interval_confirms_it(self) -> None:
         """A confirmed polling response for 10:05 confirms 10:05."""
@@ -275,6 +275,21 @@ class TestConfirmsInterval:
             CHANNEL_GENERAL: price(T1005, 0.30, estimate=False),
             CHANNEL_FEED_IN: price(T1005, 0.10, estimate=True),
         }
+
+        assert not confirms_interval(response, T1005)
+
+    def test_channel_with_only_forecasts_does_not_block_confirmation(self) -> None:
+        """A channel without a current interval has nothing to confirm, so polling it all interval would be wasted."""
+        response: dict[str, ChannelData] = {
+            CHANNEL_GENERAL: price(T1005, 0.30, estimate=False),
+            CHANNEL_FEED_IN: {ATTR_FORECAST: [price(T1010, 0.10, estimate=True)]},
+        }
+
+        assert confirms_interval(response, T1005)
+
+    def test_response_without_any_current_interval_confirms_nothing(self) -> None:
+        """Forecasts alone never confirm an interval."""
+        response: dict[str, ChannelData] = {CHANNEL_GENERAL: {ATTR_FORECAST: [price(T1010, 0.30, estimate=True)]}}
 
         assert not confirms_interval(response, T1005)
 

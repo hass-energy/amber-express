@@ -27,12 +27,11 @@ def interval_key(start_time: str) -> datetime:
 
 
 def confirms_interval(data: dict[str, ChannelData], interval_start: datetime) -> bool:
-    """Whether every channel in a response has a confirmed price for the interval starting at interval_start."""
-    return bool(data) and all(
-        ATTR_START_TIME in channel_data
-        and interval_key(channel_data[ATTR_START_TIME]) == interval_start
-        and channel_data[ATTR_ESTIMATE] is False
-        for channel_data in data.values()
+    """Whether every channel reporting a current interval has a confirmed price for the one at interval_start."""
+    current = [channel_data for channel_data in data.values() if ATTR_START_TIME in channel_data]
+    return bool(current) and all(
+        interval_key(channel_data[ATTR_START_TIME]) == interval_start and channel_data[ATTR_ESTIMATE] is False
+        for channel_data in current
     )
 
 
