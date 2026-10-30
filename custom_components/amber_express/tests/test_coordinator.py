@@ -754,6 +754,7 @@ class TestCoordinatorLifecycle:
 
 T1000 = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
 T1005 = datetime(2024, 1, 1, 10, 5, tzinfo=UTC)
+T1010 = datetime(2024, 1, 1, 10, 10, tzinfo=UTC)
 
 
 def make_coordinator(
@@ -928,6 +929,22 @@ class TestPollingUntilConfirmed:
         mock_poll.assert_called_once()
         assert coordinator.current_data[CHANNEL_GENERAL][ATTR_PER_KWH] == 0.30
         assert coordinator.data_source == DATA_SOURCE_WEBSOCKET
+
+    async def test_websocket_confirmation_polls_once_per_interval(
+        self, hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    ) -> None:
+        """Repeated confirmations leave the rest to the polling schedule rather than spending more budget."""
+        coordinator = make_coordinator(hass, wait_for_confirmed=True)
+
+        with patch.object(coordinator, "_on_scheduled_poll") as mock_poll:
+            freezer.move_to(T1005 + timedelta(seconds=15))
+            coordinator.update_from_websocket(websocket_price(T1005, 0.30, estimate=False))
+            freezer.move_to(T1005 + timedelta(seconds=20))
+            coordinator.update_from_websocket(websocket_price(T1005, 0.30, estimate=False))
+            freezer.move_to(T1010 + timedelta(seconds=15))
+            coordinator.update_from_websocket(websocket_price(T1010, 0.35, estimate=False))
+
+        assert mock_poll.call_count == 2
 
     async def test_websocket_confirmation_after_polling_confirmed_does_not_poll(
         self, hass: HomeAssistant, freezer: FrozenDateTimeFactory

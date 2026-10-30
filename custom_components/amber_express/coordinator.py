@@ -139,6 +139,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._unsub_time_change: Callable[[], None] | None = None
         self._cancel_next_poll: Callable[[], None] | None = None
         self._cancel_confirmation_timeout: Callable[[], None] | None = None
+        self._websocket_polled_interval: datetime | None = None
 
     def _get_subentry_option(self, key: str, default: Any) -> Any:
         """Get an option from subentry data."""
@@ -448,11 +449,17 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     @callback
     def update_from_websocket(self, data: dict[str, ChannelData]) -> None:
-        """Record WebSocket data and publish; a confirmation triggers a poll to fetch forecasts."""
+        """Record WebSocket data and publish; the first confirmation each interval triggers a poll for forecasts."""
         self._log_price_data(data, "WebSocket")
         self._prices.record(data, DATA_SOURCE_WEBSOCKET)
 
-        if not self.has_confirmed_price and confirms_interval(data, self._polling_interval_start()):
+        interval_start = self._polling_interval_start()
+        if (
+            not self.has_confirmed_price
+            and self._websocket_polled_interval != interval_start
+            and confirms_interval(data, interval_start)
+        ):
+            self._websocket_polled_interval = interval_start
             self._cancel_pending_poll()
             self._on_scheduled_poll(datetime.now(UTC))
 
