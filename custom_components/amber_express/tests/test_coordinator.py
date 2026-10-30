@@ -596,7 +596,7 @@ class TestCoordinatorLifecycle:
 
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.should_poll()
             coordinator._polling_manager.update_budget(rate_limit_info)
 
         stats = coordinator.get_cdf_polling_stats()
@@ -695,7 +695,7 @@ class TestCoordinatorLifecycle:
         # Set up interval so we have a next poll delay
         with patch("custom_components.amber_express.polling.smart_polling.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
-            coordinator._polling_manager.should_poll(has_data=True)
+            coordinator._polling_manager.should_poll()
             coordinator._polling_manager.update_budget(rate_limit_info)
 
         with patch("custom_components.amber_express.coordinator.async_call_later") as mock_call_later:
@@ -788,7 +788,7 @@ async def poll(coordinator: AmberDataCoordinator, *intervals: CurrentInterval | 
 
 def start_new_interval(coordinator: AmberDataCoordinator) -> None:
     """Reset polling for the interval the clock is now in, as the interval check does at a boundary."""
-    coordinator._polling_manager.check_new_interval(has_data=True)
+    coordinator._polling_manager.check_new_interval()
 
 
 def websocket_price(start: datetime, per_kwh: float, *, estimate: bool) -> dict[str, ChannelData]:

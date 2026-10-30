@@ -310,7 +310,7 @@ class AmberDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if self._prices.interval_start(datetime.now(UTC) + _DISPLAY_LEAD) != self.current_interval_start:
             self._publish()
 
-        if not self._polling_manager.check_new_interval(has_data=bool(self.current_data)):
+        if not self._polling_manager.check_new_interval():
             return
 
         # New interval - cancel any pending poll from previous interval
