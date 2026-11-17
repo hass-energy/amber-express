@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
@@ -348,6 +348,16 @@ class AmberSensor(AmberBaseSensor):
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class _RenderedForecasts:
+    """Rendered sensor attributes for one forecast list and its display options."""
+
+    source: list[ChannelData]
+    options: tuple[str, float, tzinfo]
+    simple: list[dict[str, Any]]
+    detailed: list[ChannelData] | list[dict[str, Any]]
+
+
 class AmberPriceSensor(AmberBaseSensor):
     """Sensor for current electricity price."""
 
@@ -368,6 +378,7 @@ class AmberPriceSensor(AmberBaseSensor):
         self._channel = channel
         self._attr_unique_id = f"{self._site_id}_{channel}_price"
         self._attr_translation_key = CHANNEL_PRICE_TRANSLATION_KEY.get(channel, "general_price")
+        self._rendered_forecasts: _RenderedForecasts | None = None
 
     def _get_price_key(self) -> str:
         """Return the price key based on configured pricing mode."""
@@ -422,6 +433,40 @@ class AmberPriceSensor(AmberBaseSensor):
                 result[key] = {k: v * -1 for k, v in value.items()}
         return result
 
+    def _get_rendered_forecasts(self) -> _RenderedForecasts:
+        """Render the forecasts when their source or display options change."""
+        forecasts = self.coordinator.get_forecasts(self._channel)
+        price_key = self._get_price_key()
+        demand_window_price = (
+            self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
+            if self._channel == CHANNEL_GENERAL
+            else 0.0
+        )
+        options = (price_key, demand_window_price, dt_util.get_default_time_zone())
+        cached = self._rendered_forecasts
+        # Merging current prices preserves the forecast list. Polling and rollover
+        # publish new lists without modifying entries from the previous list.
+        if cached is not None and cached.source is forecasts and cached.options == options:
+            return cached
+
+        simple: list[dict[str, Any]] = []
+        for forecast in forecasts:
+            time_value = to_local_iso_minute(forecast.get(ATTR_START_TIME))
+            value = self._get_price(forecast, price_key)
+            if value is not None:
+                if self._channel == CHANNEL_GENERAL and forecast.get(ATTR_DEMAND_WINDOW):
+                    value += demand_window_price
+                value = round(value, PRICE_DECIMAL_PLACES)
+            simple.append({"time": time_value, "value": value})
+
+        detailed = (
+            [self._negate_prices(forecast) for forecast in forecasts]
+            if self._channel == CHANNEL_FEED_IN
+            else list(forecasts)
+        )
+        self._rendered_forecasts = _RenderedForecasts(forecasts, options, simple, detailed)
+        return self._rendered_forecasts
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
@@ -429,33 +474,17 @@ class AmberPriceSensor(AmberBaseSensor):
         if not channel_data:
             return {}
 
+        forecasts = self._get_rendered_forecasts()
         attrs: dict[str, Any] = {
             ATTR_START_TIME: to_local_iso_minute(channel_data.get(ATTR_START_TIME)),
             ATTR_END_TIME: to_local_iso_minute(channel_data.get(ATTR_END_TIME)),
             ATTR_ESTIMATE: channel_data.get(ATTR_ESTIMATE),
             ATTR_DESCRIPTOR: channel_data.get(ATTR_DESCRIPTOR),
             "data_source": self.coordinator.data_source,
+            "interpolation_mode": "previous",
+            ATTR_FORECAST: forecasts.simple,
+            ATTR_DETAILED_FORECAST: forecasts.detailed,
         }
-
-        forecasts = self.coordinator.get_forecasts(self._channel)
-        forecast_list: list[dict[str, Any]] = []
-        demand_window_price = self._get_subentry_option(CONF_DEMAND_WINDOW_PRICE, DEFAULT_DEMAND_WINDOW_PRICE)
-        for f in forecasts:
-            time_value = to_local_iso_minute(f.get(ATTR_START_TIME))
-            value = self._get_price(f, self._get_price_key())
-            if value is not None:
-                if self._channel == CHANNEL_GENERAL and f.get(ATTR_DEMAND_WINDOW):
-                    value += demand_window_price
-                value = round(value, PRICE_DECIMAL_PLACES)
-            forecast_list.append({"time": time_value, "value": value})
-        attrs["interpolation_mode"] = "previous"
-        attrs[ATTR_FORECAST] = forecast_list
-
-        if self._channel == CHANNEL_FEED_IN:
-            attrs[ATTR_DETAILED_FORECAST] = [self._negate_prices(f) for f in forecasts]
-        else:
-            attrs[ATTR_DETAILED_FORECAST] = list(forecasts)
-
         return {k: v for k, v in attrs.items() if v is not None}
 
 
