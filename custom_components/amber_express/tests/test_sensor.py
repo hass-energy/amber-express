@@ -19,10 +19,12 @@ from custom_components.amber_express import AmberRuntimeData, SiteRuntimeData
 from custom_components.amber_express.const import (
     ATTR_ADVANCED_PRICE,
     ATTR_DEMAND_WINDOW,
+    ATTR_DESCRIPTOR,
     ATTR_DETAILED_FORECAST,
     ATTR_DURATION,
     ATTR_END_TIME,
     ATTR_ESTIMATE,
+    ATTR_FORECAST,
     ATTR_PER_KWH,
     ATTR_SPOT_PER_KWH,
     ATTR_START_TIME,
@@ -33,6 +35,8 @@ from custom_components.amber_express.const import (
     CONF_PRICING_MODE,
     CONF_SITE_ID,
     CONF_SITE_NAME,
+    DATA_SOURCE_WEBSOCKET,
+    PRICING_MODE_AEMO,
     PRICING_MODE_APP,
     SUBENTRY_TYPE_SITE,
 )
@@ -45,7 +49,7 @@ from custom_components.amber_express.sensor import (
     AmberSensorDescription,
     async_setup_entry,
 )
-from custom_components.amber_express.utils import get_http_status_label
+from custom_components.amber_express.utils import get_http_status_label, to_local_iso_minute
 
 
 def create_mock_subentry(
@@ -408,6 +412,102 @@ class TestAmberPriceSensor:
 
         attrs = sensor.extra_state_attributes
         assert attrs["forecast"][0]["value"] == -0.12
+
+    def test_price_sensor_reuses_forecasts_on_current_update(
+        self,
+        mock_coordinator_with_data: MagicMock,
+        mock_channel_data_feed_in: dict,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Keep both rendered forecasts while current interval data changes."""
+        sensor = AmberPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_FEED_IN,
+        )
+        initial = sensor.extra_state_attributes
+        start_time = "2024-01-01T10:05:00+00:00"
+        end_time = "2024-01-01T10:10:00+00:00"
+        mock_channel_data_feed_in.update(
+            {
+                ATTR_START_TIME: start_time,
+                ATTR_END_TIME: end_time,
+                ATTR_PER_KWH: 0.1234567,
+                ATTR_ESTIMATE: True,
+                ATTR_DESCRIPTOR: "neutral",
+            }
+        )
+        mock_coordinator_with_data.data_source = DATA_SOURCE_WEBSOCKET
+        mock_subentry.data[CONF_DEMAND_WINDOW_PRICE] = 0.05
+
+        updated = sensor.extra_state_attributes
+        assert updated[ATTR_FORECAST] is initial[ATTR_FORECAST]
+        assert updated[ATTR_DETAILED_FORECAST] is initial[ATTR_DETAILED_FORECAST]
+        assert updated[ATTR_START_TIME] == to_local_iso_minute(start_time)
+        assert updated[ATTR_END_TIME] == to_local_iso_minute(end_time)
+        assert updated[ATTR_ESTIMATE] is True
+        assert updated[ATTR_DESCRIPTOR] == "neutral"
+        assert updated["data_source"] == DATA_SOURCE_WEBSOCKET
+        assert sensor.native_value == -0.1234567
+
+        replacement = {
+            ATTR_START_TIME: start_time,
+            ATTR_PER_KWH: 0.1234567,
+            ATTR_ADVANCED_PRICE: {"low": 0.11, "predicted": 0.1356789, "high": 0.15},
+            ATTR_SPOT_PER_KWH: 0.09,
+        }
+        mock_channel_data_feed_in[ATTR_FORECAST] = [replacement]
+
+        refreshed = sensor.extra_state_attributes
+        assert refreshed[ATTR_FORECAST] == [{"time": to_local_iso_minute(start_time), "value": -0.1357}]
+        assert refreshed[ATTR_DETAILED_FORECAST] == [
+            {
+                **replacement,
+                ATTR_PER_KWH: -0.1234567,
+                ATTR_ADVANCED_PRICE: {"low": -0.11, "predicted": -0.1356789, "high": -0.15},
+            }
+        ]
+        assert replacement[ATTR_ADVANCED_PRICE] == {"low": 0.11, "predicted": 0.1356789, "high": 0.15}
+        assert initial[ATTR_FORECAST][0]["value"] == -0.12
+
+    async def test_price_sensor_refreshes_same_forecast_after_settings_change(
+        self,
+        hass: HomeAssistant,
+        mock_coordinator_with_data: MagicMock,
+        mock_channel_data_general: dict,
+        mock_config_entry: MockConfigEntry,
+        mock_subentry: MagicMock,
+    ) -> None:
+        """Refresh rendering after pricing mode, surcharge, or time zone changes."""
+        await hass.config.async_set_time_zone("UTC")
+        forecast = {
+            ATTR_START_TIME: "2024-01-01T10:05:31+00:00",
+            ATTR_PER_KWH: 0.2601234,
+            ATTR_ADVANCED_PRICE: {"low": 0.24, "predicted": 0.2801234, "high": 0.32},
+            ATTR_DEMAND_WINDOW: True,
+        }
+        mock_channel_data_general[ATTR_FORECAST] = [forecast]
+        mock_subentry.data[CONF_DEMAND_WINDOW_PRICE] = 0.05
+        sensor = AmberPriceSensor(
+            coordinator=mock_coordinator_with_data,
+            entry=mock_config_entry,
+            subentry=mock_subentry,
+            channel=CHANNEL_GENERAL,
+        )
+        assert sensor.extra_state_attributes[ATTR_FORECAST] == [{"time": "2024-01-01T10:06:00+00:00", "value": 0.3301}]
+
+        mock_subentry.data[CONF_PRICING_MODE] = PRICING_MODE_AEMO
+        assert sensor.extra_state_attributes[ATTR_FORECAST][0]["value"] == 0.3101
+
+        mock_subentry.data[CONF_DEMAND_WINDOW_PRICE] = 0.10
+        assert sensor.extra_state_attributes[ATTR_FORECAST][0]["value"] == 0.3601
+
+        await hass.config.async_set_time_zone("Australia/Melbourne")
+        updated = sensor.extra_state_attributes
+        assert updated[ATTR_FORECAST] == [{"time": "2024-01-01T21:06:00+11:00", "value": 0.3601}]
+        assert updated[ATTR_DETAILED_FORECAST] == [forecast]
 
     def test_price_sensor_rejects_non_numeric_price(
         self,
